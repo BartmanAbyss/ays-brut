@@ -1,0 +1,1965 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Champagne Tower — dev harness</title>
+<style>
+  html,body { margin:0; height:100%; background:#0a0a0c; color:#ddd;
+              font:12px/1.45 ui-monospace,Consolas,monospace; overflow:hidden; }
+  canvas { display:block; width:100vw; height:100vh; }
+  #hud { position:fixed; top:8px; left:8px; padding:8px 10px; background:#000a;
+         border:1px solid #333; border-radius:4px; white-space:pre; pointer-events:none; }
+  #ui { position:fixed; top:40px; right:8px; width:200px; padding:8px 10px; background:#000b;
+        border:1px solid #333; border-radius:4px; }
+  #ui .row { display:flex; align-items:center; gap:6px; margin:3px 0; }
+  #ui .row label { width:52px; color:#9ab; }
+  #ui .row input[type=range] { flex:1; min-width:0; }
+  #ui .row span { width:40px; text-align:right; color:#ffcf6b; }
+  #ui .cams { display:flex; gap:4px; margin:5px 0 7px; }
+  #ui .cams button { flex:1; padding:3px 0; background:#1b1b20; color:#ddd; border:1px solid #444;
+        border-radius:3px; font:11px ui-monospace,Consolas,monospace; cursor:pointer; }
+  #ui .cams button:hover { background:#2f2f3a; }
+  #ff { position:fixed; top:8px; right:146px; padding:6px 10px; background:#1b1b20; color:#ddd;
+        border:1px solid #444; border-radius:4px; font:12px ui-monospace,Consolas,monospace; cursor:pointer; }
+  #restart { position:fixed; top:8px; right:74px; padding:6px 10px; background:#1b1b20; color:#ddd;
+           border:1px solid #444; border-radius:4px; font:12px ui-monospace,Consolas,monospace; cursor:pointer; }
+  #pause { position:fixed; top:8px; right:8px; padding:6px 14px; background:#1b1b20; color:#ddd;
+           border:1px solid #444; border-radius:4px; font:12px ui-monospace,Consolas,monospace;
+           cursor:pointer; }
+  #pause:hover { background:#2a2a32; }
+  #err { position:fixed; left:8px; bottom:8px; right:8px; max-height:45vh; overflow:auto;
+         padding:8px 10px; background:#2a0b0bdd; border:1px solid #833; border-radius:4px;
+         white-space:pre-wrap; display:none; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="hud">booting…</div>
+<button id="pause" title="Pause rendering (spacebar). While paused, moving a slider still redraws one frame.">pause</button>
+<button id="ff" title="Jump the simulation forward 20 seconds without waiting.">ff +20s</button>
+<button id="restart" title="Reload the page: empties every glass and restarts the pour from zero.">restart</button>
+<div id="ui"></div>
+<div id="err"></div>
+
+<!-- ───────────────────────── WGSL ───────────────────────── -->
+<script type="text/wgsl" id="wgsl-main">
+struct U {
+  res      : vec2f,
+  time     : f32,
+  view     : f32,
+  camPos   : vec3f,
+  fov      : f32,
+  camTgt   : vec3f,
+  maxSteps : f32,
+  emitPos  : vec3f,
+  dt       : f32,
+  frame    : f32,
+  spawnMod : f32,
+  nPart    : f32,
+  pvol     : f32,
+  nPhoton  : f32,
+  cgain    : f32,
+  single   : f32,
+  noliq    : f32,
+  bub      : f32,
+  expo     : f32,
+  wav      : f32,
+  pfield   : f32,
+  bounces  : f32,
+  refl     : f32,
+  fillOv   : f32,
+  envg     : f32,
+  rtrace   : f32,
+  ltAz     : f32,
+  ltEl     : f32,
+  prad     : f32,
+  foamG    : f32,
+  evx      : f32,
+  evz      : f32,
+  shut     : f32,
+  botTilt  : f32,
+  botAz    : f32,
+  botOn    : f32,
+  pudCX    : f32,
+  pudCZ    : f32,
+  pudR     : f32,
+  pudOn    : f32,
+  _w2      : f32,
+};
+struct J { stride : f32, _a : f32, _b : f32, _c : f32 };
+
+struct Particle { pos : vec3f, life : f32, vel : vec3f, _p : f32 };
+
+@group(0) @binding(0) var<uniform> u : U;
+@group(0) @binding(1) var<storage, read_write> parts  : array<Particle>;
+@group(0) @binding(2) var<storage, read_write> fine   : array<atomic<u32>>;
+@group(0) @binding(3) var<storage, read_write> fineF  : array<f32>;
+@group(0) @binding(4) var<storage, read_write> coarse : array<vec4f>;
+@group(0) @binding(5) var<storage, read_write> glass  : array<vec4f>;        // x=level  y=spare
+@group(0) @binding(6) var<storage, read_write> gvol   : array<atomic<u32>>;  // [0..13] inflow, [14..27] overflow
+@group(0) @binding(7) var<storage, read_write> wave   : array<vec4f>;        // eta, etaOld, foam
+@group(0) @binding(8) var<storage, read_write> wimp   : array<atomic<i32>>;  // [0..N) impulse, [N..2N) foam
+@group(0) @binding(9) var<storage, read_write> caust : array<atomic<u32>>;  // RGB photon map
+@group(0) @binding(10) var<storage, read_write> caustF : array<f32>;       // blurred caustics
+@group(0) @binding(11) var<storage, read_write> pud    : array<f32>;       // puddle depth on the table
+@group(0) @binding(12) var<storage, read_write> pudA   : array<atomic<u32>>;  // puddle inflow
+@group(0) @binding(13) var<storage, read_write> pudC   : array<vec4f>;     // maxH, nearest wet block xz, valid
+@group(1) @binding(0) var<uniform> j : J;
+
+// ── glass geometry (metres) ───────────────────────────────
+// Proportions taken from the reference coupe, as ratios of the rim diameter D:
+//   total height 1.65 D · bowl depth 0.44 D · foot 0.67 D · stem 0.04 D
+// Manufacturer spec: 280 ml, 170 mm tall, 112 mm wide. For a spherical cap
+//   V = pi*h*(3R^2 + h^2)/6,  so R = 56 mm and V = 280 ml give a bowl depth of 46.3 mm.
+const RIM_R    = 0.0560;                // 112 mm diameter
+const BOWL_D   = 0.0463;                // bowl depth, solved for 280 ml
+const RIM_Y    = 0.1700;                // 170 mm tall
+const BOWL_BOT = RIM_Y - BOWL_D;
+const SPH_R    = (RIM_R * RIM_R + BOWL_D * BOWL_D) / (2.0 * BOWL_D);  // cap radius
+const SPH_CY   = BOWL_BOT + SPH_R;
+const GLASS_T  = 0.0007;                // wall half-thickness
+const STEM_R   = 0.0026;                // slender stem (0.04 D)
+const FOOT_R   = 0.0374;                // 0.67 D
+const FOOT_H   = 0.0077;
+const GH       = RIM_Y;                 // tier spacing = glass height
+const SP       = 2.0 * RIM_R;           // rims touching
+
+fn smin(a: f32, b: f32, k: f32) -> f32 {
+  let h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
+  return mix(b, a, h) - k * h * (1.0 - h);
+}
+
+// ── volume ────────────────────────────────────────────────
+const FINE   : u32 = 320u;
+const COARSE : u32 = 32u;
+const DOM_LO = vec3f(-0.31, -0.015, -0.31);
+const DOM_SZ = 0.62;                     // the tower is 0.537 m tall
+const FCELL  = DOM_SZ / 320.0;    // 1.94 mm
+const CCELL  = DOM_SZ / 32.0;     // 12.5 mm
+const KR     : i32 = 3;
+const BAND   = 0.00625;           // KR * FCELL
+// A droplet smaller than the grid's cell half-diagonal (FCELL*sqrt(3)/2 = 1.68mm at
+// FINE=320) only registers when it lands near a cell centre, so a dense stream renders
+// as a few scattered drops. Keep u.prad above that.
+const QMAX   = 1000000.0;
+const INFQ   : u32 = 4294967295u;
+
+// ── bulk liquid ───────────────────────────────────────────
+const PI    = 3.14159265;
+// puddle on the table: the same bulk treatment the glasses get, as a height field
+const PN    : u32 = 384u;
+const PEXT  = 0.55;
+const PCELL = 2.0 * PEXT / 384.0;
+const PAREA = PCELL * PCELL;
+const PMIN  = 0.0004;                  // below this there is no film
+const PSLOPE = 0.00055;                // surface slope needed before liquid flows at all
+const PCN   : u32 = 48u;               // PN / 8, for empty-table skipping
+const PBCELL = 2.0 * PEXT / 48.0;   // coarse block size
+const PMAXH  = 0.020;               // the pool never gets deeper than this
+fn pIdx(c: vec2i) -> u32 {
+  let q = clamp(c, vec2i(0), vec2i(i32(PN) - 1));
+  return u32(q.y) * PN + u32(q.x);
+}
+fn samplePuddle(xz: vec2f) -> f32 {
+  let n = xz / (2.0 * PEXT) + 0.5;
+  if (any(n < vec2f(0.0)) || any(n > vec2f(1.0))) { return 0.0; }
+  let t = n * f32(PN) - 0.5;
+  let b = floor(t);
+  let f = t - b;
+  let c = vec2i(b);
+  // 3x3 average per tap: the puddle is nearly a mirror at grazing angles, so cell-scale
+  // steps in the height field read as rings long before they are visible as depth
+  var acc = 0.0;
+  for (var dy = 0; dy <= 1; dy++) {
+    for (var dx = 0; dx <= 1; dx++) {
+      let w = mix(1.0 - f.x, f.x, f32(dx)) * mix(1.0 - f.y, f.y, f32(dy));
+      let q = c + vec2i(dx, dy);
+      var m = 0.0;
+      for (var ky = -1; ky <= 1; ky++) {
+        for (var kx = -1; kx <= 1; kx++) { m += pud[pIdx(q + vec2i(kx, ky))]; }
+      }
+      acc += w * m / 9.0;
+    }
+  }
+  return acc;
+}
+fn pflow(hi: f32, hj: f32) -> f32 {
+  let d = hj - hi;
+  // SOFT yield. A hard cut-off makes thresholded diffusion settle into a staircase, each
+  // terrace exactly PSLOPE high - which from a central source is a set of concentric rings.
+  return d * smoothstep(PSLOPE * 0.85, PSLOPE * 2.0, abs(d));
+}
+fn puddleSDF(p: vec3f) -> f32 {
+  // Bound the pool in BOTH axes. `if (p.y > 0.03) return p.y - 0.03` looks like a cheap
+  // early-out but it is the distance to a horizontal plane spanning the whole scene: it
+  // falls to zero wherever a ray descends through 3 cm, with or without liquid below. That
+  // phantom interface ate a bounce from every grazing ray, and rays ran out of bounces at
+  // different distances - which banded into concentric rings on the table.
+  let n = p.xz / (2.0 * PEXT) + 0.5;
+  let cc = vec2i(clamp(n, vec2f(0.0), vec2f(0.999)) * f32(PCN));
+  let b  = pudC[u32(cc.y) * PCN + u32(cc.x)];
+  var dh = 1e9;                                     // horizontal distance to wet table
+  if (b.w > 0.5) { dh = max(length(p.xz - b.yz) - PBCELL * 0.75, 0.0); }
+  let dv = p.y - PMAXH;                             // the pool is never deeper than this
+  if (dh > 0.004 || dv > 0.004) { return max(dh, max(dv, 0.0008)); }
+
+  var wet = false;
+  for (var dy = -1; dy <= 1; dy++) {
+    for (var dx = -1; dx <= 1; dx++) {
+      let q = clamp(cc + vec2i(dx, dy), vec2i(0), vec2i(i32(PCN) - 1));
+      if (pudC[u32(q.y) * PCN + u32(q.x)].x > PMIN) { wet = true; }
+    }
+  }
+  if (wet) {
+    let h = samplePuddle(p.xz);
+    if (h >= PMIN) { return max(p.y - h, -p.y); }
+  }
+  return max(max(dh, dv), 0.0008);
+}
+const R_IN  = SPH_R - GLASS_T;         // bowl interior (particle collision)
+// the liquid body deliberately OVERLAPS into the glass shell: coincident surfaces let
+// float noise decide glass-vs-liquid, which bands into rings. Priority in mediumAt wins.
+const R_LIQ = SPH_R - GLASS_T + 0.0004;
+const Y0    = SPH_CY - R_IN;           // lowest point of the bowl interior
+// Spill 4mm BELOW the rim. At exactly RIM_Y the liquid's top plane is coplanar with the
+// glass's rim cut plane, and that coincidence renders as an opaque disc once a glass fills.
+const LMAX  = RIM_Y - Y0 - 0.004;
+const WN    : u32 = 32u;               // wave grid per glass
+const NG    : i32 = 14;
+const VUNIT = 1e-12;                   // volume fixed-point unit (m^3)
+const WUNIT = 1e-9;                    // wave impulse fixed-point unit (m)
+const FUNIT = 1e-6;                    // foam fixed-point unit
+const NWCELL : u32 = 14u * 32u * 32u;  // NG * WN * WN
+const WMAX  = 0.01;                    // wave amplitude clamp (must match waveUpdate)
+
+// tier split heights (midway between adjacent bowls)
+const TS0 = (RIM_Y + GH + Y0) * 0.5;
+const TS1 = TS0 + GH;
+
+fn glassIdx(p: vec3f) -> i32 {
+  if (p.y >= TS1) { return 13; }
+  if (p.y >= TS0) {
+    let c = clamp(round(p.xz / SP - 0.5), vec2f(-1.0), vec2f(0.0));
+    return 9 + i32(c.x + 1.0) + 2 * i32(c.y + 1.0);
+  }
+  let c = clamp(round(p.xz / SP), vec2f(-1.0), vec2f(1.0));
+  return i32(c.x + 1.0) + 3 * i32(c.y + 1.0);
+}
+fn glassOff(g: i32) -> vec3f {
+  if (g == 13) { return vec3f(0.0, 2.0 * GH, 0.0); }
+  if (g >= 9) {
+    let k = g - 9;
+    return vec3f((f32(k % 2) - 0.5) * SP, GH, (f32(k / 2) - 0.5) * SP);
+  }
+  return vec3f((f32(g % 3) - 1.0) * SP, 0.0, (f32(g / 3) - 1.0) * SP);
+}
+fn wIdx(g: i32, c: vec2i) -> u32 {
+  let q = clamp(c, vec2i(0), vec2i(i32(WN) - 1));
+  return u32(g) * WN * WN + u32(q.y) * WN + u32(q.x);
+}
+fn sampleFoam(g: i32, xz: vec2f) -> f32 {
+  let t = (xz / (2.0 * RIM_R) + 0.5) * f32(WN) - 0.5;
+  let b = floor(t);
+  let f = t - b;
+  let c = vec2i(b);
+  let a0 = mix(wave[wIdx(g, c)].z,              wave[wIdx(g, c + vec2i(1,0))].z, f.x);
+  let a1 = mix(wave[wIdx(g, c + vec2i(0,1))].z, wave[wIdx(g, c + vec2i(1,1))].z, f.x);
+  return mix(a0, a1, f.y);
+}
+fn sampleWave(g: i32, xz: vec2f) -> f32 {
+  if (u.wav < 0.5) { return 0.0; }
+  let t = (xz / (2.0 * RIM_R) + 0.5) * f32(WN) - 0.5;
+  let b = floor(t);
+  let f = t - b;
+  let c = vec2i(b);
+  let a0 = mix(wave[wIdx(g, c)].x,                  wave[wIdx(g, c + vec2i(1,0))].x, f.x);
+  let a1 = mix(wave[wIdx(g, c + vec2i(0,1))].x,     wave[wIdx(g, c + vec2i(1,1))].x, f.x);
+  return mix(a0, a1, f.y);
+}
+// rising CO2 bubbles, as a lattice of spheres translated upward through glass-local space
+fn bubbleSDF(ql: vec3f) -> f32 {
+  let CB = 0.0055;
+  var p = ql;
+  p.y -= u.time * 0.085;
+  let id = floor(p / CB);
+  let r3 = rnd3(u32(i32(id.x) + 4096), u32(i32(id.y) + 4096), u32(i32(id.z) + 4096));
+  if (r3.z > 0.22) { return 1.0; }                       // most cells are empty
+  let rad = 0.00010 + r3.x * 0.00034;
+  let jit = (r3 - 0.5) * CB * 0.45;
+  return length(p - (id + 0.5) * CB - jit) - rad;
+}
+
+// liquid body of one glass: sphere-cap interior cut by the (wavy) surface plane
+fn bulkSDF(p: vec3f) -> f32 {
+  let g = glassIdx(p);
+  let L = glass[g].x;
+  if (L <= 0.0002) { return 1.0; }
+  let q  = p - glassOff(g);
+  let dS = length(q - vec3f(0.0, SPH_CY, 0.0)) - R_LIQ;
+  // flat-surface estimate first; waves are clamped to +/-WMAX so this bounds the error
+  let d0 = max(dS, q.y - (Y0 + L));
+  if (d0 > WMAX * 1.1) { return d0 - WMAX; }   // too far for a wave to matter: skip the fetch
+  let dl = max(dS, q.y - (Y0 + L + sampleWave(g, q.xz)));
+  if (u.bub > 0.5 && dl < 0.0) { return max(dl, -bubbleSDF(q)); }
+  return dl;
+}
+
+fn fIdx(c: vec3i) -> u32 { return u32(c.x) + u32(c.y) * FINE + u32(c.z) * FINE * FINE; }
+fn cIdx(c: vec3i) -> u32 { return u32(c.x) + u32(c.y) * COARSE + u32(c.z) * COARSE * COARSE; }
+fn c3(i: u32) -> vec3i {
+  return vec3i(i32(i % COARSE), i32((i / COARSE) % COARSE), i32(i / (COARSE * COARSE)));
+}
+// PCG3D. The sin()-based hash below loses all precision once the index is large
+// (dot() reaches ~3e7 for 262k photons), which shows up as correlated samples.
+fn pcg3d(vin: vec3u) -> vec3u {
+  var v = vin * 1664525u + 1013904223u;
+  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+  v ^= v >> vec3u(16u);
+  v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+  return v;
+}
+fn rnd3(a: u32, b: u32, c: u32) -> vec3f {
+  return vec3f(pcg3d(vec3u(a, b, c))) * (1.0 / 4294967296.0);
+}
+fn hash3(p: vec3f) -> vec3f {
+  var q = vec3f(dot(p, vec3f(127.1, 311.7, 74.7)),
+                dot(p, vec3f(269.5, 183.3, 246.1)),
+                dot(p, vec3f(113.5, 271.9, 124.6)));
+  return fract(sin(q) * 43758.5453);
+}
+
+fn sdCyl(p: vec3f, r: f32, y0: f32, y1: f32) -> f32 {
+  let d = vec2f(length(p.xz) - r, max(y0 - p.y, p.y - y1));
+  return min(max(d.x, d.y), 0.0) + length(max(d, vec2f(0.0)));
+}
+fn sdCoupe(p: vec3f) -> f32 {
+  // bowl: a spherical cap shell, cut at the rim and thinned towards it
+  var bowl = abs(length(p - vec3f(0.0, SPH_CY, 0.0)) - SPH_R) - GLASS_T;
+  bowl = max(bowl, p.y - RIM_Y);
+  // slender stem, and the solid glass knuckle the bowl sits on
+  let stem = sdCyl(p, STEM_R, FOOT_H * 0.4, BOWL_BOT + 0.005);
+  let knuc = length((p - vec3f(0.0, BOWL_BOT + 0.0045, 0.0)) * vec3f(1.0, 0.62, 1.0)) - 0.0080;
+  // foot: a thin rounded disc
+  let foot = sdCyl(p, FOOT_R - 0.0039, 0.0013, FOOT_H - 0.0026) - 0.0026;
+  var d = smin(stem, knuc, 0.0070);
+  d = smin(d, bowl, 0.0045);
+  return smin(d, foot, 0.0060);
+}
+fn sdTower(p: vec3f) -> f32 {
+  if (u.single > 0.5) { return sdCoupe(p); }   // debug: one coupe, no folding
+  let f0 = SP * clamp(round(p.xz / SP), vec2f(-1.0), vec2f(1.0));
+  var d = sdCoupe(vec3f(p.x - f0.x, p.y, p.z - f0.y));
+  let p1 = p - vec3f(0.0, GH, 0.0);
+  let f1 = SP * (clamp(round(p1.xz / SP - 0.5), vec2f(-1.0), vec2f(0.0)) + 0.5);
+  d = min(d, sdCoupe(vec3f(p1.x - f1.x, p1.y, p1.z - f1.y)));
+  d = min(d, sdCoupe(p - vec3f(0.0, 2.0 * GH, 0.0)));
+  return d;
+}
+fn towerN(p: vec3f) -> vec3f {
+  let e = vec2f(1.0, -1.0) * 0.00015;
+  return normalize( e.xyy * sdTower(p + e.xyy) + e.yyx * sdTower(p + e.yyx)
+                  + e.yxy * sdTower(p + e.yxy) + e.xxx * sdTower(p + e.xxx) );
+}
+fn sdBoxDom(p: vec3f) -> f32 {
+  let q = abs(p - (DOM_LO + vec3f(DOM_SZ * 0.5))) - vec3f(DOM_SZ * 0.5);
+  return length(max(q, vec3f(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+
+// ═══════════════ compute ═══════════════
+@compute @workgroup_size(64)
+fn simParticles(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x;
+  if (i >= u32(u.nPart)) { return; }
+  var p = parts[i];
+
+  let PV = u32(u.pvol / VUNIT);
+
+  // The bottle owns a RESERVED slice of the pool. Sharing one pool starves it: spill
+  // particles live ~6 s and occupy nearly every index once the tower cascades, so a
+  // bottle slot almost always lands on an index that is still alive.
+  let POOL = max(u32(u.nPart) / 6u, 1u);
+
+  // j.stride carries the sub-step index: without it every substep in a frame shares one
+  // spawn cadence, so fast-forward advances the drops without emitting new ones.
+  let fc = u32(u.frame) + u32(j.stride);
+
+  if (p.life <= 0.0) {
+    let h = rnd3(i, fc, 3u);
+    var born = false;
+
+    if (i < POOL) {
+      // bottle: rate-limited inside its own slice
+      let m = max(u32(u.spawnMod), 1u);
+      if ((i % m) == (fc % m)) {
+        p.pos  = u.emitPos + vec3f((h.x - 0.5) * 0.004, 0.0, (h.y - 0.5) * 0.004);
+        // the stream inherits the bottle's drift, so it trails the wander instead of
+        // falling dead straight from a moving point
+        p.vel  = vec3f(u.evx, -0.35, u.evz) + (h - 0.5) * 0.015;
+        p.life = 9.0;
+        born = true;
+      }
+    } else {
+      // spill from a glass that has overflowed (drives the cascade)
+      for (var k = 0; k < NG; k++) {
+        let g = (i32(i) + k) % NG;
+        // CAS, not sub-then-add-back: a plain atomicSub underflows u32 and invents volume
+        var took = false;
+        for (var tries = 0; tries < 3; tries++) {
+          let cur = atomicLoad(&gvol[u32(NG + g)]);
+          if (cur < PV) { break; }
+          let r = atomicCompareExchangeWeak(&gvol[u32(NG + g)], cur, cur - PV);
+          if (r.exchanged) { took = true; break; }
+        }
+        if (took) {
+          let a  = h.x * 6.2831853;
+          let off = glassOff(g);
+          let h2 = rnd3(i, fc, 11u);
+          // Spill where the surface is actually highest. Picking a uniform azimuth makes
+          // the glass overflow evenly all the way round, which reads as a waterfall curtain
+          // instead of the few wandering rivulets a real tower produces.
+          var aa = a;
+          var best = -1e9;
+          for (var t = 0; t < 4; t++) {
+            let ta = a + f32(t) * 1.5707963;
+            let e  = sampleWave(g, vec2f(cos(ta), sin(ta)) * RIM_R * 0.93);
+            if (e > best) { best = e; aa = ta; }
+          }
+          let a2 = aa + (h2.z - 0.5) * 0.5;
+          p.pos = off + vec3f(cos(a2) * RIM_R * 0.99, RIM_Y + 0.001, sin(a2) * RIM_R * 0.99);
+          p.vel = vec3f(cos(a2) * 0.05, -0.02, sin(a2) * 0.05) + (h2 - 0.5) * 0.07;
+          p.life = 6.0;
+          born = true;
+          break;
+        }
+      }
+    }
+    if (!born) { parts[i] = p; return; }
+
+    // Sub-frame emission, for BOTH emitters. A frame's worth of drops must not all start
+    // at the same point: by the time spill is falling at ~1 m/s a cohort lands ~17 mm from
+    // the next one, which reads as a chain of discrete beads. Advancing each drop by a
+    // random fraction of the step - position and velocity, gravity included - makes the
+    // emission continuous rather than stroboscopic.
+    let ts = h.z * u.dt;
+    p.vel += vec3f(0.0, -9.81 * ts, 0.0);
+    p.pos += p.vel * ts;
+  }
+
+  // substepped integration; the bowl is a POSITION constraint so it cannot be tunnelled
+  let NSUB = 4;
+  let dt = u.dt / f32(NSUB);
+  let c = vec3f(0.0, SPH_CY, 0.0);
+  for (var s = 0; s < NSUB; s++) {
+    p.vel.y -= 9.81 * dt;
+    var np = p.pos + p.vel * dt;
+
+    let g    = glassIdx(np);
+    let off  = glassOff(g);
+    let qOld = p.pos - off;
+    let q    = np - off;
+    // only constrain particles that were already INSIDE this bowl — never suck in outsiders
+    let wasIn = length(qOld - c) <= R_IN && qOld.y <= RIM_Y;
+
+    if (wasIn) {
+      // absorbed into the bulk once below the surface
+      let top = Y0 + glass[g].x + sampleWave(g, q.xz);
+      if (q.y <= top) {
+        atomicAdd(&gvol[u32(g)], PV);
+        let t  = (q.xz / (2.0 * RIM_R) + 0.5) * f32(WN);
+        let hit = vec2i(t);
+        atomicAdd(&wimp[wIdx(g, hit)], i32(clamp(-p.vel.y, 0.0, 3.0) * 0.00035 / WUNIT));
+        // mousse: CO2 foam is generated by the impact itself
+        atomicAdd(&wimp[wIdx(g, hit) + NWCELL], i32(clamp(-p.vel.y, 0.15, 4.0) * 0.02 / FUNIT));
+        p.life = 0.0;
+        parts[i] = p;
+        return;
+      }
+      let rel = q - c;
+      let d   = length(rel);
+      if (d > R_IN) {
+        let n = rel / d;
+        np = off + c + n * R_IN;
+        let vn = dot(p.vel, n);
+        if (vn > 0.0) { p.vel -= n * vn * 1.25; }
+        p.vel *= 0.80;
+      }
+    }
+    if (np.y < 0.0) {
+      // join the puddle rather than bouncing and quietly expiring
+      let pc = vec2i(floor((np.xz / (2.0 * PEXT) + 0.5) * f32(PN)));
+      if (all(pc >= vec2i(0)) && all(pc < vec2i(i32(PN)))) {
+        atomicAdd(&pudA[pIdx(pc)], PV);
+      }
+      p.life = 0.0;
+      parts[i] = p;
+      return;
+    }
+    p.pos = np;
+  }
+
+  p.life -= u.dt;
+  parts[i] = p;
+}
+
+// ── bulk level per glass: dL/dt = Q / A(L), overflow spills at the rim ──
+@compute @workgroup_size(64)
+fn glassUpdate(@builtin(global_invocation_id) gi: vec3u) {
+  let g = i32(gi.x);
+  if (g >= NG) { return; }
+  let inflow = f32(atomicExchange(&gvol[u32(g)], 0u)) * VUNIT;
+  if (u.fillOv >= 0.0) { glass[g] = vec4f(u.fillOv * LMAX, 0.0, 0.0, 0.0); return; }
+  var L = glass[g].x;
+  let y  = Y0 + L;
+  let r2 = max(R_IN * R_IN - (y - SPH_CY) * (y - SPH_CY), 1e-6);
+  let A  = PI * r2;
+  L += inflow / A;
+  if (L > LMAX) {
+    atomicAdd(&gvol[u32(NG + g)], u32(max((L - LMAX) * A, 0.0) / VUNIT));
+    L = LMAX;
+  }
+  glass[g] = vec4f(L, 0.0, 0.0, 0.0);
+}
+
+// ── surface waves: 2D wave equation on each glass's disc ──
+@compute @workgroup_size(64)
+fn waveUpdate(@builtin(global_invocation_id) gi: vec3u) {
+  let n = gi.x;
+  if (n >= u32(NG) * WN * WN) { return; }
+  let g = i32(n / (WN * WN));
+  let c = vec2i(i32(n % WN), i32((n / WN) % WN));
+
+  let imp = f32(atomicExchange(&wimp[n], 0)) * WUNIT;
+  let fin = f32(atomicExchange(&wimp[n + NWCELL], 0)) * FUNIT;
+  let e   = wave[n];
+  var eta = e.x;
+  let old = e.y;
+
+  let lap = wave[wIdx(g, c + vec2i(1,0))].x + wave[wIdx(g, c - vec2i(1,0))].x
+          + wave[wIdx(g, c + vec2i(0,1))].x + wave[wIdx(g, c - vec2i(0,1))].x - 4.0 * eta;
+
+  var nw = 2.0 * eta - old + 0.25 * lap - 0.06 * (eta - old) - imp;
+
+  // damp to zero at the disc boundary
+  let rr = length((vec2f(c) + 0.5) / f32(WN) - 0.5) * 2.0;
+  if (rr > 0.94) { nw *= 0.2; }
+  nw = clamp(nw, -WMAX, WMAX);
+
+  let foam = clamp(e.z * 0.978 + fin, 0.0, 1.6);   // mousse collapses over a few seconds
+  wave[n] = vec4f(nw, eta, foam, 0.0);
+}
+
+// ── caustics: trace photons from the key light through glass+champagne onto the table ──
+// puddle: take the frame's inflow, then let it flow downhill. On a flat table that is
+// just height-driven spreading, which gives a pool that widens as more arrives.
+@compute @workgroup_size(256)
+fn puddleUpdate(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x;
+  if (i >= PN * PN) { return; }
+  let c = vec2i(i32(i % PN), i32(i / PN));
+  var h = pud[i] + f32(atomicExchange(&pudA[i], 0u)) * VUNIT / PAREA;
+
+  let hl = pud[pIdx(c - vec2i(1,0))];
+  let hr = pud[pIdx(c + vec2i(1,0))];
+  let hd = pud[pIdx(c - vec2i(0,1))];
+  let hu = pud[pIdx(c + vec2i(0,1))];
+  // Yield threshold, not plain diffusion. Liquid only flows where the surface slope beats
+  // PSLOPE, which is what surface tension and contact angle do: a real spill stops at a
+  // definite edge. Without it the film creeps outward forever and ends up covering the
+  // whole table in a sub-millimetre sheet whose radial structure reads as ripple rings.
+  h += 0.24 * (pflow(h, hl) + pflow(h, hr) + pflow(h, hd) + pflow(h, hu));
+  pud[i] = clamp(h, 0.0, 0.05);
+}
+
+@compute @workgroup_size(64)
+fn puddleCoarse(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x;
+  if (i >= PCN * PCN) { return; }
+  let c = vec2i(i32(i % PCN), i32(i / PCN));
+  let b = c * 8;
+  var m = 0.0;
+  for (var y = 0; y < 8; y++) {
+    for (var x = 0; x < 8; x++) { m = max(m, pud[pIdx(b + vec2i(x, y))]); }
+  }
+  let ctr = (vec2f(c) + 0.5) * PBCELL - vec2f(PEXT);
+  var seed = vec4f(m, ctr.x, ctr.y, 0.0);
+  if (m > PMIN) { seed.w = 1.0; }
+  pudC[i] = seed;
+}
+
+// jump flood over the 48x48 blocks, so every point has a real distance to wet table
+@compute @workgroup_size(64)
+fn puddleJFA(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x;
+  if (i >= PCN * PCN) { return; }
+  let c   = vec2i(i32(i % PCN), i32(i / PCN));
+  let ctr = (vec2f(c) + 0.5) * PBCELL - vec2f(PEXT);
+  var best = pudC[i];
+  var bd = 1e9;
+  if (best.w > 0.5) { bd = length(ctr - best.yz); }
+  let st = i32(j.stride);
+  for (var dy = -1; dy <= 1; dy++) {
+    for (var dx = -1; dx <= 1; dx++) {
+      let q = clamp(c + vec2i(dx, dy) * st, vec2i(0), vec2i(i32(PCN) - 1));
+      let o = pudC[u32(q.y) * PCN + u32(q.x)];
+      if (o.w > 0.5) {
+        let d = length(ctr - o.yz);
+        if (d < bd) { bd = d; best = vec4f(best.x, o.y, o.z, 1.0); }
+      }
+    }
+  }
+  pudC[i] = best;
+}
+
+@compute @workgroup_size(256)
+fn causticDecay(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x;
+  if (i >= CN * CN * 3u) { return; }
+  atomicStore(&caust[i], (atomicLoad(&caust[i]) * 236u) / 256u);   // temporal fade
+}
+
+@compute @workgroup_size(256)
+fn causticBlur(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x;
+  if (i >= CN * CN) { return; }
+  let c = vec2i(i32(i % CN), i32(i / CN));
+  var sum = vec3f(0.0);
+  for (var dy = -2; dy <= 2; dy++) {
+    for (var dx = -2; dx <= 2; dx++) { sum += causFetch(c + vec2i(dx, dy)); }
+  }
+  sum /= 25.0;
+  caustF[i * 3u]      = sum.x;
+  caustF[i * 3u + 1u] = sum.y;
+  caustF[i * 3u + 2u] = sum.z;
+}
+
+@compute @workgroup_size(64)
+fn photons(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x;
+  if (i >= u32(u.nPhoton)) { return; }
+  let h = rnd3(i, u32(u.frame), 5u);
+
+  let L  = lightDir();
+  let t1 = normalize(cross(L, vec3f(0.0, 1.0, 0.0)));
+  let t2 = cross(L, t1);
+  let a  = h.x * 6.2831853;
+  let rr = sqrt(h.y);
+  let r  = rr * 0.38;                        // projects to a ~0.53 m semi-axis at this elevation
+  var p  = vec3f(0.0, 0.17, 0.0) + L * 0.75 + t1 * (cos(a) * r) + t2 * (sin(a) * r);
+  var d  = -L;
+  var med = 0;
+  // window the emitter so the pool of light fades out instead of ending on a hard circle
+  var w   = vec3f(smoothstep(1.0, 0.50, rr));
+
+  for (var b = 0; b < 4; b++) {
+    var s = 1.0;
+    if (med != 0) { s = -1.0; }
+    let hh = marchS(p, d, s);
+
+    var ht = 1e9;
+    var tab = false;
+    if (hh.hit > 0.5) { ht = hh.t; }
+    let tpl = planeT(p, d);
+    if (tpl < ht) { ht = tpl; tab = true; }
+    if (ht > FAR) { return; }
+
+    w *= exp(-sigmaOf(med) * ht);
+    let hp = p + d * ht;
+
+    if (tab) {
+      let t = (hp.xz / (2.0 * CEXT) + 0.5) * f32(CN);
+      if (all(t >= vec2f(0.0)) && all(t < vec2f(f32(CN)))) {
+        let k = causIdx(vec2i(t));
+        let e = w * CSCALE * clamp(-d.y, 0.0, 1.0);
+        atomicAdd(&caust[k],      u32(max(e.x, 0.0)));
+        atomicAdd(&caust[k + 1u], u32(max(e.y, 0.0)));
+        atomicAdd(&caust[k + 2u], u32(max(e.z, 0.0)));
+      }
+      return;
+    }
+
+    var n = mapN(hp);
+    if (dot(n, d) > 0.0) { n = -n; }
+    let medA = mediumAt(hp + d * SURF_EPS);
+    if (medA == 3) {                      // reached the table from inside the puddle
+      let t = (hp.xz / (2.0 * CEXT) + 0.5) * f32(CN);
+      if (all(t >= vec2f(0.0)) && all(t < vec2f(f32(CN)))) {
+        let k = causIdx(vec2i(t));
+        let e = w * CSCALE * clamp(-d.y, 0.0, 1.0);
+        atomicAdd(&caust[k],      u32(max(e.x, 0.0)));
+        atomicAdd(&caust[k + 1u], u32(max(e.y, 0.0)));
+        atomicAdd(&caust[k + 2u], u32(max(e.z, 0.0)));
+      }
+      return;
+    }
+    let i1 = iorOf(med);
+    let i2 = iorOf(medA);
+    let f0 = pow((i1 - i2) / (i1 + i2), 2.0);
+    let ct = clamp(dot(-d, n), 0.0, 1.0);
+    let F  = f0 + (1.0 - f0) * pow(1.0 - ct, 5.0);
+    let rf = refract(d, n, i1 / i2);
+    if (dot(rf, rf) < 1e-6) {
+      d = reflect(d, n);
+      p = hp + d * SURF_EPS;
+    } else {
+      w *= (1.0 - F);
+      d = rf;
+      p = hp + d * SURF_EPS;
+      med = medA;
+    }
+    if (max(w.x, max(w.y, w.z)) < 0.02) { return; }
+  }
+}
+
+@compute @workgroup_size(512)
+fn clearFine(@builtin(global_invocation_id) g: vec3u) {
+  if (g.x >= FINE * FINE * FINE) { return; }
+  atomicStore(&fine[g.x], INFQ);
+}
+
+@compute @workgroup_size(64)
+fn clearCoarse(@builtin(global_invocation_id) g: vec3u) {
+  if (g.x >= COARSE * COARSE * COARSE) { return; }
+  coarse[g.x] = vec4f(0.0, 0.0, 0.0, 0.0);
+}
+
+// narrow-band exact scatter. Each particle deposits a swept CAPSULE, not a sphere: over
+// one shutter interval a falling drop traces a streak, and recording it as a point is what
+// makes a pour read as a string of frozen beads instead of liquid.
+fn sdSeg(p: vec3f, a: vec3f, b: vec3f) -> f32 {
+  let pa = p - a;
+  let ba = b - a;
+  let h  = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-12), 0.0, 1.0);
+  return length(pa - ba * h);
+}
+
+@compute @workgroup_size(64)
+fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x;
+  if (i >= u32(u.nPart)) { return; }
+  let p = parts[i];
+  if (p.life <= 0.0) { return; }
+
+  var v = p.vel * u.shut;
+  let L = length(v);
+  if (L > 0.024) { v = v * (0.024 / L); }      // cap the streak so the loop stays bounded
+  let a = p.pos - v * 0.5;
+  let b = p.pos + v * 0.5;
+
+  let lo = clamp(vec3i(floor((min(a, b) - vec3f(BAND) - DOM_LO) / FCELL)),
+                 vec3i(0), vec3i(i32(FINE) - 1));
+  let hi = clamp(vec3i(ceil ((max(a, b) + vec3f(BAND) - DOM_LO) / FCELL)),
+                 vec3i(0), vec3i(i32(FINE) - 1));
+
+  for (var z = lo.z; z <= hi.z; z++) {
+    for (var y = lo.y; y <= hi.y; y++) {
+      for (var x = lo.x; x <= hi.x; x++) {
+        let cc = vec3i(x, y, z);
+        let cp = DOM_LO + (vec3f(cc) + 0.5) * FCELL;
+        let d  = sdSeg(cp, a, b);
+        if (d < BAND) {
+          atomicMin(&fine[fIdx(cc)], u32(clamp(d / BAND, 0.0, 1.0) * QMAX));
+        }
+      }
+    }
+  }
+}
+
+@compute @workgroup_size(64)
+fn seedCoarse(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x;
+  if (i >= u32(u.nPart)) { return; }
+  let p = parts[i];
+  if (p.life <= 0.0) { return; }
+  let c = vec3i(floor((p.pos - DOM_LO) / CCELL));
+  if (any(c < vec3i(0)) || any(c >= vec3i(i32(COARSE)))) { return; }
+  coarse[cIdx(c)] = vec4f(p.pos, 1.0);
+}
+
+// jump flooding on the coarse grid (in place) — far-field nearest-particle field
+@compute @workgroup_size(64)
+fn jfaCoarse(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x;
+  if (i >= COARSE * COARSE * COARSE) { return; }
+  let c  = c3(i);
+  let cp = DOM_LO + (vec3f(c) + 0.5) * CCELL;
+  var best = coarse[i];
+  var bd = 1e9;
+  if (best.w > 0.5) { bd = length(cp - best.xyz); }
+  let s = i32(j.stride);
+  for (var dz = -1; dz <= 1; dz++) {
+    for (var dy = -1; dy <= 1; dy++) {
+      for (var dx = -1; dx <= 1; dx++) {
+        let nc = c + vec3i(dx, dy, dz) * s;
+        if (any(nc < vec3i(0)) || any(nc >= vec3i(i32(COARSE)))) { continue; }
+        let q = coarse[cIdx(nc)];
+        if (q.w > 0.5) {
+          let d = length(cp - q.xyz);
+          if (d < bd) { bd = d; best = q; }
+        }
+      }
+    }
+  }
+  coarse[i] = best;
+}
+
+@compute @workgroup_size(512)
+fn resolveFine(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x;
+  if (i >= FINE * FINE * FINE) { return; }
+  let q = atomicLoad(&fine[i]);
+  var d = BAND;
+  if (q != INFQ) { d = f32(q) / QMAX * BAND; }
+  fineF[i] = d;
+}
+
+// ═══════════════ liquid distance field ═══════════════
+fn fineAt(c: vec3i) -> f32 {
+  let cc = clamp(c, vec3i(0), vec3i(i32(FINE) - 1));
+  return fineF[fIdx(cc)];
+}
+fn liquidDist(p: vec3f) -> f32 {
+  if (u.noliq > 0.5) { return 1e9; }          // debug: dry glass
+  var dPud = 1e9;
+  if (u.pudOn > 0.5) { dPud = puddleSDF(p); }
+  // the particle toggle must isolate ONLY the particle field - returning early here also
+  // disabled the puddle, which made an earlier bisection point at the wrong thing
+  if (u.pfield < 0.5) { return min(bulkSDF(p), dPud); }
+  let gp = (p - DOM_LO) / FCELL - 0.5;
+  let b  = floor(gp);
+  let f  = gp - b;
+  let c  = vec3i(b);
+  let x00 = mix(fineAt(c + vec3i(0,0,0)), fineAt(c + vec3i(1,0,0)), f.x);
+  let x10 = mix(fineAt(c + vec3i(0,1,0)), fineAt(c + vec3i(1,1,0)), f.x);
+  let x01 = mix(fineAt(c + vec3i(0,0,1)), fineAt(c + vec3i(1,0,1)), f.x);
+  let x11 = mix(fineAt(c + vec3i(0,1,1)), fineAt(c + vec3i(1,1,1)), f.x);
+  let tri = mix(mix(x00, x10, f.y), mix(x01, x11, f.y), f.z);
+
+  // far field from the coarse jump-flood result
+  let cc = vec3i(clamp(floor((p - DOM_LO) / CCELL), vec3f(0.0), vec3f(f32(COARSE) - 1.0)));
+  let q  = coarse[cIdx(cc)];
+  var dc = 1.0;
+  if (q.w > 0.5) { dc = (length(p - q.xyz) - u.prad) * 0.85; }
+
+  var d = dc;
+  if (tri < BAND * 0.98) { d = tri - u.prad; }        // inside the exact band
+  else { d = max(BAND - u.prad, dc); }
+  // particle field (spray/stream), the analytic bulk in each glass, and the table puddle
+  return min(min(max(d, sdBoxDom(p)), bulkSDF(p)), dPud);
+}
+
+// the table is NOT marched — it is intersected analytically (grazing rays used to burn
+// the whole step budget skimming the plane)
+// ── magnum (1.5 L): 345 mm tall, 116 mm body, 30 mm neck, deep punt ──
+const BOT_H   = 0.345;
+const BODY_R  = 0.060;                   // height/width 2.87, matching the reference
+const NECK_R  = 0.0150;
+const BOT_W   = 0.0030;                  // wall thickness
+fn rotX(v: vec3f, a: f32) -> vec3f {
+  let c = cos(a); let s = sin(a);
+  return vec3f(v.x, c * v.y - s * v.z, s * v.y + c * v.z);
+}
+fn rotY(v: vec3f, a: f32) -> vec3f {
+  let c = cos(a); let s = sin(a);
+  return vec3f(c * v.x + s * v.z, v.y, -s * v.x + c * v.z);
+}
+// The silhouette as radius-vs-height. A champagne shoulder is an S-curve - convex as it
+// leaves the body, concave as it meets the neck - which a straight cone cannot produce and
+// a wide smooth-min rounds away entirely. Measured off the reference, of 345 mm:
+// body 163, shoulder 67, neck 115.
+fn bottleR(y: f32) -> f32 {
+  // the neck is slightly tapered, wider where it leaves the shoulder
+  let nr = mix(NECK_R + 0.0014, NECK_R, clamp((y - 0.275) / 0.060, 0.0, 1.0));
+  // Span 175 mm, not 115. Smootherstep is nearly flat at both ends, so only about 60% of
+  // the span reads as curvature - the visible shoulder was coming out ~2/3 of the arc the
+  // reference shows. The flat tails still leave a ~135 mm straight body and ~105 mm neck.
+  let t  = clamp((y - 0.100) / 0.175, 0.0, 1.0);
+  // smootherstep, not smoothstep: smoothstep's second derivative jumps at each end, which
+  // shows up as a crease where the shoulder meets the body. This is C2, so the silhouette
+  // flows from neck to body with no seam.
+  let sm = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+  var r  = mix(BODY_R, nr, sm);
+  // heel: 30% of the previous bevel, and eased rather than a straight chamfer so it does
+  // not leave a crease where it meets the body
+  let hy = clamp(y / 0.0036, 0.0, 1.0);
+  let hs = hy * hy * hy * (hy * (hy * 6.0 - 15.0) + 10.0);
+  r = min(r, BODY_R - 0.0015 * (1.0 - hs));
+  return r;
+}
+fn sdBottleLocal(p: vec3f) -> f32 {
+  // 0.70 keeps the estimate conservative where the shoulder is steepest
+  var d = (length(p.xz) - bottleR(p.y)) * 0.70;
+  d = max(d, p.y - BOT_H);
+  d = max(d, -p.y);
+  // lip ring below the mouth
+  let lip = sdCyl(p, NECK_R + 0.0019, BOT_H - 0.013, BOT_H - 0.003) - 0.0011;
+  d = min(d, lip);
+  // punt: a dome pushed up into the base
+  let punt = length((p - vec3f(0.0, -0.008, 0.0)) * vec3f(1.0, 0.50, 1.0)) - 0.040;
+  d = max(d, -punt);
+  // hollow into a shell, then open the bore so the mouth is a mouth
+  let sh = max(d, -(d + BOT_W));
+  let bore = sdCyl(p, NECK_R - BOT_W - 0.0006, 0.22, BOT_H + 0.02);
+  return max(sh, -bore);
+}
+fn sdBottle(p: vec3f) -> f32 {
+  if (u.botOn < 0.5) { return 1e9; }
+  // the mouth sits at the emitter, so the bottle follows the pour's wander for free
+  var v = p - u.emitPos;
+  v = rotY(v, -u.botAz);
+  v = rotX(v, -u.botTilt);
+  v.y += BOT_H;
+  // cheap bounding sphere first: the full profile is a dozen primitives and this runs on
+  // every raymarch step, but the bottle occupies a small part of the scene
+  let b = length(v - vec3f(0.0, BOT_H * 0.50, 0.0)) - 0.186;
+  if (b > 0.015) { return b; }
+  return sdBottleLocal(v);
+}
+
+fn map(p: vec3f) -> f32 { return min(min(sdTower(p), liquidDist(p)), sdBottle(p)); }
+fn planeT(ro: vec3f, rd: vec3f) -> f32 {
+  if (rd.y > -1e-6) { return 1e9; }
+  let t = -ro.y / rd.y;
+  if (t < 0.0) { return 1e9; }
+  return t;
+}
+
+fn mapN(p: vec3f) -> vec3f {
+  let e = vec2f(1.0, -1.0) * 0.0002;
+  return normalize( e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx)
+                  + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx) );
+}
+
+struct Hit { t: f32, steps: f32, hit: f32 };
+
+const FAR      = 14.0;   // the table runs to the horizon; a 4 m clip dropped it to env
+const SURF_EPS = 0.00025;
+const HIT_EPS  = 0.00012;
+
+// sphere-trace; s = +1 when travelling through air, -1 when inside a medium
+fn marchS(ro: vec3f, rd: vec3f, s: f32) -> Hit {
+  var t = 0.0;
+  var i = 0.0;
+  loop {
+    if (i >= u.maxSteps) { break; }
+    let d = map(ro + rd * t) * s;
+    if (d < HIT_EPS) { return Hit(t, i, 1.0); }
+    t = t + max(d * 0.9, 0.00006);
+    if (t > FAR) { break; }
+    i = i + 1.0;
+  }
+  return Hit(t, i, 0.0);
+}
+fn march(ro: vec3f, rd: vec3f) -> Hit { return marchS(ro, rd, 1.0); }
+
+// 0 air · 1 glass · 2 champagne · 3 table (opaque).
+// Priority order resolves coincident glass/liquid surfaces — no double refraction.
+fn mediumAt(p: vec3f) -> i32 {
+  if (p.y < 0.0) { return 3; }
+  if (sdBottle(p) < 0.0) { return 4; }
+  if (sdTower(p) < 0.0) { return 1; }
+  if (liquidDist(p) < 0.0) { return 2; }
+  return 0;
+}
+fn iorOf(m: i32) -> f32 {
+  if (m == 1) { return 1.50; }      // glass
+  if (m == 2) { return 1.34; }      // champagne
+  if (m == 4) { return 1.52; }      // bottle glass
+  return 1.0;
+}
+fn sigmaOf(m: i32) -> vec3f {
+  if (m == 1) { return vec3f(0.6, 0.35, 0.6); }     // faint green in the glass
+  if (m == 2) { return vec3f(2.2, 5.5, 16.0); }     // Beer-Lambert gold
+  if (m == 4) { return vec3f(260.0, 85.0, 310.0); } // dark olive bottle glass
+  return vec3f(0.0);
+}
+
+fn turbo(x: f32) -> vec3f {
+  let v = clamp(x, 0.0, 1.0);
+  return clamp(vec3f(2.0 * v - 0.4, 1.4 - abs(2.0 * v - 1.0) * 1.6, 1.3 - 2.2 * v),
+               vec3f(0.0), vec3f(1.0));
+}
+// out-of-focus party lights: what makes refraction through glass worth looking at
+fn bokeh(rd: vec3f) -> vec3f {
+  let el = asin(clamp(rd.y, -1.0, 1.0));
+  let g  = vec2f(atan2(rd.z, rd.x), el) / 0.20;
+  let b  = floor(g);
+  var acc = vec3f(0.0);
+  for (var i = -1; i <= 1; i++) {
+    for (var k = -1; k <= 1; k++) {
+      let id = b + vec2f(f32(i), f32(k));
+      let r  = rnd3(u32(i32(id.x) + 2048), u32(i32(id.y) + 2048), 17u);
+      if (r.z > 0.46) { continue; }
+      let ctr = id + 0.5 + (r.xy - 0.5) * 0.7;
+      let rad = 0.11 + r.x * 0.15;
+      let m   = smoothstep(rad, rad * 0.5, length(g - ctr));
+      acc += mix(vec3f(1.0, 0.66, 0.28), vec3f(0.50, 0.70, 1.0), r.y) * m * (0.45 + r.x * 2.2);
+    }
+  }
+  return acc * exp(-abs(el) * 1.9);
+}
+// lat-long test grid: makes it obvious WHICH direction a reflection or refraction samples
+fn envGrid(rd: vec3f) -> vec3f {
+  let el = asin(clamp(rd.y, -1.0, 1.0));
+  let uv = vec2f(atan2(rd.z, rd.x) / 6.2831853 + 0.5, el / 3.14159265 + 0.5);
+  let g  = uv * vec2f(72.0, 36.0);
+  let fr = abs(fract(g) - 0.5);
+  let ln = smoothstep(0.42, 0.50, max(fr.x, fr.y));
+  let g2 = uv * vec2f(12.0, 6.0);
+  let f2 = abs(fract(g2) - 0.5);
+  let l2 = smoothstep(0.45, 0.50, max(f2.x, f2.y));
+  var c = mix(vec3f(uv.x, uv.y, 0.35) * 0.9, vec3f(1.0), ln * 0.55);
+  c = mix(c, vec3f(1.0), l2);
+  if (abs(el) < 0.015) { c = vec3f(0.1, 1.0, 0.2); }          // horizon
+  if (abs(el) > 1.50)  { c = vec3f(1.0, 0.1, 0.9); }          // poles
+  if (dot(rd, lightDir()) > 0.995) { c = vec3f(1.0, 0.5, 0.0); } // key direction
+  return c;
+}
+fn env(rd: vec3f) -> vec3f {
+  if (u.envg > 0.5) { return envGrid(rd); }
+  let h = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
+  var c = mix(vec3f(0.007, 0.008, 0.013), vec3f(0.034, 0.034, 0.047), h);
+  let kd = clamp(dot(rd, lightDir()), 0.0, 1.0);
+  c += vec3f(1.00, 0.95, 0.86) * pow(kd,  14.0) *  1.0;    // broad softbox: long specular streaks
+  c += vec3f(1.00, 0.97, 0.90) * pow(kd, 420.0) * 34.0;    // hot core
+  c += vec3f(1.00, 0.60, 0.26) * pow(clamp(dot(rd, normalize(vec3f(-0.75, 0.10, 0.35))), 0.0, 1.0), 26.0) * 1.3;
+  c += vec3f(0.38, 0.52, 0.95) * pow(clamp(dot(rd, normalize(vec3f( 0.10,-0.20, 0.95))), 0.0, 1.0),  7.0) * 0.22;
+  return c + bokeh(rd);
+}
+fn sky(rd: vec3f) -> vec3f { return env(rd); }
+const CN     : u32 = 768u;
+const CEXT   = 0.55;        // half-extent (m); must contain the lit ellipse
+const CSCALE = 3000.0;      // photon energy fixed-point scale
+fn lightDir() -> vec3f {
+  let ce = cos(u.ltEl);
+  return normalize(vec3f(ce * cos(u.ltAz), sin(u.ltEl), ce * sin(u.ltAz)));
+}
+fn causIdx(c: vec2i) -> u32 {
+  let q = clamp(c, vec2i(0), vec2i(i32(CN) - 1));
+  return (u32(q.y) * CN + u32(q.x)) * 3u;
+}
+fn causFetch(c: vec2i) -> vec3f {
+  let k = causIdx(c);
+  return vec3f(f32(atomicLoad(&caust[k])), f32(atomicLoad(&caust[k + 1u])), f32(atomicLoad(&caust[k + 2u])));
+}
+fn causFetchF(c: vec2i) -> vec3f {
+  let q = clamp(c, vec2i(0), vec2i(i32(CN) - 1));
+  let k = (u32(q.y) * CN + u32(q.x)) * 3u;
+  return vec3f(caustF[k], caustF[k + 1u], caustF[k + 2u]);
+}
+fn causticAt(xz: vec2f) -> vec3f {
+  let n = xz / (2.0 * CEXT) + 0.5;
+  // clamping the fetch would smear the border texels to infinity as long streaks
+  if (any(n < vec2f(0.0)) || any(n > vec2f(1.0))) { return vec3f(0.0); }
+  let t = n * f32(CN) - 0.5;
+  let b = floor(t);
+  let f = t - b;
+  let c = vec2i(b);
+  let a0 = mix(causFetchF(c),               causFetchF(c + vec2i(1, 0)), f.x);
+  let a1 = mix(causFetchF(c + vec2i(0, 1)), causFetchF(c + vec2i(1, 1)), f.x);
+  let e = min(min(n.x, n.y), min(1.0 - n.x, 1.0 - n.y));
+  return mix(a0, a1, f.y) / CSCALE * smoothstep(0.0, 0.02, e);
+}
+fn tableShade(p: vec3f) -> vec3f {
+  let r = length(p.xz);
+  let fall = 1.0 - 0.55 * clamp(r * 1.5, 0.0, 1.0);
+  let amb = vec3f(0.013, 0.013, 0.017);
+  // direct light AND caustics both come from the photon map: shadows are free
+  let c = causticAt(p.xz) * u.cgain;
+  return (amb + c) * fall * vec3f(0.97, 0.94, 0.90);
+}
+fn tonemap(x: vec3f) -> vec3f {
+  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3f(0.0), vec3f(1.0));
+}
+
+@vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
+  var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
+  return vec4f(p[i], 0.0, 1.0);
+}
+
+// Short refraction-only walk used to COLOUR a reflection. Sampling env() for a reflection
+// that actually hits nearby geometry is what paints flat discs on near-grazing surfaces.
+fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
+  var p = p0; var d = d0; var med = med0;
+  var tp = vec3f(1.0);
+  var acc = vec3f(0.0);
+  for (var b = 0; b < 3; b++) {
+    var s = 1.0;
+    if (med != 0) { s = -1.0; }
+    let h = marchS(p, d, s);
+    var ht = FAR;
+    var tab = false;
+    if (h.hit > 0.5) { ht = h.t; }
+    let tpl = planeT(p, d);
+    if (tpl < ht) { ht = tpl; tab = true; }
+    if (med == 2) { acc += tp * vec3f(0.95, 0.60, 0.20) * (1.0 - exp(-ht * 7.0)) * 0.30; }
+    tp *= exp(-sigmaOf(med) * ht);
+    if (!tab && h.hit < 0.5) { return acc + tp * env(d); }
+    let hp = p + d * ht;
+    if (tab) { return acc + tp * tableShade(hp); }
+    var n = mapN(hp);
+    if (dot(n, d) > 0.0) { n = -n; }
+    let medA = mediumAt(hp + d * SURF_EPS);
+    if (medA == 3) { return acc + tp * tableShade(hp); }
+    let rf = refract(d, n, iorOf(med) / iorOf(medA));
+    if (dot(rf, rf) < 1e-6) { d = reflect(d, n); p = hp + d * SURF_EPS; }
+    else { d = rf; p = hp + d * SURF_EPS; med = medA; }
+  }
+  return acc + tp * env(d);
+}
+
+@fragment fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
+  let uv = (fc.xy * 2.0 - u.res) / u.res.y;
+  let ro = u.camPos;
+  let fw = normalize(u.camTgt - ro);
+  let rt = normalize(cross(fw, vec3f(0.0, 1.0, 0.0)));
+  let up = cross(rt, fw);
+  let rd = normalize(uv.x * rt - uv.y * up + fw * u.fov);
+
+  var p   = ro;
+  var d   = rd;
+  var med = 0;
+  var tp  = vec3f(1.0);        // throughput
+  var acc = vec3f(0.0);
+  var steps = 0.0;
+  var tir = 0.0;
+  var fin = false;
+  var firstHit = 0.0;
+  var firstN = vec3f(0.0);
+
+  for (var b = 0; b < i32(u.bounces); b++) {
+    var s = 1.0;
+    if (med != 0) { s = -1.0; }
+    let h = marchS(p, d, s);
+    steps += h.steps;
+
+    var ht = FAR;
+    var tab = false;
+    if (h.hit > 0.5) { ht = h.t; }
+    let tpl = planeT(p, d);
+    if (tpl < ht) { ht = tpl; tab = true; }
+
+    // cheap single-scatter: champagne glows gold rather than going black in depth
+    if (med == 2) { acc += tp * vec3f(0.95, 0.60, 0.20) * (1.0 - exp(-ht * 7.0)) * 0.30; }
+    tp *= exp(-sigmaOf(med) * ht);           // absorption along the segment just travelled
+
+    if (!tab && h.hit < 0.5) { acc += tp * env(d); fin = true; break; }
+
+    let hp = p + d * ht;
+    if (tab) { acc += tp * tableShade(hp); fin = true; break; }
+    var n = mapN(hp);
+    if (dot(n, d) > 0.0) { n = -n; }
+    if (b == 0) { firstHit = 1.0; firstN = n; }
+
+    let medA = mediumAt(hp + d * SURF_EPS);
+
+    // The table can also be reached from INSIDE the puddle, where the marched hit beats the
+    // analytic plane test. Without this the ray refracts straight through the table and the
+    // puddle renders as flat grey with no shadow or caustics.
+    if (medA == 3) { acc += tp * tableShade(hp); fin = true; break; }
+
+    // mousse sits on the liquid's upward-facing surface: opaque, diffuse, not refractive
+    if (medA == 2 && n.y > 0.5 && u.foamG > 0.0) {
+      let gi = glassIdx(hp);
+      let fm = sampleFoam(gi, (hp - glassOff(gi)).xz) * u.foamG;
+      let w  = clamp(fm, 0.0, 1.0);
+      if (w > 0.004) {
+        let l   = clamp(dot(n, lightDir()), 0.0, 1.0);
+        let lit = vec3f(0.94, 0.92, 0.88) * (0.22 + 0.78 * l) + vec3f(0.35, 0.28, 0.16) * 0.25;
+        acc += tp * lit * w;
+        tp *= (1.0 - w);
+        if (max(tp.x, max(tp.y, tp.z)) < 0.02) { fin = true; break; }
+      }
+    }
+
+    let i1 = iorOf(med);
+    let i2 = iorOf(medA);
+    let f0 = pow((i1 - i2) / (i1 + i2), 2.0);
+    let ct = clamp(dot(-d, n), 0.0, 1.0);
+    let F  = f0 + (1.0 - f0) * pow(1.0 - ct, 5.0);
+
+    let rdir = reflect(d, n);
+    var rcol = env(rdir);
+    if (u.rtrace > 0.5 && b < 2 && F > 0.05) { rcol = reflColour(hp + rdir * SURF_EPS, rdir, med); }
+    acc += tp * F * rcol * u.refl;
+
+    let rf = refract(d, n, i1 / i2);
+    if (dot(rf, rf) < 1e-6) {                // total internal reflection
+      tir = tir + 1.0;
+      d = reflect(d, n);
+      p = hp + d * SURF_EPS;
+    } else {
+      tp *= (1.0 - F);
+      d = rf;
+      p = hp + d * SURF_EPS;
+      med = medA;
+    }
+    if (max(tp.x, max(tp.y, tp.z)) < 0.02) { fin = true; break; }
+  }
+  // A ray that merely ran out of bounces keeps its remaining energy, but as a SMOOTH
+  // average rather than env(d): after many refractions neighbouring pixels point in
+  // wildly different directions, so a directional sample shatters into checkerboard
+  // shards. A constant degrades to a soft haze. (Dropping it to black instead quantises
+  // into concentric rings, which is what this replaced.)
+  if (!fin) { acc += tp * vec3f(0.055, 0.052, 0.060); }
+
+  var col = tonemap(acc * u.expo);
+
+  let v = u.view;
+  if (v > 0.5 && v < 1.5) {
+    col = turbo(steps / (u.maxSteps * 2.0));
+  } else if (v > 1.5 && v < 2.5) {
+    col = vec3f(0.0);
+    if (firstHit > 0.5) { col = firstN * 0.5 + 0.5; }
+  } else if (v > 7.5) {
+    // the puddle height field itself, unsmoothed, with contours - tells us whether rings
+    // live in the simulation data or only appear in the shading
+    let tpl = planeT(ro, rd);
+    col = vec3f(0.02);
+    if (tpl < 100.0) {
+      let q = ro + rd * tpl;
+      let n = q.xz / (2.0 * PEXT) + 0.5;
+      if (all(n >= vec2f(0.0)) && all(n <= vec2f(1.0))) {
+        let h = pud[pIdx(vec2i(n * f32(PN)))];
+        // RED overlay: where the renderer actually thinks there is a liquid surface just
+        // above the table. This is what the camera hits, as opposed to what pud[] holds.
+        let probe1 = puddleSDF(vec3f(q.x, 0.0012, q.z));
+        if (probe1 < 0.0003) { col = vec3f(1.0, 0.1, 0.1); }
+        else if (h < PMIN) {
+          col = vec3f(0.05, 0.05, 0.07) + vec3f(0.9, 0.2, 0.9) * clamp(h / PMIN, 0.0, 1.0);
+        } else {
+          col = turbo(clamp(h / 0.010, 0.0, 1.0));
+          let band = fract(h / 0.00025);                 // one contour per 0.25 mm
+          col *= 0.55 + 0.45 * smoothstep(0.0, 0.12, min(band, 1.0 - band));
+        }
+      }
+    }
+  } else if (v > 6.5) {
+    // solo: the bottle alone, upright at the origin, flat-lit for shape comparison
+    var t = 0.0; var i = 0.0; var got = 0.0;
+    loop {
+      if (i >= u.maxSteps) { break; }
+      let d = sdBottleLocal(ro + rd * t);
+      if (d < 0.00010) { got = 1.0; break; }
+      t = t + max(d * 0.85, 0.00006);
+      if (t > FAR) { break; }
+      i = i + 1.0;
+    }
+    col = vec3f(0.90, 0.90, 0.91);
+    if (got > 0.5) {
+      let q = ro + rd * t;
+      let e = vec2f(1.0, -1.0) * 0.00018;
+      let n = normalize(e.xyy * sdBottleLocal(q + e.xyy) + e.yyx * sdBottleLocal(q + e.yyx)
+                      + e.yxy * sdBottleLocal(q + e.yxy) + e.xxx * sdBottleLocal(q + e.xxx));
+      let l = clamp(dot(n, normalize(vec3f(-0.35, 0.45, 0.82))), 0.0, 1.0);
+      col = vec3f(0.07, 0.20, 0.09) * (0.22 + 1.0 * l) + vec3f(1.0) * pow(l, 42.0) * 0.75;
+    }
+  } else if (v > 5.5) {
+    // red = this pixel's path underwent total internal reflection
+    col = mix(col * 0.25, vec3f(1.0, 0.1, 0.05), clamp(tir, 0.0, 1.0));
+  } else if (v > 3.5 && v < 5.5) {
+    // isolate one field: 4 = liquid only, 5 = glass only
+    var t = 0.0; var i = 0.0; var got = 0.0;
+    loop {
+      if (i >= u.maxSteps) { break; }
+      let q = ro + rd * t;
+      var d = liquidDist(q);
+      if (v > 4.5) { d = sdTower(q); }
+      if (d < 0.00015) { got = 1.0; break; }
+      t = t + max(d * 0.9, 0.00008);
+      if (t > FAR) { break; }
+      i = i + 1.0;
+    }
+    col = vec3f(0.025);
+    if (got > 0.5) {
+      let q = ro + rd * t;
+      let e = vec2f(1.0, -1.0) * 0.0003;
+      var n: vec3f;
+      if (v > 4.5) {
+        n = normalize(e.xyy * sdTower(q + e.xyy) + e.yyx * sdTower(q + e.yyx)
+                    + e.yxy * sdTower(q + e.yxy) + e.xxx * sdTower(q + e.xxx));
+      } else {
+        n = normalize(e.xyy * liquidDist(q + e.xyy) + e.yyx * liquidDist(q + e.yyx)
+                    + e.yxy * liquidDist(q + e.yxy) + e.xxx * liquidDist(q + e.xxx));
+      }
+      var base = vec3f(0.95, 0.74, 0.30);
+      if (v > 4.5) { base = vec3f(0.55, 0.72, 0.95); }
+      col = base * (0.15 + 0.85 * clamp(dot(n, lightDir()), 0.0, 1.0));
+    }
+  } else if (v > 2.5 && v < 3.5) {
+    let hh = march(ro, rd);
+    col = vec3f(0.02);
+    if (hh.hit > 0.5) {
+      let q = ro + rd * hh.t;
+      let m = mediumAt(q + rd * SURF_EPS);
+      if (m == 1) { col = vec3f(0.25, 0.55, 0.95); }
+      if (m == 2) { col = vec3f(0.95, 0.72, 0.26); }
+      if (m == 3) { col = vec3f(0.15); }
+    }
+  }
+
+  col = pow(max(col, vec3f(0.0)), vec3f(0.4545));
+  return vec4f(col, 1.0);
+}
+</script>
+
+<!-- ───────────────────────── JS ───────────────────────── -->
+<script type="module">
+const Q  = new URLSearchParams(location.search);
+const qf = (k, d) => { const v = parseFloat(Q.get(k)); return Number.isFinite(v) ? v : d; };
+
+const VIEWS = { beauty: 0, steps: 1, normals: 2, medium: 3, liquid: 4, glass: 5, tir: 6, bottle: 7, puddle: 8 };
+const cfg = {
+  t:        Q.has('t') ? qf('t', 0) : null,
+  w:        qf('w', 0),
+  h:        qf('h', 0),
+  view:     VIEWS[Q.get('view')] ?? 0,
+  still:    Q.get('still') === '1',
+  selftest: Q.get('selftest') === '1',
+  steps:    qf('steps', 160),
+  npart:    qf('npart', 65536),
+  spawnMod: qf('spawnmod', 1600),
+  pvol:     qf('pvol', 2e-8),
+  warm:     qf('warm', 400),
+  single:   Q.get('tower') === '0',
+  noliq:    Q.get('liquid') === '0',
+  cam:      Q.get('cam') || 'orbit',
+  bub:      Q.get('bubbles') !== '0',
+  expo:     qf('expo', 1.45),
+  wav:      Q.get('waves') !== '0',
+  pfield:   Q.get('parts') !== '0',
+  bounces:  qf('bounces', 10),
+  refl:     qf('refl', 1.0),
+  envg:     Q.get('gridenv') === '1',
+  fillQ:    Q.has('fill') ? qf('fill', 80) : null,
+  camQ:     ['angle','dist','camY','tgtY','lightAz','lightEl']
+              .filter(k => Q.has(k.toLowerCase()) || Q.has(k))
+              .map(k => [k, qf(Q.has(k) ? k : k.toLowerCase(), 0)]),
+  nphoton:  qf('nphoton', 65536),
+  cgain:    qf('cgain', 0.05),
+  paused:   Q.get('pause') === '1',
+};
+
+const FINE = 320, COARSE = 32, NG = 14, WN = 32, CN = 768, PN = 384, PCN = 48;
+const FINE_N = FINE ** 3, COARSE_N = COARSE ** 3;
+const JFA_STRIDES = [16, 8, 4, 2, 1];
+
+const errEl = document.getElementById('err');
+const hudEl = document.getElementById('hud');
+const errors = [];
+function fail(where, e) {
+  const msg = '[' + where + '] ' + (e && e.message ? e.message : e);
+  errors.push(msg);
+  errEl.style.display = 'block';
+  errEl.textContent = errors.join('\n\n');
+  console.error(msg);
+}
+
+const probe = {
+  ok: false, adapter: null, features: [], errors,
+  frameMs: 0, fps: 0, gpuMs: {}, frames: 0, time: 0, live: 0, selftest: null,
+};
+window.__probe = () => JSON.parse(JSON.stringify(probe));
+
+(async function main() {
+  const canvas = document.getElementById('c');
+  if (!navigator.gpu) { fail('init', 'navigator.gpu missing — WebGPU unavailable'); return; }
+  const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+  if (!adapter) { fail('init', 'requestAdapter returned null'); return; }
+
+  const info = adapter.info ?? {};
+  probe.adapter = { vendor: info.vendor, architecture: info.architecture };
+  const hasTS = adapter.features.has('timestamp-query');
+  probe.features = [...adapter.features].filter(f =>
+    ['timestamp-query', 'shader-f16', 'subgroups', 'float32-filterable'].includes(f));
+
+  // default fragment-stage storage-buffer limit is 8; we bind 9
+  // 320^3 / 512 = 64000 workgroups, just inside the per-dimension cap; 256-wide would be
+  // workgroups instead - which itself needs raising from the default 256.
+  const want = { maxStorageBuffersPerShaderStage: 16, maxStorageBuffersInFragmentStage: 16,
+                 maxComputeWorkgroupSizeX: 512, maxComputeInvocationsPerWorkgroup: 512 };
+  const lim = {};
+  for (const k in want) if (adapter.limits[k] !== undefined) lim[k] = Math.min(want[k], adapter.limits[k]);
+  const device = await adapter.requestDevice({
+    requiredFeatures: hasTS ? ['timestamp-query'] : [],
+    requiredLimits: lim,
+  });
+  device.addEventListener('uncapturederror', e => fail('gpu', e.error.message));
+  device.lost.then(i => { if (i.reason !== 'destroyed') fail('device-lost', i.message); });
+
+  const ctx = canvas.getContext('webgpu');
+  const format = navigator.gpu.getPreferredCanvasFormat();
+  ctx.configure({ device, format, alphaMode: 'opaque' });
+
+  // ── shader ──
+  const code = document.getElementById('wgsl-main').textContent;
+  device.pushErrorScope('validation');
+  const module = device.createShaderModule({ code });
+  for (const m of (await module.getCompilationInfo()).messages) {
+    if (m.type === 'error') fail('wgsl', 'line ' + m.lineNum + ':' + m.linePos + ' ' + m.message);
+  }
+
+  // ── layouts ──
+  const VIS = GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT;
+  const bgl0 = device.createBindGroupLayout({ entries: [
+    { binding: 0, visibility: VIS, buffer: { type: 'uniform' } },
+    { binding: 1, visibility: VIS, buffer: { type: 'storage' } },
+    { binding: 2, visibility: VIS, buffer: { type: 'storage' } },
+    { binding: 3, visibility: VIS, buffer: { type: 'storage' } },
+    { binding: 4, visibility: VIS, buffer: { type: 'storage' } },
+    { binding: 5, visibility: VIS, buffer: { type: 'storage' } },
+    { binding: 6, visibility: VIS, buffer: { type: 'storage' } },
+    { binding: 7, visibility: VIS, buffer: { type: 'storage' } },
+    { binding: 8, visibility: VIS, buffer: { type: 'storage' } },
+    { binding: 9, visibility: VIS, buffer: { type: 'storage' } },
+    { binding: 10, visibility: VIS, buffer: { type: 'storage' } },
+    { binding: 11, visibility: VIS, buffer: { type: 'storage' } },
+    { binding: 12, visibility: VIS, buffer: { type: 'storage' } },
+    { binding: 13, visibility: VIS, buffer: { type: 'storage' } },
+  ]});
+  const bgl1 = device.createBindGroupLayout({ entries: [
+    { binding: 0, visibility: VIS, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 } },
+  ]});
+  const layout = device.createPipelineLayout({ bindGroupLayouts: [bgl0, bgl1] });
+
+  // ── buffers ──
+  const S = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
+  const ubo     = device.createBuffer({ size: 208, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const SUBSLOT = JFA_STRIDES.length;        // sub-step indices live after the JFA strides
+  const jbo     = device.createBuffer({ size: 256 * (JFA_STRIDES.length + 16), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const partBuf = device.createBuffer({ size: cfg.npart * 32, usage: S });
+  const fineBuf = device.createBuffer({ size: FINE_N * 4, usage: S });
+  const fineF   = device.createBuffer({ size: FINE_N * 4, usage: S });
+  const coarse  = device.createBuffer({ size: COARSE_N * 16, usage: S });
+  const glassB  = device.createBuffer({ size: NG * 16, usage: S });
+  const gvol    = device.createBuffer({ size: NG * 2 * 4, usage: S });
+  const waveB   = device.createBuffer({ size: NG * WN * WN * 16, usage: S });
+  const wimp    = device.createBuffer({ size: NG * WN * WN * 2 * 4, usage: S });
+  const caust   = device.createBuffer({ size: CN * CN * 3 * 4, usage: S });
+  const caustF  = device.createBuffer({ size: CN * CN * 3 * 4, usage: S });
+  const pud     = device.createBuffer({ size: PN * PN * 4, usage: S });
+  const pudA    = device.createBuffer({ size: PN * PN * 4, usage: S });
+  device.queue.writeBuffer(pud,  0, new Float32Array(PN * PN));
+  device.queue.writeBuffer(pudA, 0, new Uint32Array(PN * PN));
+  const pudC    = device.createBuffer({ size: PCN * PCN * 16, usage: S });
+  device.queue.writeBuffer(pudC, 0, new Float32Array(PCN * PCN * 4));
+  const glassRd = device.createBuffer({ size: NG * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const pudRd = device.createBuffer({ size: PCN * PCN * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const PSAMP = Math.min(cfg.npart, 16384);
+  const partRd = device.createBuffer({ size: PSAMP * 32, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  device.queue.writeBuffer(glassB, 0, new Float32Array(NG * 4));
+  device.queue.writeBuffer(gvol,   0, new Uint32Array(NG * 2));
+  device.queue.writeBuffer(waveB,  0, new Float32Array(NG * WN * WN * 4));
+  device.queue.writeBuffer(wimp,   0, new Int32Array(NG * WN * WN * 2));
+
+  // particles start dead and stagger in
+  {
+    const init = new Float32Array(cfg.npart * 8);
+    for (let i = 0; i < cfg.npart; i++) init[i * 8 + 3] = -1;   // life
+    device.queue.writeBuffer(partBuf, 0, init);
+  }
+  for (let i = 0; i < JFA_STRIDES.length; i++) {
+    device.queue.writeBuffer(jbo, i * 256, new Float32Array([JFA_STRIDES[i], 0, 0, 0]));
+  }
+  for (let i = 0; i < 16; i++) {
+    device.queue.writeBuffer(jbo, (SUBSLOT + i) * 256, new Float32Array([i, 0, 0, 0]));
+  }
+
+  const bg0 = device.createBindGroup({ layout: bgl0, entries: [
+    { binding: 0, resource: { buffer: ubo } },
+    { binding: 1, resource: { buffer: partBuf } },
+    { binding: 2, resource: { buffer: fineBuf } },
+    { binding: 3, resource: { buffer: fineF } },
+    { binding: 4, resource: { buffer: coarse } },
+    { binding: 5, resource: { buffer: glassB } },
+    { binding: 6, resource: { buffer: gvol } },
+    { binding: 7, resource: { buffer: waveB } },
+    { binding: 8, resource: { buffer: wimp } },
+    { binding: 9, resource: { buffer: caust } },
+    { binding: 10, resource: { buffer: caustF } },
+    { binding: 11, resource: { buffer: pud } },
+    { binding: 12, resource: { buffer: pudA } },
+    { binding: 13, resource: { buffer: pudC } },
+  ]});
+  const bg1 = device.createBindGroup({ layout: bgl1, entries: [
+    { binding: 0, resource: { buffer: jbo, size: 16 } },
+  ]});
+
+  const comp = n => device.createComputePipeline({ layout, compute: { module, entryPoint: n } });
+  const P = {
+    sim:     comp('simParticles'),
+    clearF:  comp('clearFine'),
+    clearC:  comp('clearCoarse'),
+    scatter: comp('scatterFine'),
+    seed:    comp('seedCoarse'),
+    jfa:     comp('jfaCoarse'),
+    resolve: comp('resolveFine'),
+    glass:   comp('glassUpdate'),
+    wave:    comp('waveUpdate'),
+    decay:   comp('causticDecay'),
+    photon:  comp('photons'),
+    cblur:   comp('causticBlur'),
+    puddle:  comp('puddleUpdate'),
+    pudC:    comp('puddleCoarse'),
+    pudJ:    comp('puddleJFA'),
+  };
+  const render = device.createRenderPipeline({
+    layout,
+    vertex:   { module, entryPoint: 'vs' },
+    fragment: { module, entryPoint: 'fs', targets: [{ format }] },
+    primitive:{ topology: 'triangle-list' },
+  });
+  const verr = await device.popErrorScope();
+  if (verr) fail('pipeline', verr.message);
+
+  // ── timing: 3 labelled pass groups ──
+  const LABELS = ['sim', 'build', 'photon', 'render'];
+  let qset = null, qres = null, qrd = null, qbusy = false;
+  if (hasTS) {
+    qset = device.createQuerySet({ type: 'timestamp', count: LABELS.length * 2 });
+    qres = device.createBuffer({ size: LABELS.length * 16, usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC });
+    qrd  = device.createBuffer({ size: LABELS.length * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  }
+  const ts = i => hasTS ? { querySet: qset, beginningOfPassWriteIndex: i * 2, endOfPassWriteIndex: i * 2 + 1 } : undefined;
+
+  function resize() {
+    canvas.width  = Math.max(1, Math.floor(cfg.w || canvas.clientWidth));
+    canvas.height = Math.max(1, Math.floor(cfg.h || canvas.clientHeight));
+    // The CSS stretches the canvas to the viewport, so an explicit w/h of a different
+    // aspect silently distorts the picture. Letterbox rather than lie about proportions.
+    if (cfg.w && cfg.h) {
+      const k = Math.min(innerWidth / cfg.w, innerHeight / cfg.h);
+      canvas.style.width  = (cfg.w * k) + 'px';
+      canvas.style.height = (cfg.h * k) + 'px';
+      canvas.style.margin = ((innerHeight - cfg.h * k) / 2) + 'px auto 0';
+    }
+  }
+  resize();
+  if (!cfg.w && !cfg.h) addEventListener('resize', resize);
+
+  const SIM_DT = 1 / 60;
+  let simAcc = 0;
+  const f32 = new Float32Array(48);
+  const t0 = performance.now();
+  let last = t0, acc = 0, accN = 0, frameNo = 0, simStep = 0, ffSteps = 0;
+  const pudBound = [0, 0, 0.02];   // wet-region bounding circle, from the coarse readback
+
+  function writeUniforms(time) {
+    let ang;
+    if (ui.spin) { ang = time * 0.25; setUI('angle', (ang * 180 / Math.PI) % 360); }
+    else         { ang = ui.angle * Math.PI / 180; }
+    const cam = [Math.sin(ang) * ui.dist, ui.camY, Math.cos(ang) * ui.dist];
+    const tgt = [0, ui.tgtY, 0];
+    f32[0] = canvas.width; f32[1] = canvas.height; f32[2] = time; f32[3] = ui.view;
+    f32[4] = cam[0]; f32[5] = cam[1]; f32[6] = cam[2];
+    f32[7] = 1.6;
+    f32[8] = tgt[0]; f32[9] = tgt[1]; f32[10] = tgt[2]; f32[11] = cfg.steps;
+    // a real pour is not perfectly aimed: let the bottle wander on a slow Lissajous
+    const K = ui.wanderSpd;
+    const wob = tt => [Math.sin(tt * 0.37 * K) * 0.62 + Math.sin(tt * 0.91 * K + 1.3) * 0.38,
+                       Math.cos(tt * 0.29 * K + 2.1) * 0.62 + Math.sin(tt * 0.73 * K + 0.7) * 0.38];
+    const W = ui.pourWander * 0.001;
+    const w0 = wob(time), w1 = wob(time + 0.02);
+    f32[12] = w0[0] * W; f32[13] = 0.555; f32[14] = w0[1] * W;
+    f32[37] = (w1[0] - w0[0]) * W / 0.02;      // bottle drift velocity
+    f32[38] = (w1[1] - w0[1]) * W / 0.02;
+    f32[15] = SIM_DT;                           // fixed step    // emitPos (inside domain), dt
+    f32[16] = simStep; f32[17] = Math.max(1, Math.round((cfg.npart / 6) / ui.pourRate)); f32[18] = cfg.npart; f32[19] = ui.dropVol * 1e-9;
+    f32[20] = cfg.nphoton; f32[21] = ui.cgain;
+    f32[22] = cfg.single ? 1 : 0; f32[23] = cfg.noliq ? 1 : 0;
+    f32[24] = ui.bubbles ? 1 : 0; f32[25] = ui.expo; f32[26] = ui.waves ? 1 : 0; f32[27] = ui.drops ? 1 : 0; f32[28] = ui.bounces; f32[29] = ui.reflect ? 1 : 0; f32[30] = ui.autofill ? -1 : ui.fill / 100; f32[31] = ui.gridEnv ? 1 : 0; f32[32] = ui.rtrace ? 1 : 0;
+    f32[33] = ui.lightAz * Math.PI / 180; f32[34] = ui.lightEl * Math.PI / 180;
+    f32[35] = ui.dropRad * 0.001; f32[36] = ui.foam; f32[39] = ui.shutter * SIM_DT;
+    f32[40] = ui.botTilt * Math.PI / 180; f32[41] = ui.botAz * Math.PI / 180;
+    f32[42] = ui.bottle ? 1 : 0;
+    f32[43] = pudBound[0]; f32[44] = pudBound[1]; f32[45] = pudBound[2]; f32[46] = ui.puddle ? 1 : 0;
+    device.queue.writeBuffer(ubo, 0, f32);
+  }
+
+  async function readTimestamps() {
+    if (!hasTS || qbusy || qrd.mapState !== 'unmapped') return;
+    qbusy = true;
+    try {
+      await qrd.mapAsync(GPUMapMode.READ);
+      const b = new BigInt64Array(qrd.getMappedRange().slice(0));
+      qrd.unmap();
+      let tot = 0;
+      LABELS.forEach((l, i) => {
+        const ms = Number(b[i * 2 + 1] - b[i * 2]) / 1e6;
+        probe.gpuMs[l] = ms; tot += ms;
+      });
+      probe.gpuMs.total = tot;
+    } catch (e) {}
+    qbusy = false;
+  }
+
+  let dbusy = false;
+  async function readPuddle() {
+    if (dbusy || pudRd.mapState !== 'unmapped') return;
+    dbusy = true;
+    try {
+      await pudRd.mapAsync(GPUMapMode.READ);
+      const a = new Float32Array(pudRd.getMappedRange().slice(0));
+      pudRd.unmap();
+      let mx = 0, wet = 0, x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
+      const PEXT = 0.55, CELL = 2 * PEXT / PCN;
+      for (let k = 0; k < PCN * PCN; k++) {
+        const h = a[k * 4];
+        if (h > mx) mx = h;
+        if (h > 0.0004) {
+          wet++;
+          const bx = (k % PCN) * CELL - PEXT, bz = Math.floor(k / PCN) * CELL - PEXT;
+          if (bx < x0) x0 = bx; if (bx + CELL > x1) x1 = bx + CELL;
+          if (bz < z0) z0 = bz; if (bz + CELL > z1) z1 = bz + CELL;
+        }
+      }
+      if (wet) {
+        pudBound[0] = (x0 + x1) / 2; pudBound[1] = (z0 + z1) / 2;
+        pudBound[2] = 0.5 * Math.hypot(x1 - x0, z1 - z0) + CELL;
+      } else { pudBound[0] = 0; pudBound[1] = 0; pudBound[2] = 0; }
+      probe.puddle = { maxMM: +(mx * 1000).toFixed(2), wetBlocks: wet, ofBlocks: PCN * PCN,
+                       boundR: +pudBound[2].toFixed(3) };
+    } catch (e) {}
+    dbusy = false;
+  }
+
+  let pbusy = false;
+  async function readParts() {
+    if (pbusy || partRd.mapState !== 'unmapped') return;
+    pbusy = true;
+    try {
+      await partRd.mapAsync(GPUMapMode.READ);
+      const a = new Float32Array(partRd.getMappedRange().slice(0));
+      partRd.unmap();
+      const POOL = Math.max(Math.floor(cfg.npart / 6), 1);
+      let alive = 0, aliveBottle = 0, ymin = 1e9, ymax = -1e9;
+      for (let k = 0; k < PSAMP; k++) {
+        const life = a[k * 8 + 3];
+        if (life > 0) {
+          alive++;
+          if (k < POOL) { aliveBottle++; const y = a[k * 8 + 1]; if (y < ymin) ymin = y; if (y > ymax) ymax = y; }
+        }
+      }
+      probe.parts = { sampled: PSAMP, alive, aliveBottle, pool: POOL,
+                      bottleY: aliveBottle ? [+ymin.toFixed(3), +ymax.toFixed(3)] : null };
+    } catch (e) {}
+    pbusy = false;
+  }
+
+  let gbusy = false;
+  async function readLevels() {
+    if (gbusy || glassRd.mapState !== 'unmapped') return;
+    gbusy = true;
+    try {
+      await glassRd.mapAsync(GPUMapMode.READ);
+      const a = new Float32Array(glassRd.getMappedRange().slice(0));
+      glassRd.unmap();
+      probe.levels = Array.from({length: NG}, (_, i) => +(a[i*4]*1000).toFixed(2));  // mm
+      probe.filled = probe.levels.filter(v => v > 0.1).length;
+    } catch (e) {}
+    gbusy = false;
+  }
+
+  const WG = (n, s) => Math.ceil(n / s);
+
+  function frame() {
+    const now = performance.now();
+    // One sim step per rendered frame, never more. Catching up after a hitch would make
+    // the fluid jump, and because the emitter's spawn cadence is keyed to the frame, extra
+    // substeps advanced the drops without emitting new ones - the stream visibly thinned.
+    // A slow frame therefore runs slightly slow rather than skipping ahead.
+    simAcc += Math.min((now - last) / 1000, 0.25) * ui.simSpeed;
+    // simSpeed deliberately runs more steps; the cap only stops a HITCH from being caught
+    // up, which would make the fluid jump. Leftover time is discarded, not banked.
+    const maxSub = Math.min(16, Math.max(1, Math.ceil(ui.simSpeed)));
+    const simSteps = Math.min(maxSub, Math.floor(simAcc / SIM_DT)) + ffSteps;
+    simAcc = Math.min(simAcc - Math.min(maxSub, Math.floor(simAcc / SIM_DT)) * SIM_DT, SIM_DT);
+    ffSteps = 0;
+    const time = cfg.t !== null ? cfg.t : (now - t0) / 1000;
+    probe.time = time;
+    writeUniforms(time);
+
+    const enc = device.createCommandEncoder();
+
+    // 1 — particles
+    let cp = enc.beginComputePass({ timestampWrites: ts(0) });
+    cp.setBindGroup(0, bg0); cp.setBindGroup(1, bg1, [0]);
+    // Fixed-step accumulator: the sim must advance at the same rate on a 60 Hz compo
+    // machine as on a 165 Hz monitor. Driving dt off the frame rate made it 2.75x fast here.
+    cp.setPipeline(P.sim);
+    for (let k = 0; k < simSteps; k++) {
+      cp.setBindGroup(1, bg1, [(SUBSLOT + (k % 16)) * 256]);
+      cp.dispatchWorkgroups(WG(cfg.npart, 64));
+    }
+    cp.setBindGroup(1, bg1, [0]);
+    cp.end();
+
+    // 2 — build the distance field (ordered dispatches share one pass)
+    cp = enc.beginComputePass({ timestampWrites: ts(1) });
+    cp.setBindGroup(0, bg0); cp.setBindGroup(1, bg1, [0]);
+    cp.setPipeline(P.puddle);  cp.dispatchWorkgroups(WG(PN * PN, 256));
+    cp.setPipeline(P.pudC);    cp.dispatchWorkgroups(WG(PCN * PCN, 64));
+    cp.setPipeline(P.pudJ);
+    for (let k = 0; k < JFA_STRIDES.length; k++) {
+      cp.setBindGroup(1, bg1, [k * 256]);
+      cp.dispatchWorkgroups(WG(PCN * PCN, 64));
+    }
+    cp.setBindGroup(1, bg1, [0]);
+    cp.setPipeline(P.glass);   cp.dispatchWorkgroups(1);
+    cp.setPipeline(P.wave);
+    for (let k = 0; k < 3; k++) cp.dispatchWorkgroups(WG(NG * WN * WN, 64));
+    cp.setPipeline(P.clearF);  cp.dispatchWorkgroups(WG(FINE_N, 512));
+    cp.setPipeline(P.clearC);  cp.dispatchWorkgroups(WG(COARSE_N, 64));
+    cp.setPipeline(P.scatter); cp.dispatchWorkgroups(WG(cfg.npart, 64));
+    cp.setPipeline(P.seed);    cp.dispatchWorkgroups(WG(cfg.npart, 64));
+    cp.setPipeline(P.jfa);
+    for (let i = 0; i < JFA_STRIDES.length; i++) {
+      cp.setBindGroup(1, bg1, [i * 256]);
+      cp.dispatchWorkgroups(WG(COARSE_N, 64));
+    }
+    cp.setBindGroup(1, bg1, [0]);
+    cp.setPipeline(P.resolve); cp.dispatchWorkgroups(WG(FINE_N, 512));
+    cp.end();
+
+    // 2b — caustics: fade the photon map, then shoot this frame's photons
+    cp = enc.beginComputePass({ timestampWrites: ts(2) });
+    cp.setBindGroup(0, bg0); cp.setBindGroup(1, bg1, [0]);
+    cp.setPipeline(P.decay);  cp.dispatchWorkgroups(WG(CN * CN * 3, 256));
+    cp.setPipeline(P.photon); cp.dispatchWorkgroups(WG(cfg.nphoton, 64));
+    cp.setPipeline(P.cblur);  cp.dispatchWorkgroups(WG(CN * CN, 256));
+    cp.end();
+
+    // 3 — render
+    const desc = {
+      colorAttachments: [{
+        view: ctx.getCurrentTexture().createView(),
+        clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store',
+      }],
+    };
+    if (hasTS) desc.timestampWrites = ts(3);
+    const rp = enc.beginRenderPass(desc);
+    rp.setPipeline(render); rp.setBindGroup(0, bg0); rp.setBindGroup(1, bg1, [0]);
+    rp.draw(3); rp.end();
+
+    if (hasTS && !qbusy && qrd.mapState === 'unmapped') {
+      enc.resolveQuerySet(qset, 0, LABELS.length * 2, qres, 0);
+      enc.copyBufferToBuffer(qres, 0, qrd, 0, LABELS.length * 16);
+    }
+    if (gbusy === false && glassRd.mapState === 'unmapped') enc.copyBufferToBuffer(glassB, 0, glassRd, 0, NG * 16);
+    if (pbusy === false && partRd.mapState === 'unmapped') enc.copyBufferToBuffer(partBuf, 0, partRd, 0, PSAMP * 32);
+    if (dbusy === false && pudRd.mapState === 'unmapped') enc.copyBufferToBuffer(pudC, 0, pudRd, 0, PCN * PCN * 16);
+    device.queue.submit([enc.finish()]);
+    readTimestamps();
+    readLevels();
+    readParts();
+    readPuddle();
+
+    frameNo++; simStep += simSteps; probe.frames = frameNo; probe.ok = true;
+    const dt = now - last; last = now;
+    acc += dt; accN++;
+    if (acc > 400) { probe.frameMs = acc / accN; probe.fps = 1000 / probe.frameMs; acc = 0; accN = 0; updateHud(); }
+    if (cfg.selftest && !probe.selftest && frameNo > 10 && probe.gpuMs.total !== undefined) runSelftest();
+    if (cfg.paused) { updateHud(); return; }
+    if (!cfg.still || frameNo < cfg.warm) requestAnimationFrame(frame); else updateHud();
+  }
+
+  function frameOnce() { const was = cfg.paused; cfg.paused = false; frame(); cfg.paused = was; }
+
+  function updateHud() {
+    const g = probe.gpuMs;
+    const f = k => g[k] !== undefined ? g[k].toFixed(2) : '—';
+    hudEl.textContent =
+      canvas.width + 'x' + canvas.height + '  view=' + (Q.get('view') ?? 'beauty') +
+      '  part=' + cfg.npart + '\n' +
+      'cpu   ' + probe.frameMs.toFixed(2) + ' ms   ' + probe.fps.toFixed(0) + ' fps\n' +
+      'sim   ' + f('sim') + ' ms\n' +
+      'build ' + f('build') + ' ms\n' +
+      'rend  ' + f('render') + ' ms\n' +
+      'gpu   ' + f('total') + ' ms\n' +
+      't     ' + probe.time.toFixed(2) + ' s' + (cfg.t !== null ? ' (fixed)' : '') + '\n' +
+      (probe.adapter?.vendor ?? '?') + ' / ' + (probe.adapter?.architecture ?? '?') +
+      (errors.length ? '\nERRORS ' + errors.length : '');
+  }
+
+  // ── debug panel ──
+  const SPEC = [
+    ['spin',     'check', true],
+    ['angle',    'range', 0,    0,    360,  0.5,  1],
+    ['dist',     'range', 0.80, 0.10, 1.80, 0.01, 2],
+    ['camY',     'range', 0.44, 0.01, 1.10, 0.005,2],
+    ['tgtY',     'range', 0.26, 0.00, 0.62, 0.005,2],
+    ['lightAz',  'range', -45,  -180, 180,  1,    0],
+    ['lightEl',  'range', 45.6,   5,  85,  0.5,  1],
+    ['gridEnv',  'check', false],
+    ['rtrace',   'check', true],
+    ['drops',    'check', true],
+    ['bubbles',  'check', true],
+    ['waves',    'check', true],
+    ['puddle',   'check', true],
+    ['reflect',  'check', true],
+    ['autofill', 'check', true],
+    ['fill',     'range', 80,   0,    100,  1,    0],
+    ['pourRate', 'range', 120,  1,    250,  1,    0],
+    ['dropVol',  'range', 6,    1,    60,   1,    0],
+    ['dropRad',  'range', 2.0,  0.4,  6.0,  0.1,  1],
+    ['foam',     'range', 1.0,  0.0,  3.0,  0.05, 2],
+    ['bottle',   'check', true],
+    ['botTilt',  'range', 118,  0,    170,  1,    0],
+    ['botAz',    'range', 205, -180,  180,  1,    0],
+    ['pourWander','range', 9,   0,    30,   0.5,  1],
+    ['wanderSpd','range', 4.0,  0.2,  12,   0.1,  1],
+    ['shutter',  'range', 0.5,  0.0,  2.5,  0.05, 2],
+    ['bounces',  'range', 10,   2,    28,   1,    0],
+    ['simSpeed', 'range', 1,    0,    16,   0.5,  1],
+    ['expo',     'range', 1.45, 0.20, 4.00, 0.05, 2],
+    ['cgain',    'range', 0.05, 0.00, 0.30, 0.005,3],
+  ];
+  const PRESET = {
+    tower: { dist: 0.800, camY: 0.440, tgtY: 0.260, angle: 39 },
+    bottl: { dist: 0.520, camY: 0.175, tgtY: 0.175, angle: 0 },     // solo bottle, use view=bottle
+    pour:  { dist: 0.170, camY: 0.565, tgtY: 0.495, angle: 39 },   // top glass + incoming stream
+    macro: { dist: 0.180, camY: 0.520, tgtY: 0.480, angle: 39 },   // top glass close-up
+    tier2: { dist: 0.260, camY: 0.400, tgtY: 0.320, angle: 39 },   // middle tier
+    top:   { dist: 0.420, camY: 0.460, tgtY: 0.010, angle: 32 },   // table / caustics
+  };
+  const TIPS = {
+    view: 'Which pass to visualise. tir = red where the ray hit total internal reflection. beauty = final image. steps = raymarch cost heatmap, blue cheap and red expensive. normals = surface normals of the first hit. medium = what the first hit is, blue glass / gold champagne / grey table. liquid = the liquid field alone with the glass hidden. glass = the glass alone with the liquid hidden.',
+    cams: 'Camera presets. tower = the whole tower. macro = close-up of the top glass. tier2 = the middle tier. top = looking down at the table for the caustics.',
+    spin: 'Auto-rotate the camera. Uncheck to drive the angle slider by hand.',
+    angle: 'Camera orbit angle around the tower, in degrees. Only used when spin is off.',
+    dist: 'Camera distance from the tower axis, in metres. Smaller is closer.',
+    camY: 'Camera height above the table, in metres. The tower is 0.51 m tall.',
+    tgtY: 'Height the camera aims at, in metres. 0.26 is mid-tower, 0.48 is the top glass.',
+    lightAz: 'Key light azimuth in degrees: swings the light around the tower. Moves the specular, the shadows and the caustics together.',
+    lightEl: 'Key light elevation in degrees above the horizon. Low is raking and dramatic, high is overhead.',
+    gridEnv: 'Swap the environment for a lat-long UV test grid: green horizon, magenta poles, orange dot at the key light. Shows which direction a reflection or refraction samples.',
+    rtrace: 'Trace real reflection rays instead of just sampling the environment. Off is cheaper but paints flat bright discs on near-grazing surfaces.',
+    drops: 'Render the particle field: pour stream, splashes and droplets. Off leaves only the bulk liquid, but the simulation keeps running so the glasses still fill.',
+    bubbles: 'Rising CO2 bubbles, carved out of the liquid as real geometry, so light refracts through every one.',
+    puddle: 'The spreading pool of spilled champagne on the table. Off removes it from the scene entirely.',
+    waves: 'Surface ripples from the per-glass wave equation. Off gives a perfectly flat liquid surface.',
+    reflect: 'The Fresnel reflection lobe at every interface. Off removes all reflections. Diagnostic only, not physical.',
+    autofill: 'Let the simulation decide the liquid levels. Uncheck to force every glass to the fill slider instead.',
+    fill: 'Forced liquid level, as a percent of the spill level. Only used when autofill is off.',
+    pourRate: 'Drops leaving the bottle per frame. Raise it for a dense continuous stream, lower it for separate falling drops.',
+    wanderSpd: 'How quickly the bottle drifts around. Higher makes the pour restless and the stream whip about; lower is a slow lazy sway.',
+    bottle: 'Show the magnum. It is an analytic shape only - there is no fluid simulated inside it yet.',
+    botTilt: 'Tilt from upright, in degrees. 0 is standing up; pouring needs to go past horizontal, so 110-130 is the useful range. The mouth stays at the pour point and the body swings around it.',
+    botAz: 'Which direction the magnum is held from, in degrees.',
+    pourWander: 'How far the bottle drifts while pouring, in mm. A real pour is not perfectly aimed; the stream inherits the drift so it trails rather than falling dead straight. 0 is a perfectly steady pour.',
+    shutter: 'Shutter length, in frames. Each drop is smeared into a streak along its own velocity, the way a camera records a moving liquid. 0 freezes every drop as a separate sphere; higher values turn fast spray into continuous ribbons.',
+    foam: 'Mousse. Foam is generated where drops land, then collapses over a few seconds, so it builds up under the pour and around the rim where spill comes in. 0 disables it.',
+    dropRad: 'Rendered radius of a droplet in mm. Below about 1.7 mm (the fine grid cell half-diagonal at 256 cubed) drops start falling between voxels, so a dense stream breaks up into scattered drops.',
+    dropVol: 'Volume of one drop in microlitres. Together with pourRate this sets how fast the glasses fill: mL/s = pourRate x dropVol x 60 / 1000.',
+    bounces: 'Maximum refraction/reflection interfaces per ray. Deep interior shots need 20+; the wide tower is fine around 8. Each extra bounce costs render time, and too few shatters the image into checkerboard shards where rays run out.',
+    simSpeed: 'Simulation speed multiplier. The fluid runs on a fixed 1/60 s step driven by real elapsed time, so refresh rate does not change its speed. At most one step per frame: a slow frame runs slightly slow rather than jumping to catch up. 0 freezes it while the camera keeps moving.',
+    expo: 'Exposure applied before tonemapping.',
+    cgain: 'Brightness of the photon caustic map on the table. It carries the direct light too, so 0 leaves the table lit by ambient only.',
+  };
+  const DIG = k => SPEC.find(x => x[0] === k)[6] ?? 2;
+  const ui = {}, uiEl = {};
+  const uiRoot = document.getElementById('ui');
+  {
+    const row = document.createElement('div'); row.className = 'row';
+    const lab = document.createElement('label'); lab.textContent = 'view';
+    const sel = document.createElement('select');
+    sel.style.flex = '1'; sel.style.minWidth = '0';
+    for (const k in VIEWS) {
+      const o = document.createElement('option');
+      o.value = VIEWS[k]; o.textContent = k; sel.append(o);
+    }
+    sel.value = cfg.view;
+    row.title = TIPS.view;
+    sel.oninput = () => { ui.view = parseFloat(sel.value); if (cfg.paused) requestAnimationFrame(frameOnce); };
+    row.append(lab, sel); uiRoot.append(row);
+  }
+  ui.view = cfg.view;
+  {
+    const bar = document.createElement('div'); bar.className = 'cams';
+    bar.title = TIPS.cams;
+    for (const name of ['tower', 'pour', 'macro', 'tier2', 'top', 'bottl']) {
+      const b = document.createElement('button');
+      b.textContent = name;
+      b.onclick = () => {
+        ui.spin = false; uiEl.spin.inp.checked = false;
+        for (const k in PRESET[name]) setUI(k, PRESET[name][k]);
+        if (cfg.paused) requestAnimationFrame(frameOnce);
+      };
+      bar.append(b);
+    }
+    uiRoot.append(bar);
+  }
+  for (const [k, kind, def, lo, hi, st] of SPEC) {
+    ui[k] = def;
+    const row = document.createElement('div'); row.className = 'row';
+    const lab = document.createElement('label'); lab.textContent = k;
+    const inp = document.createElement('input');
+    const out = document.createElement('span');
+    if (kind === 'check') { inp.type = 'checkbox'; inp.checked = def; }
+    else { inp.type = 'range'; inp.min = lo; inp.max = hi; inp.step = st; inp.value = def;
+           out.textContent = (+def).toFixed(DIG(k)); }
+    inp.oninput = () => {
+      ui[k] = (kind === 'check') ? inp.checked : parseFloat(inp.value);
+      if (kind !== 'check') out.textContent = (+ui[k]).toFixed(DIG(k));
+      if (cfg.paused) requestAnimationFrame(frameOnce);   // keep the view live while paused
+    };
+    row.title = TIPS[k] || '';
+    row.append(lab, inp, out); uiRoot.append(row);
+    uiEl[k] = { inp, out };
+  }
+  function setUI(k, v) {
+    ui[k] = v; uiEl[k].inp.value = v;
+    uiEl[k].out.textContent = (+v).toFixed(DIG(k));
+  }
+  if (PRESET[cfg.cam]) {
+    ui.spin = false; uiEl.spin.inp.checked = false;
+    for (const k in PRESET[cfg.cam]) setUI(k, PRESET[cfg.cam][k]);
+  }
+  setUI('bounces', cfg.bounces);
+  setUI('expo', cfg.expo);
+  setUI('cgain', cfg.cgain);
+  if (cfg.camQ.length) { ui.spin = false; uiEl.spin.inp.checked = false;
+    for (const [k, v] of cfg.camQ) setUI(k, v); }
+  if (cfg.fillQ !== null) { ui.autofill = false; uiEl.autofill.inp.checked = false; setUI('fill', cfg.fillQ); }
+  // seed the toggles from the URL params
+  for (const [k, v] of [['drops', cfg.pfield], ['bubbles', cfg.bub], ['gridEnv', cfg.envg],
+                        ['waves', cfg.wav], ['reflect', cfg.refl > 0.5],
+                        ['puddle', Q.get('puddle') !== '0']]) {
+    ui[k] = v; uiEl[k].inp.checked = v;
+  }
+  document.getElementById('restart').onclick = () => location.reload();
+  document.getElementById('ff').onclick = () => { ffSteps = 1200; if (cfg.paused) requestAnimationFrame(frameOnce); };
+
+  const btn = document.getElementById('pause');
+  function setPaused(v) {
+    const was = cfg.paused;
+    cfg.paused = v;
+    btn.textContent = v ? 'resume' : 'pause';
+    if (was && !v) requestAnimationFrame(frame);
+  }
+  btn.onclick = () => setPaused(!cfg.paused);
+  addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); setPaused(!cfg.paused); } });
+  window.__pause  = () => { setPaused(true);  return 'paused'; };
+  window.__resume = () => { setPaused(false); return 'running'; };
+  setPaused(cfg.paused);
+
+  if (!cfg.paused) requestAnimationFrame(frame);
+
+  // frame-count driven, not wall-clock: rAF pauses when the page isn't painting
+  function runSelftest() {
+    {
+      const r = {};
+      r.no_shader_errors = errors.filter(e => e.startsWith('[wgsl]')).length === 0;
+      r.no_gpu_errors    = errors.filter(e => e.startsWith('[gpu]')).length === 0;
+      r.rendered_frames  = probe.frames > 10;
+      r.timestamps       = hasTS && probe.gpuMs.render > 0 && probe.gpuMs.build > 0;
+      r.build_under_4ms  = (probe.gpuMs.build ?? 99) < 4;
+      r.frame_under_16ms = (probe.gpuMs.total ?? 99) < 16.6;
+      r.PASS = Object.values(r).every(Boolean);
+      probe.selftest = r;
+      console.log('SELFTEST ' + (r.PASS ? 'PASS' : 'FAIL') + ' ' + JSON.stringify(r));
+    }
+  }
+})().catch(e => fail('main', e));
+</script>
+</body>
+</html>
