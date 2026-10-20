@@ -1,7 +1,7 @@
 # comparade26 — champagne tower
 
 A realtime 3D fluid simulation of champagne filling a three-tier champagne tower, rendered
-entirely by SDF raymarching. Target: a **4096-byte PC intro** for **ComParade 2026**
+entirely by SDF raymarching. Target: an **8192-byte PC intro** for **ComParade 2026**
 (Emmering/Munich, 6–8 Nov 2026), packaged the INCENDIUM way — WebGPU + a tiny PowerShell
 dropper — not a native exe.
 
@@ -189,14 +189,28 @@ Next:
 3. Fluid inside the bottle (it is an empty shell today).
 4. Camera and timeline.
 5. Music — must be **human-composed**; the party bans prompt-based music.
-6. The 4096-byte squeeze: template long names to one letter, Brotli, then a search over
+6. The 8192-byte squeeze: template long names to one letter, Brotli, then a search over
    statement orderings scored by compressed size (INCENDIUM's packer, derived from Pakettic,
-   is MIT). Budget from INCENDIUM's measured numbers: a 324-byte dropper leaves ~3770 bytes,
-   which for them held ~24 KB of WGSL + 10 KB of JS + 4.9 KB of note data. NuSan's *Drifting
-   Shore* independently confirms ~22.6 KB of source fitting in 4096 bytes.
+   is MIT). A ~324-byte dropper leaves ~7870 bytes of payload.
 
-Open questions for the organisers: the PC 8K Intro Showdown's actual size limit, whether a
-browser/WebGPU entry is allowed, and the submission deadline.
+   Measured baseline — today's harness with comments and indentation stripped, Brotli q11:
+
+   | | raw | brotli |
+   |---|---|---|
+   | WGSL | 34.2 KB | 8 820 |
+   | JS | 29.6 KB | 8 726 |
+   | **both** | **63.8 KB** | **17 438** |
+
+   Stripping alone is a 3.7:1 ratio and lands ~2.2x over budget. The rest has to come from
+   deleting the debug harness — most of that JS, and a good share of the WGSL, is panel,
+   probe, selftest and nine isolation views — and from minification proper, where the
+   identifiers being long and descriptive works in our favour, since renaming feeds the
+   compressor as well as shrinking the source. INCENDIUM reached ~10:1 end-to-end on a
+   comparable 38.9 KB (24 KB WGSL + 10 KB JS + 4.9 KB of note data in ~3770 bytes), and
+   NuSan's *Drifting Shore* fit ~22.6 KB in 4096, so the ~5:1 that 8 KB asks for has room.
+
+Open questions for the organisers: whether a browser/WebGPU entry is allowed, and the
+submission deadline.
 
 Party rules: tools must be disclosed, generative-AI use must be **fully** disclosed, and
 entries that are mostly AI material with little human input are disqualified. Realtime/Wild

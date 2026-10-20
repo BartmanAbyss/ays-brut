@@ -126,6 +126,11 @@ between two `str.index` results will happily swallow everything in between.
 ## Ground rules
 
 - Performance budget is **16.6 ms** at 1920×1080. Currently over, on the tower shots.
+- Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
+  organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
+  stale. The dropper is ~324 bytes, leaving ~7870 for the payload. The harness as it stands
+  Brotlis to 17 438 bytes with comments stripped; the README roadmap has the breakdown and
+  where the rest has to come from.
 - Music must be composed by the user. The party bans prompt-based music, requires full
   disclosure of generative-AI use, and disqualifies entries that are mostly AI output. The
   NFO must carry the disclosure.
