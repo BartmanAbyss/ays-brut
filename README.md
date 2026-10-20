@@ -116,18 +116,28 @@ Domain: `(-0.31, -0.015, -0.31)`, 0.62 m cube.
 
 ## Performance
 
+**These numbers are at the wrong resolution** and the comparison below them was a mistake.
+They were taken at 1100×880 — the size of the debug pane — while the budget is 16.6 ms at
+**1920×1080**. Profiling happens at 1920×1080; anything else is unreportable.
+
 RTX 4070, tower shot at 1100×880, everything on:
 
-| Pass | ms |
-|---|---|
-| sim | 0.85 |
-| build | 2.29 |
-| photons + blur | 2.88 |
-| render | 11.67 |
-| **total** | **17.7** |
+| Pass | ms | grows with resolution |
+|---|---|---|
+| sim | 0.85 | no |
+| build | 2.29 | no |
+| photons + blur | 2.88 | no |
+| render | 11.67 | yes |
+| **total** | **17.7** | |
 
-**Budget is 16.6 ms for 60 Hz, so this is currently over.** Levers, in order: photon count,
-the `bounces` default (10), half-resolution refracted paths, and the 320³ build.
+1920×1080 is 2.07 Mpx against 0.97, so the render pass extrapolates to ~25 ms and the frame
+to **~31 ms — about 2× over budget, not 7%**. Treat that as a floor: it assumes perfect
+linearity in pixel count, and it is an extrapolation, not a measurement. Measure it.
+
+That reorders the levers. At 1080p the render pass is ~80% of the frame, so the two that live
+inside it — the `bounces` default (10) and half-resolution refracted paths — are the only ones
+that can close a 15 ms gap. Photon count and the 320³ build together are ~5 ms of fixed cost
+no matter the resolution; spending effort there first would be optimising the small half.
 
 ### WebGPU limits that must be requested
 

@@ -34,8 +34,11 @@ A link beats a description when comparing before/after.
 - `?selftest=1` — assertions, logs PASS/FAIL.
 - Isolation views settle arguments far faster than reasoning: `liquid`, `glass`, `tir`,
   `puddle`, `bottle`, `medium`, `steps`, plus `gridEnv` for reflection/refraction direction.
-- Perf numbers only from the real GPU at the resolution you care about. Quote the per-pass
-  split, not just the total.
+- Perf numbers only from the real GPU **at 1920×1080**, which is what the budget is set at.
+  The debug pane is ~1100×880, barely half the pixels, and the render pass scales with them,
+  so a pane-sized number flatters the frame by about 2×. This already produced one wrong
+  conclusion ("17.7 ms, slightly over" when it was nearer 31). Pass `w=1920&h=1080` and quote
+  the per-pass split, not just the total.
 
 ## Traps already paid for
 
@@ -125,7 +128,8 @@ between two `str.index` results will happily swallow everything in between.
 
 ## Ground rules
 
-- Performance budget is **16.6 ms** at 1920×1080. Currently over, on the tower shots.
+- Performance budget is **16.6 ms** at 1920×1080. Estimated ~31 ms on the tower shots — about
+  2× over, not marginally over. Needs measuring at full resolution before any trade-offs.
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
   stale. The dropper is ~324 bytes, leaving ~7870 for the payload. The harness as it stands
