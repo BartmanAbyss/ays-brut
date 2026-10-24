@@ -129,10 +129,23 @@ vertex_index instance_index front_facing frag_depth sample_index sample_mask""".
 def f32_literal(v):
     """Shortest WGSL literal that rounds to the same f32 the JS would have written."""
     t = struct.unpack('f', struct.pack('f', v))[0]
+    same = lambda s: struct.unpack('f', struct.pack('f', float(s)))[0] == t
     for prec in range(1, 10):
         lit = '%.*g' % (prec, t)
-        if struct.unpack('f', struct.pack('f', float(lit)))[0] == t:
+        if same(lit):
             break
+    # %g writes 10 as `1e+01` and 160 as `1.6e+02`: tidy the exponent, and prefer the plain
+    # form (`10.`, `160.`) whenever it is no longer
+    lit = re.sub(r'e\+?(-?)0*(\d)', r'e\1\2', lit)
+    if 'e' in lit:
+        for d in range(0, 12):
+            plain = ('%.*f' % (d, t)).rstrip('0') if d else '%.0f' % t
+            if not plain.endswith('.') and '.' not in plain:
+                plain += '.'
+            if same(plain):
+                if len(plain) <= len(lit):
+                    lit = plain
+                break
     if not any(c in lit for c in '.e'):
         lit += '.'                     # keep it a float: `91.` not the abstract int `91`
     # no `.5`: valid WGSL, but wgslender's parser rejects a leading dot and the build
@@ -161,6 +174,27 @@ def release_uniforms(ui):
         'botTilt': f('botTilt') * rad, 'botAz': f('botAz') * rad,
         'botOn': on('bottle'), 'pudOn': on('puddle'),
     }
+
+
+def peephole(w):
+    """Exact clean-ups of what folding leaves behind: a control folded to 1 leaves `x * 1.`,
+    one folded to a constant leaves `u32(65536.)` or `(false) || ...`. Each rewrite is an
+    identity, so the picture cannot change."""
+    n = 0
+    def sub(pat, rep, s):
+        nonlocal n
+        s, k = re.subn(pat, rep, s)
+        n += k
+        return s
+    w = sub(r'\s*\*\s*1\.(?![\w.])', '', w)                          # x * 1.
+    w = sub(r'(?<![\w.])1\.\s*\*\s*', '', w)                          # 1. * x
+    w = sub(r'\bu32\((\d+)\.0*\)', r'\1u', w)                         # u32(65536.)
+    w = sub(r'\bi32\((\d+)\.0*\)', r'\1', w)                          # i32(10.)
+    w = sub(r'\bmax\((\d+)u, *(\d+)u\)',
+            lambda m: '%du' % max(int(m.group(1)), int(m.group(2))), w)
+    w = sub(r'\(false\)\s*\|\|\s*', '', w)                            # (false) || x
+    w = sub(r'\(true\s*&&\s*', '(', w)                                # (true && x
+    return w, n
 
 
 def fold_uniforms(w, ui):
@@ -449,6 +483,8 @@ def prepare(verbose=False):
     say('uniforms folded  %d references to release constants' % folded)
     wgsl, branches = fold_branches(wgsl)
     say('branches folded  %d if-statements resolved at build time' % branches)
+    wgsl, tidied = peephole(wgsl)
+    say('peephole         %d folded leftovers simplified' % tidied)
     wgsl, shaken = tree_shake(wgsl)
     if shaken:
         say('tree-shaken      wgsl %7d   (wgslender: dead code + syntax)' % len(wgsl.encode()))

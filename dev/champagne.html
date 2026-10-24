@@ -105,7 +105,7 @@ struct Particle { pos : vec3f, life : f32, vel : vec3f, _p : f32 };
 @group(0) @binding(7) var<storage, read_write> wave   : array<vec4f>;        // eta, etaOld, foam
 @group(0) @binding(8) var<storage, read_write> wimp   : array<atomic<i32>>;  // [0..N) impulse, [N..2N) foam
 @group(0) @binding(9) var<storage, read_write> caust : array<atomic<u32>>;  // RGB photon map
-@group(0) @binding(10) var<storage, read_write> caustF : array<f32>;       // blurred caustics
+@group(0) @binding(10) var<storage, read_write> caustF : array<vec4f>;       // blurred caustics
 @group(0) @binding(11) var<storage, read_write> pud    : array<f32>;       // puddle depth on the table
 @group(0) @binding(12) var<storage, read_write> pudA   : array<atomic<u32>>;  // puddle inflow
 @group(0) @binding(13) var<storage, read_write> pudC   : array<vec4f>;     // maxH, nearest wet block xz, valid
@@ -286,24 +286,18 @@ fn wIdx(g: i32, c: vec2i) -> u32 {
   let q = clamp(c, vec2i(0), vec2i(i32(WN) - 1));
   return u32(g) * WN * WN + u32(q.y) * WN + u32(q.x);
 }
-fn sampleFoam(g: i32, xz: vec2f) -> f32 {
+// The wave field of glass g, bilinear at xz: x = surface height, z = foam. One fetch for
+// both - they were two copies differing only in the channel.
+fn sampleWave(g: i32, xz: vec2f) -> vec4f {
   let t = (xz / (2.0 * RIM_R) + 0.5) * f32(WN) - 0.5;
   let b = floor(t);
   let f = t - b;
   let c = vec2i(b);
-  let a0 = mix(wave[wIdx(g, c)].z,              wave[wIdx(g, c + vec2i(1,0))].z, f.x);
-  let a1 = mix(wave[wIdx(g, c + vec2i(0,1))].z, wave[wIdx(g, c + vec2i(1,1))].z, f.x);
-  return mix(a0, a1, f.y);
-}
-fn sampleWave(g: i32, xz: vec2f) -> f32 {
-  if (u.wav < 0.5) { return 0.0; }
-  let t = (xz / (2.0 * RIM_R) + 0.5) * f32(WN) - 0.5;
-  let b = floor(t);
-  let f = t - b;
-  let c = vec2i(b);
-  let a0 = mix(wave[wIdx(g, c)].x,                  wave[wIdx(g, c + vec2i(1,0))].x, f.x);
-  let a1 = mix(wave[wIdx(g, c + vec2i(0,1))].x,     wave[wIdx(g, c + vec2i(1,1))].x, f.x);
-  return mix(a0, a1, f.y);
+  let a0 = mix(wave[wIdx(g, c)],                  wave[wIdx(g, c + vec2i(1,0))], f.x);
+  let a1 = mix(wave[wIdx(g, c + vec2i(0,1))],     wave[wIdx(g, c + vec2i(1,1))], f.x);
+  var r = mix(a0, a1, f.y);
+  if (u.wav < 0.5) { r.x = 0.0; }               // waves off: a flat surface, foam kept
+  return r;
 }
 // rising CO2 bubbles, as a lattice of spheres translated upward through glass-local space
 fn bubbleSDF(ql: vec3f) -> f32 {
@@ -329,7 +323,7 @@ fn bulkSDF(p: vec3f) -> f32 {
   let d0 = max(dS, q.y - (Y0 + L));
   if (d0 > WMAX * 1.1) { return d0 - WMAX; }   // too far for a wave to matter: skip the fetch
   if (PROF) { pc[5] += 1u; }
-  let dl = max(dS, q.y - (Y0 + L + sampleWave(g, q.xz)));
+  let dl = max(dS, q.y - (Y0 + L + sampleWave(g, q.xz).x));
   if (u.bub > 0.5 && dl < 0.0) { if (PROF) { pc[43] += 1u; } return max(dl, -bubbleSDF(q)); }
   return dl;
 }
@@ -503,7 +497,7 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u) {
           var best = -1e9;
           for (var t = 0; t < 4; t++) {
             let ta = a + f32(t) * 1.5707963;
-            let e  = sampleWave(g, vec2f(cos(ta), sin(ta)) * RIM_R * 0.93);
+            let e  = sampleWave(g, vec2f(cos(ta), sin(ta)) * RIM_R * 0.93).x;
             if (e > best) { best = e; aa = ta; }
           }
           let a2 = aa + (h2.z - 0.5) * 0.5;
@@ -515,7 +509,7 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u) {
         }
       }
     }
-    if (!born) { parts[i] = p; return; }
+    if (!born) { return; }
 
     // Sub-frame emission, for BOTH emitters. A frame's worth of drops must not all start
     // at the same point: by the time spill is falling at ~1 m/s a cohort lands ~17 mm from
@@ -544,7 +538,7 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u) {
 
     if (wasIn) {
       // absorbed into the bulk once below the surface
-      let top = Y0 + glass[g].x + sampleWave(g, q.xz);
+      let top = Y0 + glass[g].x + sampleWave(g, q.xz).x;
       if (q.y <= top) {
         atomicAdd(&gvol[u32(g)], PV);
         let t  = (q.xz / (2.0 * RIM_R) + 0.5) * f32(WN);
@@ -658,17 +652,18 @@ fn puddleCoarse(@builtin(global_invocation_id) g: vec3u) {
   if (i >= PCN * PCN) { return; }
   let c = vec2i(i32(i % PCN), i32(i / PCN));
   let b = c * 8;
-  var m = 0.0;
-  for (var y = 0; y < 8; y++) {
-    for (var x = 0; x < 8; x++) { m = max(m, pud[pIdx(b + vec2i(x, y))]); }
-  }
   // x: the tallest the RENDERED film gets anywhere within one block of this one - the 3x3
   // blocks around it, plus 3 cells, since samplePuddle's smoothed bilinear tap reads up to
   // two cells from a point's own. puddleSDF bounds by it out to a block's distance. (The
   // wet flag in w stays this block's own.)
+  var m = 0.0;
   var mh = 0.0;
   for (var y = -11; y < 19; y++) {
-    for (var x = -11; x < 19; x++) { mh = max(mh, pud[pIdx(b + vec2i(x, y))]); }
+    for (var x = -11; x < 19; x++) {
+      let v = pud[pIdx(b + vec2i(x, y))];
+      mh = max(mh, v);
+      if (all(vec2i(x, y) >= vec2i(0)) && all(vec2i(x, y) < vec2i(8))) { m = max(m, v); }
+    }
   }
   let ctr = (vec2f(c) + 0.5) * PBCELL - vec2f(PEXT);
   var seed = vec4f(mh, ctr.x, ctr.y, 0.0);
@@ -716,10 +711,7 @@ fn causticBlur(@builtin(global_invocation_id) g: vec3u) {
   for (var dy = -2; dy <= 2; dy++) {
     for (var dx = -2; dx <= 2; dx++) { sum += causFetch(c + vec2i(dx, dy)); }
   }
-  sum /= 25.0;
-  caustF[i * 3u]      = sum.x;
-  caustF[i * 3u + 1u] = sum.y;
-  caustF[i * 3u + 2u] = sum.z;
+  caustF[i] = vec4f(sum / 25.0, 0.0);
 }
 
 @compute @workgroup_size(64)
@@ -1123,7 +1115,6 @@ fn mapN(p: vec3f) -> vec3f {
                   + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx) );
 }
 
-struct Hit { t: f32, steps: f32, hit: f32 };
 
 const FAR      = 14.0;   // the table runs to the horizon; a 4 m clip dropped it to env
 const SURF_EPS = 0.00025;
@@ -1136,7 +1127,8 @@ const HIT_EPS  = 0.00012;
 // last safe point and march conservatively for the rest of the ray. Long approaches through
 // open air get cheaper; near thin shells the fallback trips and it behaves as before.
 // tmax: where the caller's analytic table plane would win anyway (see below)
-fn marchS(ro: vec3f, rd: vec3f, s: f32, tmax: f32) -> Hit {
+// returns (distance, steps, 1 if it hit)
+fn marchS(ro: vec3f, rd: vec3f, s: f32, tmax: f32) -> vec3f {
   var t = 0.0;
   var i = 0.0;
   var w = 1.4;
@@ -1166,7 +1158,7 @@ fn marchS(ro: vec3f, rd: vec3f, s: f32, tmax: f32) -> Hit {
       i = i + 1.0;
       continue;
     }
-    if (d < HIT_EPS) { return Hit(t, i, 1.0); }
+    if (d < HIT_EPS) { return vec3f(t, i, 1.0); }
     tPrev = t; rPrev = d;
     // Past the table plane nothing can win - every caller replaces a farther hit with the
     // analytic table. Stop once the last PROVEN-empty sphere reaches it, not merely when t
@@ -1181,9 +1173,9 @@ fn marchS(ro: vec3f, rd: vec3f, s: f32, tmax: f32) -> Hit {
     if (t > FAR) { break; }
     i = i + 1.0;
   }
-  return Hit(t, i, 0.0);
+  return vec3f(t, i, 0.0);
 }
-fn march(ro: vec3f, rd: vec3f) -> Hit { return marchS(ro, rd, 1.0, 1e9); }
+fn march(ro: vec3f, rd: vec3f) -> vec3f { return marchS(ro, rd, 1.0, 1e9); }
 
 // 0 air · 1 glass · 2 champagne · 3 table (opaque).
 // Priority order resolves coincident glass/liquid surfaces — no double refraction.
@@ -1195,17 +1187,13 @@ fn mediumAt(p: vec3f) -> i32 {
   if (liquidDist(p) < 0.0) { return 2; }
   return 0;
 }
+// per medium: 0 air, 1 glass, 2 champagne, 3 table, 4 bottle glass
 fn iorOf(m: i32) -> f32 {
-  if (m == 1) { return 1.50; }      // glass
-  if (m == 2) { return 1.34; }      // champagne
-  if (m == 4) { return 1.52; }      // bottle glass
-  return 1.0;
+  return array(1.0, 1.50, 1.34, 1.0, 1.52)[m];
 }
-fn sigmaOf(m: i32) -> vec3f {
-  if (m == 1) { return vec3f(0.6, 0.35, 0.6); }     // faint green in the glass
-  if (m == 2) { return vec3f(2.2, 5.5, 16.0); }     // Beer-Lambert gold
-  if (m == 4) { return vec3f(260.0, 85.0, 310.0); } // dark olive bottle glass
-  return vec3f(0.0);
+fn sigmaOf(m: i32) -> vec3f {           // absorption: faint green glass, Beer-Lambert gold, olive bottle
+  return array(vec3f(0.0), vec3f(0.6, 0.35, 0.6), vec3f(2.2, 5.5, 16.0), vec3f(0.0),
+               vec3f(260.0, 85.0, 310.0))[m];
 }
 
 fn turbo(x: f32) -> vec3f {
@@ -1278,8 +1266,7 @@ fn causFetch(c: vec2i) -> vec3f {
 }
 fn causFetchF(c: vec2i) -> vec3f {
   let q = clamp(c, vec2i(0), vec2i(i32(CN) - 1));
-  let k = (u32(q.y) * CN + u32(q.x)) * 3u;
-  return vec3f(caustF[k], caustF[k + 1u], caustF[k + 2u]);
+  return caustF[u32(q.y) * CN + u32(q.x)].xyz;
 }
 fn causticAt(xz: vec2f) -> vec3f {
   let n = xz / (2.0 * CEXT) + 0.5;
@@ -1324,9 +1311,9 @@ fn leg(p: vec3f, d: vec3f, med: i32) -> vec3f {
   var s = 1.0;
   if (med != 0) { s = -1.0; }
   let h = marchS(p, d, s, tpl);
-  var r = vec3f(FAR, 0.0, h.steps);
-  if (h.hit > 0.5) { r = vec3f(h.t, 2.0, h.steps); }
-  if (tpl < r.x) { r = vec3f(tpl, 1.0, h.steps); }
+  var r = vec3f(FAR, 0.0, h.y);
+  if (h.z > 0.5) { r = vec3f(h.x, 2.0, h.y); }
+  if (tpl < r.x) { r = vec3f(tpl, 1.0, h.y); }
   return r;
 }
 // turn: at the surface a leg ended on, the normal facing the ray, the medium beyond, the
@@ -1383,11 +1370,13 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
   var med = 0;
   var tp  = vec3f(1.0);        // throughput
   var acc = vec3f(0.0);
-  var steps = 0.0;
-  var tir = 0.0;
   var fin = false;
+//#D{
+  var steps = 0.0;                // for the steps, tir and normals views
+  var tir = 0.0;
   var firstHit = 0.0;
   var firstN = vec3f(0.0);
+//#D}
 //#D{
   var pSpray = 0u; var pGlass = 0u; var pBulk = 0u;   // profiler: entries per ray
 //#D}
@@ -1397,7 +1386,9 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
     let lg = leg(p, d, med);
     if (PROF) { profPrim = false; }
     let ht = lg.x;
+//#D{
     steps += lg.z;
+//#D}
     if (PROF) { pc[9] += 1u; pc[10] += u32(lg.z); pc[31u + min(u32(b), 10u)] += u32(lg.z); }
     if (PROF && b == 0) {
       // 67/68/69 primary rays ending on the table / in the environment / at an object, and
@@ -1425,7 +1416,9 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
     var sf: Turn;
     if (!tab) {
       sf = turn(hp, d, med);
+//#D{
       if (b == 0) { firstHit = 1.0; firstN = sf.n; }
+//#D}
       tab = sf.medA == 3;
     }
     if (tab) {
@@ -1439,7 +1432,7 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
     // mousse sits on the liquid's upward-facing surface: opaque, diffuse, not refractive
     if (medA == 2 && n.y > 0.5 && u.foamG > 0.0) {
       let gi = glassIdx(hp);
-      let fm = sampleFoam(gi, (hp - glassOff(gi)).xz) * u.foamG;
+      let fm = sampleWave(gi, (hp - glassOff(gi)).xz).z * u.foamG;
       let w  = clamp(fm, 0.0, 1.0);
       if (w > 0.004) {
         let l   = clamp(dot(n, lightDir()), 0.0, 1.0);
@@ -1470,16 +1463,14 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
     if (wantTrace && b < 2 && F > 0.05) { rcol = reflColour(hp + rdir * SURF_EPS, rdir, med); }
     acc += tp * F * rcol * u.refl;
 
-    if (sf.tir) { tir = tir + 1.0; }          // total internal reflection
-    else {
 //#D{
-      if (PROF && med == 0) {
-        if (medA == 1) { pGlass += 1u; }
-        if (medA == 2) { if (abs(bulkSDF(hp)) < 0.004) { pBulk += 1u; } else { pSpray += 1u; } }
-      }
-//#D}
-      tp *= (1.0 - F);
+    if (sf.tir) { tir = tir + 1.0; }
+    else if (PROF && med == 0) {
+      if (medA == 1) { pGlass += 1u; }
+      if (medA == 2) { if (abs(bulkSDF(hp)) < 0.004) { pBulk += 1u; } else { pSpray += 1u; } }
     }
+//#D}
+    if (!sf.tir) { tp *= (1.0 - F); }         // a refraction loses what Fresnel reflects
     d = sf.d; p = sf.p; med = sf.med;
     if (max(tp.x, max(tp.y, tp.z)) < 0.02) {
       if (PROF) { pc[16u + min(u32(b), 10u)] += 1u; pc[29] += 1u; }
@@ -1598,8 +1589,8 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
   } else if (v > 2.5 && v < 3.5) {
     let hh = march(ro, rd);
     col = vec3f(0.02);
-    if (hh.hit > 0.5) {
-      let q = ro + rd * hh.t;
+    if (hh.z > 0.5) {
+      let q = ro + rd * hh.x;
       let m = mediumAt(q + rd * SURF_EPS);
       if (m == 1) { col = vec3f(0.25, 0.55, 0.95); }
       if (m == 2) { col = vec3f(0.95, 0.72, 0.26); }
@@ -1608,7 +1599,7 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
   }
 
 //#D}
-  col = pow(max(col, vec3f(0.0)), vec3f(0.4545));
+  col = pow(col, vec3f(0.4545));
   if (PROF) {
     pc[0] = 1u;
     let bank = ((u32(fc.x) * 7u + u32(fc.y) * 13u) & 63u) * 128u;
@@ -1738,7 +1729,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     NG * WN * WN * 16,        //  7 wave field
     NG * WN * WN * 2 * 4,     //  8 wave and foam impulses
     CN * CN * 3 * 4,          //  9 photon map
-    CN * CN * 3 * 4,          // 10 photon map, blurred
+    CN * CN * 16,             // 10 photon map, blurred
     PN * PN * 4,              // 11 puddle depth
     PN * PN * 4,              // 12 puddle inflow
     PCN * PCN * 16,           // 13 puddle coarse blocks
