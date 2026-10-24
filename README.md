@@ -116,28 +116,51 @@ Domain: `(-0.31, -0.015, -0.31)`, 0.62 m cube.
 
 ## Performance
 
-**These numbers are at the wrong resolution** and the comparison below them was a mistake.
-They were taken at 1100×880 — the size of the debug pane — while the budget is 16.6 ms at
-**1920×1080**. Profiling happens at 1920×1080; anything else is unreportable.
+### Target hardware
 
-RTX 4070, tower shot at 1100×880, everything on:
+The compo PC, confirmed 24 Oct 2026:
+
+| | |
+|---|---|
+| GPU | ASUS GeForce RTX 5070 Prime OC White |
+| CPU | AMD Ryzen 7 7800X3D |
+| RAM | Kingston FURY 16 GB DDR5-6000 |
+| Board / disk | ASRock B650 Steel Legend WIFI, Samsung 990 Pro 1 TB |
+
+Development is on an **RTX 4070**. Against it the 5070 brings +4% shaders, +1% clock, +6%
+FP32 and +33% memory bandwidth (GDDR7), plus a larger L2; reviews put it ~20% ahead at 1080p
+raster. This frame is mostly ALU with incoherent gathers out of a 125 MiB grid, so call it
+**15–20%** — an estimate from specifications, not a benchmark of this workload.
+
+That fixes the number to aim at: 16.6 ms on the 5070 is about **19 ms on the 4070**.
+
+CPU and disk don't matter here — one draw call, everything GPU-side.
+
+**The compo's display resolution is still unknown, and it matters more than the GPU.** At
+2560×1440 the pixel count rises 1.78×, costing several times whatever the 5070 gives back.
+
+### Where it stands
+
+RTX 4070, 1920×1080, tower shot at fill 80, everything on. **Provisional** — see the caveat:
 
 | Pass | ms | grows with resolution |
 |---|---|---|
-| sim | 0.85 | no |
-| build | 2.29 | no |
-| photons + blur | 2.88 | no |
-| render | 11.67 | yes |
-| **total** | **17.7** | |
+| sim | 0.20 | no |
+| build | 1.9–2.4 | no |
+| photons + blur | 4.0 | partly |
+| render | 29.9–33.0 | yes |
+| **total** | **36–40** | |
 
-1920×1080 is 2.07 Mpx against 0.97, so the render pass extrapolates to ~25 ms and the frame
-to **~31 ms — about 2× over budget, not 7%**. Treat that as a floor: it assumes perfect
-linearity in pixel count, and it is an extrapolation, not a measurement. Measure it.
+Against a 19 ms target that is **roughly 2× over**, and the render pass is ~83% of it. So the
+levers that matter are the ones inside it: the `bounces` default (10), half-resolution
+refracted paths, step count, better early-outs. Photon count and the 320³ build are ~6 ms of
+fixed cost at any resolution — going after those first would be optimising the small sixth.
 
-That reorders the levers. At 1080p the render pass is ~80% of the frame, so the two that live
-inside it — the `bounces` default (10) and half-resolution refracted paths — are the only ones
-that can close a 15 ms gap. Photon count and the 320³ build together are ~5 ms of fixed cost
-no matter the resolution; spending effort there first would be optimising the small half.
+**Caveat.** Taken with the browser pane hidden, where the page runs as a background page at
+~2 fps. The per-pass timestamps measure real GPU work, but a GPU idling 90% of the time
+downclocks, so these are an upper bound of unknown tightness. Re-measure with the window
+actually on screen before trading any quality away. (The older 17.7 ms figure was at the
+pane's own 1100×880 and was never comparable to the budget.)
 
 ### WebGPU limits that must be requested
 

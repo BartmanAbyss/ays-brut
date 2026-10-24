@@ -34,6 +34,11 @@ A link beats a description when comparing before/after.
 - `?selftest=1` — assertions, logs PASS/FAIL.
 - Isolation views settle arguments far faster than reasoning: `liquid`, `glass`, `tir`,
   `puddle`, `bottle`, `medium`, `steps`, plus `gridEnv` for reflection/refraction direction.
+- **The pane must be on screen.** A hidden browser pane runs the page as a background page
+  at ~2 fps; the per-pass timestamps still measure real work, but the GPU downclocks between
+  frames and inflates them. If `frameMs` is wildly larger than `gpuMs.total`, the reading is
+  an upper bound, not a measurement. `show_pane` reports whether the session is open in a
+  window at all — if it isn't, the user is away and a real profile has to wait.
 - Perf numbers only from the real GPU **at 1920×1080**, which is what the budget is set at.
   The debug pane is ~1100×880, barely half the pixels, and the render pass scales with them,
   so a pane-sized number flatters the frame by about 2×. This already produced one wrong
@@ -128,8 +133,11 @@ between two `str.index` results will happily swallow everything in between.
 
 ## Ground rules
 
-- Performance budget is **16.6 ms** at 1920×1080. Estimated ~31 ms on the tower shots — about
-  2× over, not marginally over. Needs measuring at full resolution before any trade-offs.
+- Performance budget is **16.6 ms** at 1920×1080 on the compo PC, which is an **RTX 5070**.
+  Dev is on a 4070, ~15–20% slower, so the number to hit here is **~19 ms**. Measured 36–40 ms
+  on the tower shot at 1080p (provisional, pane hidden), of which render is ~83%. Roughly 2×
+  over. The compo's display resolution is still unconfirmed and would change this more than
+  the GPU does.
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
   stale. The dropper is ~324 bytes, leaving ~7870 for the payload. The harness as it stands
