@@ -592,6 +592,41 @@ also bans "purely generated effects or shaders". The NFO must carry this.
 python build/build.py
 ```
 
+### Setting up a machine
+
+Three things, installed once. On Windows, from a terminal (winget ships with Windows 10
+and 11):
+
+```bash
+winget install -e --id Git.Git
+winget install -e --id Python.Python.3.13
+winget install -e --id OpenJS.NodeJS.LTS
+```
+
+Open a **new** terminal so PATH picks them up, then:
+
+```bash
+python -m pip install brotli
+git clone https://github.com/BartmanAbyss/comparade26.git
+cd comparade26
+python build/build.py
+```
+
+If `python` is not found or opens the Microsoft Store, use the launcher instead: `py -m pip
+install brotli` and `py build/build.py`. On macOS or Linux it is the same with `python3`;
+only the dropper itself is Windows-only.
+
+The output ends with `intro.cmd  <bytes>  UNDER`, and for a given commit that number is the
+same on every machine. If something is missing, the build stops with `BUILD FAILED` and
+names it. Nothing else gets installed - no npm packages, no network requests during a
+build - so once these three are on the laptop it builds offline at the party.
+
+Optional extras: a WebGPU browser (Chrome, Edge or Firefox) to run the harness or the
+release, and `python build/pack.py` for the packer search (it uses every core; *The packer
+search*).
+
+### What the build does
+
 One source of truth: `dev/champagne.html`. The build strips the harness, inlines the values
 the debug panel used to supply, minifies, packs, and writes:
 
@@ -602,7 +637,7 @@ the debug panel used to supply, minifies, packs, and writes:
 | `build/min.wgsl`, `build/min.js` | what ships, as packed |
 | `build/min.pretty.wgsl`, `build/min.pretty.js` | the same, re-indented to read |
 
-It needs **Python 3 with `brotli`** (`pip install brotli`) and **Node.js 16+** on PATH.
+It needs **Python 3 with `brotli`** and **Node.js 16+** on PATH (*Setting up a machine*).
 That is all: wgslender 1.5.1 and terser 5.51.2 are vendored in `build/vendor/node_modules`
 (committed, 5.5 MB, plain JS and WebAssembly, so the same files on every OS) and run with
 `node` from there - no npm, no npx, no network. A fresh clone builds the same `intro.cmd`,
