@@ -71,6 +71,36 @@ coplanar with the glass's cut plane and the coincidence renders as an opaque dis
 Spill leaves the rim **where the wave crest is highest** (best of 4 sampled azimuths), so a
 glass overflows in a few wandering rivulets rather than an even curtain.
 
+### Timing {D} one clock
+
+Everything is a function of a single master clock: the sim advances in whole 1/60 s steps
+whose index is derived from it, and the camera reads it directly. Nothing is a function of
+the frame.
+
+This matters because the intro has to hold sync with music for its whole length. Stepping
+once per rendered frame ties the simulation's rate to whatever the renderer happens to
+manage {D} measured on the previous build, **1.160{X} at 66 fps and 0.624{X} at 39 fps**. The slow
+case alone would end a three-minute intro more than a minute behind the music.
+
+| | sim seconds per wall second |
+|---|---|
+| one step per frame, 66 fps | 1.160 |
+| one step per frame, 39 fps | 0.624 |
+| master clock, 78 fps | 0.9996 |
+| master clock, 39 fps | 0.9954 |
+
+A frame that runs long leaves a deficit, and the deficit is **kept** and worked off over the
+following frames, so a hitch costs nothing in the end. Catch-up is capped at 16 steps per
+frame because the sub-step index reaches the shader through 16 uniform slots and reusing one
+would make two substeps share an RNG stream {D} the bug that used to thin the pour. Past
+`LAG_STEPS` (0.5 s) behind, the missed steps are given up rather than chased: in a demo,
+staying with the music beats fluid continuity. Those events are counted in `probe.resyncs`
+so the cost is visible rather than silent.
+
+`?det=1` (implied by `?still=1`) swaps the wall clock for a fixed one so that frame N is
+always step N. That makes a run reproducible on any machine, which is what A/B comparisons
+need {D} `?still=1&warm=300` lands on `t = 5.0000` exactly.
+
 ### Rendering
 
 Nearest-particle narrow-band distance field → sphere trace. Particles deposit a **swept
@@ -242,7 +272,7 @@ bottle, botTilt, botAz, pourWander, wanderSpd, shutter, bounces, simSpeed, expo,
 **Buttons** — `ff +20s` (jump the sim forward), `restart`, `pause` (also spacebar).
 
 Useful URL params beyond the above: `w`, `h` (explicit resolution, letterboxed), `t` (fixed
-time), `still`, `warm`, `steps`, `npart`, `selftest`.
+time), `still`, `warm`, `det`, `steps`, `npart`, `nphoton`, `selftest`.
 
 `gridEnv` replaces the environment with a lat-long UV test grid (green horizon, magenta
 poles, orange dot at the key light) — it makes it obvious which direction a reflection or
@@ -254,7 +284,8 @@ refraction is sampling.
 
 `window.__probe()` returns JSON: per-pass GPU times (`timestamp-query`), fps, adapter info,
 shader compile and validation errors, glass levels in mm, particle counts and bottle-stream
-extent, and puddle depth/wet-block/bound stats. `?selftest=1` runs assertions and logs
+extent, puddle depth/wet-block/bound stats, and the clock's `step`, `drift` and `resyncs`.
+Drift should stay under one step (16.7 ms); the HUD shows it live. `?selftest=1` runs assertions and logs
 PASS/FAIL.
 
 The renderer **pauses on demand** and still redraws one frame when a slider moves, so

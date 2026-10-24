@@ -32,6 +32,8 @@ A link beats a description when comparing before/after.
 ## Verifying
 
 - `?selftest=1` — assertions, logs PASS/FAIL.
+- `?det=1` (implied by `?still=1`) makes frame N always step N, so a run is reproducible
+  on any machine. Use it for any A/B: without it the two sides see different sim states.
 - Isolation views settle arguments far faster than reasoning: `liquid`, `glass`, `tir`,
   `puddle`, `bottle`, `medium`, `steps`, plus `gridEnv` for reflection/refraction direction.
 - **The pane must be on screen.** A hidden browser pane runs the page as a background page
@@ -108,6 +110,14 @@ the resize listener whenever `w`/`h` were given, so a page opened while the pane
 (viewport 0×0) scaled the canvas to `0px` and left it there: overlays visible, picture gone,
 GPU still rendering 1920×1080 at full cost. If the HUD is there and the render isn't, this
 is why.
+
+**One sim step per rendered frame makes the sim run at the refresh rate.** It reads as
+correct because the step size is fixed, but the step *rate* is then the frame rate:
+measured 1.160× at 66 fps and 0.624× at 39. Against music that error accumulates for the
+whole run. The step index must come from a clock, and a deficit must be KEPT and worked off
+rather than discarded — discarding it is exactly how the drift gets in. Corollary: a
+deliberate burst (the ff button, 1200 steps) has to be allowed past the steady-state
+catch-up cap, or it silently skips instead of simulating and the glasses never fill.
 
 **A debug toggle must isolate exactly one thing.** `parts=0` also disabled the puddle, which
 sent a bisection at the wrong subsystem for several rounds. When a toggle's result is

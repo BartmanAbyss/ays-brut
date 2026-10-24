@@ -1364,6 +1364,7 @@ const cfg = {
   nphoton:  qf('nphoton', 65536),
   cgain:    qf('cgain', 0.05),
   paused:   Q.get('pause') === '1',
+  det:      Q.get('det') === '1' || Q.get('still') === '1',   // frame N is always step N
 };
 
 const FINE = 320, COARSE = 32, NG = 14, WN = 32, CN = 768, PN = 384, PCN = 48;
@@ -1384,6 +1385,7 @@ function fail(where, e) {
 const probe = {
   ok: false, adapter: null, features: [], errors,
   frameMs: 0, fps: 0, gpuMs: {}, frames: 0, time: 0, live: 0, selftest: null,
+  drift: 0, resyncs: 0, step: 0,
 };
 window.__probe = () => JSON.parse(JSON.stringify(probe));
 
@@ -1576,7 +1578,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   addEventListener('resize', resize);
 
   const SIM_DT = 1 / 60;
-  let simAcc = 0;
+  const LAG_STEPS = 30;        // 0.5 s behind the clock before we give up the missed steps
+  let clockT = 0;              // master clock, seconds; the sim step index derives from it
   const f32 = new Float32Array(48);
   const t0 = performance.now();
   let last = t0, acc = 0, accN = 0, frameNo = 0, simStep = 0, ffSteps = 0;
@@ -1702,19 +1705,40 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 
   function frame() {
     const now = performance.now();
-    // One sim step per rendered frame, never more. Catching up after a hitch would make
-    // the fluid jump, and because the emitter's spawn cadence is keyed to the frame, extra
-    // substeps advanced the drops without emitting new ones - the stream visibly thinned.
-    // A slow frame therefore runs slightly slow rather than skipping ahead.
-    simAcc += Math.min((now - last) / 1000, 0.25) * ui.simSpeed;
-    // simSpeed deliberately runs more steps; the cap only stops a HITCH from being caught
-    // up, which would make the fluid jump. Leftover time is discarded, not banked.
-    const maxSub = Math.min(16, Math.max(1, Math.ceil(ui.simSpeed)));
-    const simSteps = Math.min(maxSub, Math.floor(simAcc / SIM_DT)) + ffSteps;
-    simAcc = Math.min(simAcc - Math.min(maxSub, Math.floor(simAcc / SIM_DT)) * SIM_DT, SIM_DT);
-    ffSteps = 0;
-    const time = cfg.t !== null ? cfg.t : (now - t0) / 1000;
-    probe.time = time;
+
+    // ── master clock ──────────────────────────────────────────────────────────────
+    // Everything is a function of one clock: the sim advances in whole SIM_DT steps
+    // derived from it, and the camera reads it directly. Stepping once per rendered
+    // frame instead tied the fluid's rate to whatever the renderer managed - 23% fast
+    // at 74 fps, 37% slow at 38 - and against music that error accumulates over the
+    // whole run. A deficit is now KEPT and worked off over the following frames rather
+    // than discarded, which is the part that makes a hitch cost nothing in the end.
+    if (cfg.det) { clockT += SIM_DT * ui.simSpeed; }          // frame N is always step N
+    else         { clockT += Math.min((now - last) / 1000, 0.25) * ui.simSpeed; }
+    // Fast-forward is a deliberate burst, not a hitch: it has to actually simulate its
+    // steps or the glasses never fill, so it raises the ceiling for this frame only. The
+    // substep slots wrap every 16, so a burst reuses RNG streams - fine when skipping
+    // ahead, not fine as a steady state.
+    const ffNow = ffSteps; ffSteps = 0;
+    clockT += ffNow * SIM_DT;
+
+    // 16 is the steady-state ceiling: the sub-step index reaches the shader through 16
+    // uniform slots, and reusing one would make two substeps share an RNG stream - the
+    // bug that used to thin the pour whenever a frame ran long.
+    const want = Math.floor(clockT / SIM_DT) - simStep;
+    const simSteps = Math.max(0, Math.min(16 + ffNow, want));
+    if (want - simSteps > LAG_STEPS) {
+      // Persistently too slow to hold the clock. In a demo sync beats continuity: drop
+      // the steps we cannot afford so the picture stays with the music, and count it so
+      // the cost is visible rather than silent.
+      simStep = Math.floor(clockT / SIM_DT) - simSteps;
+      probe.resyncs++;
+    }
+
+    const time = cfg.t !== null ? cfg.t : clockT;
+    probe.time  = time;
+    probe.step  = simStep + simSteps;
+    probe.drift = clockT - probe.step * SIM_DT;
     writeUniforms(time);
 
     const enc = device.createCommandEncoder();
@@ -1815,7 +1839,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       'build ' + f('build') + ' ms\n' +
       'rend  ' + f('render') + ' ms\n' +
       'gpu   ' + f('total') + ' ms\n' +
-      't     ' + probe.time.toFixed(2) + ' s' + (cfg.t !== null ? ' (fixed)' : '') + '\n' +
+      't     ' + probe.time.toFixed(2) + ' s' + (cfg.t !== null ? ' (fixed)' : '') + (cfg.det ? '  det' : '') + '\n' +
+      'step  ' + probe.step + '   drift ' + (probe.drift * 1000).toFixed(1) + ' ms' +
+        (probe.resyncs ? '   resync ' + probe.resyncs : '') + String.fromCharCode(10) +
       (probe.adapter?.vendor ?? '?') + ' / ' + (probe.adapter?.architecture ?? '?') +
       (errors.length ? '\nERRORS ' + errors.length : '');
   }
@@ -1891,7 +1917,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     dropRad: 'Rendered radius of a droplet in mm. Below about 1.7 mm (the fine grid cell half-diagonal at 256 cubed) drops start falling between voxels, so a dense stream breaks up into scattered drops.',
     dropVol: 'Volume of one drop in microlitres. Together with pourRate this sets how fast the glasses fill: mL/s = pourRate x dropVol x 60 / 1000.',
     bounces: 'Maximum refraction/reflection interfaces per ray. Deep interior shots need 20+; the wide tower is fine around 8. Each extra bounce costs render time, and too few shatters the image into checkerboard shards where rays run out.',
-    simSpeed: 'Simulation speed multiplier. The fluid runs on a fixed 1/60 s step driven by real elapsed time, so refresh rate does not change its speed. At most one step per frame: a slow frame runs slightly slow rather than jumping to catch up. 0 freezes it while the camera keeps moving.',
+    simSpeed: 'Simulation speed multiplier. The fluid runs on a fixed 1/60 s step whose index comes from the master clock, so refresh rate does not change its speed and a slow frame is caught up over the next ones (16 steps per frame maximum). Watch drift in the HUD: it should stay under one step. 0 freezes it while the camera keeps moving.',
     expo: 'Exposure applied before tonemapping.',
     cgain: 'Brightness of the photon caustic map on the table. It carries the direct light too, so 0 leaves the table lit by ambient only.',
   };
@@ -1974,7 +2000,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const was = cfg.paused;
     cfg.paused = v;
     btn.textContent = v ? 'resume' : 'pause';
-    if (was && !v) requestAnimationFrame(frame);
+    // Resume from the moment we stopped, or the clock banks the whole pause and the sim
+    // tries to catch up through it.
+    if (was && !v) { last = performance.now(); requestAnimationFrame(frame); }
   }
   btn.onclick = () => setPaused(!cfg.paused);
   addEventListener('keydown', e => { if (e.code === 'Space') { e.preventDefault(); setPaused(!cfg.paused); } });
