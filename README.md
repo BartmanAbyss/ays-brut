@@ -309,11 +309,70 @@ champagne's free surface mirroring the sky as an opaque disc near grazing — an
 only there. Droplets and glass use the environment lookup; the visible difference is a
 slightly more silvery spill curtain. `rtrace` 2 restores the old behaviour for comparison.
 
+### Anatomy of the heavy tier2 frame
+
+`det=1`, run naturally to step 3120, `simSpeed` 0; 1920×1080, RTX 4070. Before the packed
+far field below: render 24.8, total 29.9 (build 2.1, photons 3.0). Counted with
+`__profile()` over all 2 073 600 pixels, and identical frame to frame:
+
+| per pixel | |
+|---|---|
+| marches (bounces taken) | 3.07 |
+| march steps | 39.4 |
+| `map()` evaluations | 53.1 (17% of them for normals: 2.3 normals × 4) |
+
+| per `map()` / spray lookup | |
+|---|---|
+| coupe evaluations | 3.1, of which 22% get past the bounding cylinder |
+| spray lookups in an occupied block (trilerp) | 64% — and 68% of those land outside the band anyway |
+| wave fetch / bubble lattice | 0.36 / 0.10 |
+| bottle profile | ~0 (the bounding sphere works) |
+
+| how rays end | |
+|---|---|
+| table | 58.1% |
+| environment | 29.5% |
+| too dim to matter | 1.7% |
+| **out of bounces (10)** | **10.7%** — and they take about 30% of all march steps |
+
+66% of pixels finish at bounce 0. March steps by bounce: 46% the primary ray, 4% bounce 1,
+29% bounces 2–4, 21% bounces 5–9. The traced reflection is 4.4% of pixels and 3.3% of
+steps; over-relaxation fallbacks are 3.8% of steps. Neither is a lever.
+
+**What each component costs**, measured by making `map()` evaluate it a second time at a
+point the compiler cannot prove equal (`__xc(bits)`; the picture does not change). These
+are a ranking, not a budget: duplicating also raises register pressure, so the deltas add
+up to more than the frame.
+
+| evaluated twice | render +ms |
+|---|---|
+| whole spray/liquid lookup (`liquidDist`) | 26.1 |
+| tower (three coupes) | 11.7 |
+| bulk liquid (wave fetch, bubbles) | 7.1 |
+| spray trilerp | 3.9 |
+| *before the fix:* far-field seed lookup | 16.0 |
+| *before the fix:* the occupancy `atomicLoad` alone | 7.2 |
+| *before the fix:* the seed particle read alone | 5.4 |
+
+The last three are why the far field was repacked. `occ` is `array<atomic<u32>>` because
+the compute passes build it, and `liquidDist` read it with two `atomicLoad`s per call plus a
+dependent read of the seed particle — ~114 M calls a frame. In a fragment shader an atomic
+load is not a cached load. `packCoarse` now copies occupancy, seed validity and the seed's
+position into the (previously unused) `coarse` vec4 buffer after the flood, so the render
+does one plain load. Every profiler counter matched exactly before and after, so the image
+is bit-identical. Render 24.8 → **21.8** on this frame, 21.95 → 18.6 on the step-2400 A/B
+frame; +62 bytes compressed.
+
+Where the rest is: the spray lookup itself is still the biggest item; a finer occupancy
+test would skip most of the wasted trilerps; and the 10.7% of rays that run out of bounces
+(inside spray and glass, ending in constant haze anyway) pay for ~30% of the marching.
+
 ### WebGPU limits that must be requested
 
 Several defaults were within a few percent of biting:
 
-- `maxStorageBuffersPerShaderStage: 16` and `maxStorageBuffersInFragmentStage: 16` — we bind 14.
+- `maxStorageBuffersPerShaderStage: 16` and `maxStorageBuffersInFragmentStage: 16` — we bind
+  15 in dev (the profiler's counter banks are the 15th), 14 in the release.
 - `maxComputeWorkgroupSizeX: 512`, `maxComputeInvocationsPerWorkgroup: 512` — 320³/256 would
   be 65 536 workgroups, one over the per-dimension cap, so the clear/resolve passes are
   512-wide.
@@ -360,6 +419,15 @@ PASS/FAIL.
 
 The renderer **pauses on demand** and still redraws one frame when a slider moves, so
 exploring costs nothing.
+
+`await window.__profile()` renders one frame with a second render pipeline compiled with
+`PROF` on (a WGSL `override`, so the normal pipeline carries no counter cost) and returns 48
+counters summed over the frame: map, spray and coupe evaluations, march steps, normals,
+reflection traces, rays ending per bounce and per reason, march steps per bounce. The index
+map is in the comment above `__profile`. `await window.__xc(bits)` renders with one
+component evaluated twice to rank what it costs (`__xc(0)` restores);
+`__variant({...})` takes arbitrary pipeline constants, and `{ PROF: 1, ... }` profiles a
+variant. All of it is dev-only and absent from the release.
 
 ---
 

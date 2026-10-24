@@ -91,7 +91,8 @@ DEV_RE = re.compile(
     r'|\bqrd\b|\bqres\b|\bqset\b|\bqbusy\b|\bLABELS\b'
     r'|readTimestamps|readLevels|readParts|readPuddle|updateHud|runSelftest'
     r'|\bglassRd\b|\bpudRd\b|\bpartRd\b|\bgbusy\b|\bpbusy\b|\bpudbusy\b|\bPSAMP\b'
-    r'|window\.__|getCompilationInfo|\bverr\b')
+    r'|window\.__|getCompilationInfo|\bverr\b'
+    r'|\bprofB\b|\bprofRd\b|\bprofReq\b|\brenderProf\b|\bdoProf\b|flushProfile|\brenderX\b')
 
 
 def strip_js(js, ui):
@@ -438,6 +439,15 @@ def prepare(verbose=False):
     say('dev code removed wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
     io.open(os.path.join(ROOT, 'strip.js'), 'wb').write(js.encode())
 
+    # Comments go BEFORE any folding. fold_branches works on text, and a comment that
+    # mentioned `if (PROF)` became `if (false)` and was folded as code - deleting everything
+    # up to the next matching brace, glass constants included, with no error until WebGPU
+    # rejected the module.
+    wgsl = re.sub(r'/\*.*?\*/', '', wgsl, flags=re.S)
+    wgsl = re.sub(r'//[^\n]*', '', wgsl)
+    # the profiler: its override becomes a literal false and fold_branches deletes it
+    wgsl = re.sub(r'(?m)^override PROF[^\n]*\n', '', wgsl)
+    wgsl = re.sub(r'\bPROF\b', 'false', wgsl)
     wgsl, folded = fold_uniforms(wgsl, ui)
     say('uniforms folded  %d references to release constants' % folded)
     wgsl, branches = fold_branches(wgsl)
@@ -445,8 +455,6 @@ def prepare(verbose=False):
     wgsl, shaken = tree_shake(wgsl)
     if shaken:
         say('tree-shaken      wgsl %7d   (wgslender: dead code + syntax)' % len(wgsl.encode()))
-    wgsl = re.sub(r'/\*.*?\*/', '', wgsl, flags=re.S)
-    wgsl = re.sub(r'//[^\n]*', '', wgsl)
     jmin, how = minify_js(js)
     say('js minified with %s' % how)
     return wgsl, js, jmin

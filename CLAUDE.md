@@ -145,6 +145,19 @@ evolution - bursts do not reproduce it - and tier2 read 25 ms there against 29-3
 real run. For a heavy, reproducible state: `det=1`, run naturally to step 3120 (t = 52 s),
 then set `simSpeed` 0. It takes about two minutes of wall time.
 
+**An `atomicLoad` in the fragment shader is not a cached load.** The occupancy grid and the
+far-field seeds live in an atomic buffer because the compute passes build them with
+atomics, and the render read them there: two atomic loads and a dependent particle read
+per spray lookup, 3.1 ms of tier2's 24.8. Anything the render reads per march step must be
+in a plain buffer — `packCoarse` copies it out after the flood.
+
+**Count before you guess, then rank by duplication.** `__profile()` gives exact per-frame
+counts (steps per bounce, why rays end, evaluations per component); `__xc(bits)` makes a
+component run twice with an unchanged picture and the time delta ranks it. Duplication
+deltas are not additive — register pressure inflates them past the frame — so use them to
+order suspects, then confirm with a real A/B. The atomic-load finding came from a
+four-instruction lookup out-ranking the 8-fetch trilerp by 4×.
+
 **A particle smaller than a voxel vanishes.** The fine cell is 1.94 mm, so a drop only
 registers if it lands near a cell centre. Keep `dropRad` above the cell half-diagonal
 (~1.68 mm) or raise `FINE`. Symptom: a dense stream renders as four scattered drops.
@@ -253,6 +266,14 @@ JS. When the build renders black, check the console WITHOUT the error filter fir
 warnings were still listed — left over from the broken loads. Open a fresh tab before
 believing a console check.
 
+**Text-level folding must never see a comment.** `fold_branches` works on text. A WGSL
+comment saying "every `if (PROF)` away" became `if (false)` after the profiler
+substitution and was folded as code: everything up to the next matching brace vanished,
+glass constants included. The module then failed to compile, which shows only as
+"Invalid ComputePipeline" warnings and a black screen. Comments are now stripped before
+any folding. To find a compile error in the release, compile `build/min.wgsl` yourself
+and read `getCompilationInfo()` — the page only reports the invalid pipelines.
+
 **Generated names must contain a digit.** A two-letter pool produced `as`, a WGSL reserved
 word. Everything past the single letters now carries a digit.
 
@@ -335,13 +356,14 @@ with physical cores, not threads. Do not score with a lower quality to go faster
 ## Ground rules
 
 - Performance budget is **16.6 ms** at **1920×1080** (confirmed) on the compo PC, an **RTX
-  5070**. Dev is on a 4070, ~15–20% slower, so the number to hit here is **~19 ms**. Measured:
-  tower 13.6, pour 20.8, tier2 26.5 — it is camera-dependent, and only the worst shots fail.
-  Non-render passes are a flat ~3.8 ms. The one real win is skipping the particle-field sample
-  where the band is empty (~8 ms, no visual change); `bounces` is ~1.1 ms each after that.
-  Step count, reflections and photon count are **not** levers — measured, see the README.
-  Neither was the particle-field sample: skipping it exactly is worth 0.9 ms, not the 8 ms
-  that `parts=0` suggested. `bounces` (~1.1 ms each) is the only real one found so far.
+  5070**. Dev is on a 4070, ~15–20% slower, so the number to hit here is **~19 ms**. It is
+  camera-dependent and only the worst shots fail. The worst measured is the heavy natural
+  tier2 frame (step 3120): **26.9 total, 21.8 render** after the packed far field (was 29.9).
+  Non-render passes are ~5 ms there. Step count, reflections and photon count are **not**
+  levers, and neither was skipping empty particle blocks (0.9 ms, not the 8 that `parts=0`
+  suggested). What is left, from the profile in the README: the spray lookup, the ~68% of
+  trilerps that land outside the band, and the 10.7% of rays that exhaust the bounce budget
+  while taking ~30% of the march steps.
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
   stale. The dropper is ~324 bytes, leaving ~7870 for the payload. The harness as it stands
