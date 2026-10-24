@@ -770,14 +770,13 @@ fn photons(@builtin(global_invocation_id) g: vec3u) {
 fn clearFine(@builtin(global_invocation_id) g: vec3u) {
   if (g.x >= FINE * FINE * FINE) { return; }
   atomicStore(&fine[g.x], INFQ);
+  // the coarse occupancy blocks and far-field seed keys, in the same dispatch
+  if (g.x < COARSE * COARSE * COARSE) {
+    atomicStore(&occ[g.x], 0u);
+    atomicStore(&occ[COARSE * COARSE * COARSE + g.x], 0xFFFFFFFFu);
+  }
 }
 
-@compute @workgroup_size(64)
-fn clearCoarse(@builtin(global_invocation_id) g: vec3u) {
-  if (g.x >= COARSE * COARSE * COARSE) { return; }
-  atomicStore(&occ[g.x], 0u);
-  atomicStore(&occ[COARSE * COARSE * COARSE + g.x], 0xFFFFFFFFu);
-}
 
 // narrow-band exact scatter. Each particle deposits a swept CAPSULE, not a sphere: over
 // one shutter interval a falling drop traces a streak, and recording it as a point is what
@@ -795,6 +794,15 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
   if (i >= u32(u.nPart)) { return; }
   let p = parts[i];
   if (p.life <= 0.0) { return; }
+
+  // Far-field seed key for this particle's coarse cell (see the note on the coarse far
+  // field below): nearest to the cell centre wins, so the choice is the same every frame.
+  let sc = vec3i(floor((p.pos - DOM_LO) / CCELL));
+  if (all(sc >= vec3i(0)) && all(sc < vec3i(i32(COARSE)))) {
+    let cp = DOM_LO + (vec3f(sc) + 0.5) * CCELL;
+    let qd = u32(clamp(length(p.pos - cp) / CCELL, 0.0, 0.999) * 65535.0);
+    atomicMin(&occ[COARSE * COARSE * COARSE + cIdx(sc)], (qd << 16u) | (i & 0xFFFFu));
+  }
 
   var v = p.vel * u.shut;
   let L = length(v);
@@ -855,34 +863,12 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
 // ray took near the spray differed, and drops flickered with the simulation frozen. Now the
 // seed is the particle nearest the cell centre (atomicMin on distance << 16 | index) and
 // every flood pass reads one region and writes the other.
-@compute @workgroup_size(64)
-fn seedCoarse(@builtin(global_invocation_id) g: vec3u) {
-  let i = g.x;
-  if (i >= u32(u.nPart)) { return; }
-  let pt = parts[i];
-  if (pt.life <= 0.0) { return; }
-  let c = vec3i(floor((pt.pos - DOM_LO) / CCELL));
-  if (any(c < vec3i(0)) || any(c >= vec3i(i32(COARSE)))) { return; }
-  let cp = DOM_LO + (vec3f(c) + 0.5) * CCELL;
-  let qd = u32(clamp(length(pt.pos - cp) / CCELL, 0.0, 0.999) * 65535.0);
-  atomicMin(&occ[COARSE * COARSE * COARSE + cIdx(c)], (qd << 16u) | (i & 0xFFFFu));
-}
 
-// Pack what the render needs per coarse cell into one plain vec4: the seed particle's
+// Packed by resolveFine: what the render needs per coarse cell, in one plain vec4: the seed particle's
 // position, and in w: +1 a seed exists, +2 the block is occupied. Both of those live in
 // occ, which is atomic because the compute passes build it - and in the fragment shader an
 // atomicLoad is not a cached load. Two of them per liquidDist call, plus the dependent read
 // of the seed particle, ~114 M calls a frame on tier2.
-@compute @workgroup_size(64)
-fn packCoarse(@builtin(global_invocation_id) g: vec3u) {
-  let i = g.x;
-  if (i >= COARSE * COARSE * COARSE) { return; }
-  let qi = atomicLoad(&occ[2u * COARSE * COARSE * COARSE + i]);
-  var v = vec4f(0.0);
-  if (qi != 0xFFFFFFFFu) { v = vec4f(parts[qi].pos, 1.0); }
-  if (atomicLoad(&occ[i]) != 0u) { v.w += 2.0; }
-  coarse[i] = v;
-}
 
 // jump flooding on the coarse grid (in place) — far-field nearest-particle field
 @compute @workgroup_size(64)
@@ -920,6 +906,14 @@ fn resolveFine(@builtin(global_invocation_id) g: vec3u) {
   var d = BAND;
   if (q != INFQ) { d = f32(q) / QMAX * BAND; }
   fineF[i] = d;
+  // and pack the coarse cells for the render (see the note above)
+  if (i < COARSE * COARSE * COARSE) {
+    let qi = atomicLoad(&occ[2u * COARSE * COARSE * COARSE + i]);
+    var v = vec4f(0.0);
+    if (qi != 0xFFFFFFFFu) { v = vec4f(parts[qi].pos, 1.0); }
+    if (atomicLoad(&occ[i]) != 0u) { v.w += 2.0; }
+    coarse[i] = v;
+  }
 }
 
 // ═══════════════ liquid distance field ═══════════════
@@ -942,7 +936,7 @@ fn liquidDist(p: vec3f) -> f32 {
   // approximation. Clamp like fineAt does, so a point outside the domain tests the same
   // border block its corners clamp into.
   //
-  // The cell comes from `coarse`, packed by packCoarse, not from `occ`: occ is atomic, and
+  // The cell comes from `coarse`, packed by resolveFine, not from `occ`: occ is atomic, and
   // in a fragment shader an atomicLoad is not a cached load. Two of them per call plus the
   // dependent read of the seed particle cost 3.1 ms of tier2's 24.8 ms render, for values
   // that are bit-identical once packed.
@@ -1790,7 +1784,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 
   const P = {};
   for (const n of ('simParticles puddleUpdate glassUpdate waveUpdate puddleCoarse puddleJFA ' +
-                   'clearFine clearCoarse scatterFine seedCoarse jfaCoarse packCoarse resolveFine ' +
+                   'clearFine scatterFine jfaCoarse resolveFine ' +
                    'causticDecay photons causticBlur').split(' '))
     P[n] = device.createComputePipeline({ layout, compute: { module, entryPoint: n } });
   const render = device.createRenderPipeline({ layout,
@@ -2155,10 +2149,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     pass(1, [
       ['puddleCoarse', WG(PCN * PCN, 64)],
       ...JFA_STRIDES.map((_, k) => ['puddleJFA', WG(PCN * PCN, 64), k]),
-      ['clearFine', WG(FINE_N, 512)], ['clearCoarse', WG(COARSE_N, 64)],
-      ['scatterFine', WG(cfg.npart, 64)], ['seedCoarse', WG(cfg.npart, 64)],
+      ['clearFine', WG(FINE_N, 512)], ['scatterFine', WG(cfg.npart, 64)],
       ...JFA_STRIDES.map((_, k) => ['jfaCoarse', WG(COARSE_N, 64), CJSLOT + k]),
-      ['packCoarse', WG(COARSE_N, 64)], ['resolveFine', WG(FINE_N, 512)],
+      ['resolveFine', WG(FINE_N, 512)],
     ]);
 
     // 2b — caustics: fade the photon map, shoot this frame's photons, blur. A redraw keeps
