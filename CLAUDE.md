@@ -102,7 +102,12 @@ threshold high per step — concentric rings from a central source. Ramp it smoo
 replaced distant table with environment.
 
 **The canvas CSS stretches.** An explicit `w`/`h` whose aspect differs from the viewport was
-being squashed, so shape judgements were made on distorted frames. It letterboxes now.
+being squashed, so shape judgements were made on distorted frames. It letterboxes now — and
+the letterbox is recomputed whenever the viewport changes, not only at load. It used to skip
+the resize listener whenever `w`/`h` were given, so a page opened while the pane was hidden
+(viewport 0×0) scaled the canvas to `0px` and left it there: overlays visible, picture gone,
+GPU still rendering 1920×1080 at full cost. If the HUD is there and the render isn't, this
+is why.
 
 **A debug toggle must isolate exactly one thing.** `parts=0` also disabled the puddle, which
 sent a bisection at the wrong subsystem for several rounds. When a toggle's result is
@@ -133,11 +138,12 @@ between two `str.index` results will happily swallow everything in between.
 
 ## Ground rules
 
-- Performance budget is **16.6 ms** at 1920×1080 on the compo PC, which is an **RTX 5070**.
-  Dev is on a 4070, ~15–20% slower, so the number to hit here is **~19 ms**. Measured 36–40 ms
-  on the tower shot at 1080p (provisional, pane hidden), of which render is ~83%. Roughly 2×
-  over. The compo's display resolution is still unconfirmed and would change this more than
-  the GPU does.
+- Performance budget is **16.6 ms** at **1920×1080** (confirmed) on the compo PC, an **RTX
+  5070**. Dev is on a 4070, ~15–20% slower, so the number to hit here is **~19 ms**. Measured:
+  tower 13.6, pour 20.8, tier2 26.5 — it is camera-dependent, and only the worst shots fail.
+  Non-render passes are a flat ~3.8 ms. The one real win is skipping the particle-field sample
+  where the band is empty (~8 ms, no visual change); `bounces` is ~1.1 ms each after that.
+  Step count, reflections and photon count are **not** levers — measured, see the README.
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
   stale. The dropper is ~324 bytes, leaving ~7870 for the payload. The harness as it stands

@@ -136,31 +136,68 @@ That fixes the number to aim at: 16.6 ms on the 5070 is about **19 ms on the 407
 
 CPU and disk don't matter here — one draw call, everything GPU-side.
 
-**The compo's display resolution is still unknown, and it matters more than the GPU.** At
-2560×1440 the pixel count rises 1.78×, costing several times whatever the 5070 gives back.
+The compo runs at **1920×1080**, confirmed with the organisers.
 
 ### Where it stands
 
-RTX 4070, 1920×1080, tower shot at fill 80, everything on. **Provisional** — see the caveat:
+RTX 4070, 1920×1080, every camera preset at fill 88, everything on. Median of ~20 samples
+after warm-up, window on screen:
 
-| Pass | ms | grows with resolution |
-|---|---|---|
-| sim | 0.20 | no |
-| build | 1.9–2.4 | no |
-| photons + blur | 4.0 | partly |
-| render | 29.9–33.0 | yes |
-| **total** | **36–40** | |
+| Shot | sim | build | photon | render | **total** | fps |
+|---|---|---|---|---|---|---|
+| tower | 0.13 | 1.84 | 1.84 | 9.76 | **13.57** | 74 |
+| bottl | 0.20 | 1.84 | 1.84 | 12.45 | **16.25** | 62 |
+| macro | 0.13 | 1.84 | 1.84 | 13.43 | **17.24** | 58 |
+| top | 0.13 | 1.84 | 1.84 | 15.66 | **19.46** | 52 |
+| pour | 0.20 | 1.84 | 1.84 | 17.04 | **20.84** | 50 |
+| **tier2** | 0.20 | 1.84 | 1.84 | **22.61** | **26.48** | 38 |
 
-Against a 19 ms target that is **roughly 2× over**, and the render pass is ~83% of it. So the
-levers that matter are the ones inside it: the `bounces` default (10), half-resolution
-refracted paths, step count, better early-outs. Photon count and the 320³ build are ~6 ms of
-fixed cost at any resolution — going after those first would be optimising the small sixth.
+Everything but `render` is flat at **~3.8 ms** regardless of shot or resolution. `render`
+swings 9.8–22.6 depending on how much glass and liquid the camera is looking through.
 
-**Caveat.** Taken with the browser pane hidden, where the page runs as a background page at
-~2 fps. The per-pass timestamps measure real GPU work, but a GPU idling 90% of the time
-downclocks, so these are an upper bound of unknown tightness. Re-measure with the window
-actually on screen before trading any quality away. (The older 17.7 ms figure was at the
-pane's own 1100×880 and was never comparable to the budget.)
+Against the 19 ms target: four of six shots pass, `pour` is 10% over and `tier2` is **40%
+over**. It is a camera-dependent problem, not a uniform one, which matters for the timeline —
+the cheapest shots are also the widest, and tier2 is the expensive one to linger on.
+
+### What each lever actually buys
+
+Measured on `tier2` at fill 88, the worst shot. Baseline render 22.61, total 26.48:
+
+| Change | render | total | saves |
+|---|---|---|---|
+| `bounces` 10 –> 8 | 20.45 | 24.25 | 2.2 |
+| `bounces` 10 –> 6 | 17.76 | 21.56 | 4.9 |
+| `bounces` 10 –> 4 | 14.68 | 18.61 | **7.9** |
+| `parts=0` (no particle field) | 15.01 | 18.48 | **8.0** |
+| `bubbles=0` | 21.23 | 25.03 | 1.5 |
+| `nphoton` 65536 –> 16384 | 22.68 | 26.02 | 0.5 |
+| `steps` 160 –> 120 | 22.54 | 26.35 | 0.1 |
+| `refl=0` | 22.68 | 26.48 | 0.0 |
+
+Three of those are worth knowing because they are **not** levers. Step count does nothing —
+the march is bounce-limited, not step-limited, so rays are terminating on hits long before
+the cap and lowering it only risks artifacts. Reflections are free. Photons are nearly free,
+so the caustics cost almost nothing to keep.
+
+The two that matter:
+
+1. **The particle field costs 8 ms of render — a third of the frame — with ~460 particles
+   alive.** `build` is unchanged at 1.84 with `parts=0`, so this is not the grid build: it is
+   the per-step cost of sampling the narrow band inside `map()`, paid on every step of every
+   ray whether or not a particle is anywhere near. That is the one real optimisation, and it
+   is a correctness-free win: a coarse occupancy test that skips the trilerp where the band
+   is empty changes no pixel. Worth finding out first whether the cost is the 320³ fine
+   trilerp or the 32³ JFA lookup.
+2. **`bounces` is ~1.1 ms each.** Real quality is traded here, and 10 was chosen to fix the
+   checkerboard breakup deep in the tower, so this is the reserve rather than the first move.
+
+Doing (1) alone brings `tier2` to roughly 18.5 ms, which clears the target without touching
+the look.
+
+**Measure with the window on screen.** The same tier2 shot read 36–40 ms with the browser pane
+hidden — roughly 3× inflated, because a background page runs at ~2 fps and the GPU
+downclocks between frames. An earlier 17.7 ms figure was taken at the pane's own 1100×880 and
+was never comparable to the budget at all.
 
 ### WebGPU limits that must be requested
 
@@ -217,7 +254,9 @@ exploring costs nothing.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, puddle, bottle, lighting.
 
 Next:
-1. **Optimisation pass** — get back under 16.6 ms.
+1. **Optimisation pass** — skip the particle-field sample where the narrow band is empty.
+   That is ~8 ms on the worst shot and costs nothing visually; see *What each lever actually
+   buys*. `bounces` is the reserve after that.
 2. Bloom.
 3. Fluid inside the bottle (it is an empty shell today).
 4. Camera and timeline.

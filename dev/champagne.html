@@ -1521,20 +1521,29 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   }
   const ts = i => hasTS ? { querySet: qset, beginningOfPassWriteIndex: i * 2, endOfPassWriteIndex: i * 2 + 1 } : undefined;
 
+  let lastVW = -1, lastVH = -1;
   function resize() {
-    canvas.width  = Math.max(1, Math.floor(cfg.w || canvas.clientWidth));
-    canvas.height = Math.max(1, Math.floor(cfg.h || canvas.clientHeight));
+    const bw = Math.max(1, Math.floor(cfg.w || canvas.clientWidth));
+    const bh = Math.max(1, Math.floor(cfg.h || canvas.clientHeight));
+    if (canvas.width  !== bw) canvas.width  = bw;
+    if (canvas.height !== bh) canvas.height = bh;
+    if (!cfg.w || !cfg.h) return;
     // The CSS stretches the canvas to the viewport, so an explicit w/h of a different
     // aspect silently distorts the picture. Letterbox rather than lie about proportions.
-    if (cfg.w && cfg.h) {
-      const k = Math.min(innerWidth / cfg.w, innerHeight / cfg.h);
-      canvas.style.width  = (cfg.w * k) + 'px';
-      canvas.style.height = (cfg.h * k) + 'px';
-      canvas.style.margin = ((innerHeight - cfg.h * k) / 2) + 'px auto 0';
-    }
+    // A viewport of zero (pane hidden at load, tab restored in the background) scaled it
+    // to 0px and left it there - invisible, while the GPU went on rendering full size -
+    // because the explicit-size path skipped the resize listener. Never apply a zero, and
+    // re-check whenever the viewport changes rather than only at load.
+    if (innerWidth < 1 || innerHeight < 1) return;
+    if (innerWidth === lastVW && innerHeight === lastVH) return;
+    lastVW = innerWidth; lastVH = innerHeight;
+    const k = Math.min(innerWidth / cfg.w, innerHeight / cfg.h);
+    canvas.style.width  = (cfg.w * k) + 'px';
+    canvas.style.height = (cfg.h * k) + 'px';
+    canvas.style.margin = ((innerHeight - cfg.h * k) / 2) + 'px auto 0';
   }
   resize();
-  if (!cfg.w && !cfg.h) addEventListener('resize', resize);
+  addEventListener('resize', resize);
 
   const SIM_DT = 1 / 60;
   let simAcc = 0;
@@ -1753,6 +1762,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     readParts();
     readPuddle();
 
+    resize();   // the pane can be shown or resized without firing a resize event
     frameNo++; simStep += simSteps; probe.frames = frameNo; probe.ok = true;
     const dt = now - last; last = now;
     acc += dt; accN++;
