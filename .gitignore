@@ -9,3 +9,5 @@ build/min.wgsl
 build/min.js
 build/strip.js
 build/_min.js
+build/intro.cmd
+build/extracted.html

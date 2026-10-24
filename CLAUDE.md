@@ -190,6 +190,21 @@ word. Everything past the single letters now carries a digit.
 Bisect a broken build by stage, not by reading: comments, then whitespace, then renaming,
 each as its own payload. That found the renamer in three page loads.
 
+## Packaging
+
+**Brotli is not available to a dropper, and this is measured.** Stock Windows PowerShell is
+5.1 on .NET Framework: `DeflateStream` yes, `BrotliStream` no, and no `pwsh` 7 to fall back
+on. The browser is no help either — `DecompressionStream` does gzip, deflate and
+deflate-raw, never brotli. Any brotli figure in a size estimate is only real if the entry is
+a native exe. Check before planning against a number.
+
+**`New-Object ...DeflateStream($m,0)` throws on an ambiguous overload**, because 0 fits both
+`CompressionMode` and `CompressionLevel`. Name the enum. Costs 33 bytes in the dropper.
+
+A dropper that inflates is why the payload needs no encoding at all: base64 costs a third,
+and the byte-string alternative still needs escaping. Let PowerShell do the inflating and
+the bytes go in raw.
+
 ## Ground rules
 
 - Performance budget is **16.6 ms** at **1920×1080** (confirmed) on the compo PC, an **RTX

@@ -422,17 +422,41 @@ else goes by rule, so the harness cannot quietly end up in the release:
 |---|---|
 | payload, uncompressed | 32 751 |
 | deflate-raw | 11 267 |
-| **brotli q11** | **10 199** |
-| `intro.html`, runnable | 15 292 |
+| brotli q11 | 10 216 |
+| dropper header | 345 |
+| **`intro.cmd`, the deliverable** | **11 612** |
+| `intro.html` (base64, test convenience only) | 15 296 |
 
-Against 8192 with a ~324-byte dropper, that is **10 523 — over by 2 331**, or about 28%.
-Which is close enough to be worth saying plainly: the squeeze is a known amount of work, not
-an open question, and that is before a single byte of music.
+**11 612 against 8192 — over by 3 420**, about 42%, before a byte of music.
 
-The runnable `intro.html` is larger than the brotli figure for two reasons, both fixable:
-it carries the payload as base64, which costs a third, and browsers cannot inflate brotli
-from `DecompressionStream` — only deflate. A dropper that hands raw bytes to the page
-avoids both.
+### Brotli is not reachable from a dropper
+
+This was measured, not assumed. Stock Windows PowerShell is 5.1 on .NET Framework, which
+has `DeflateStream` but **no `BrotliStream`**; `pwsh` 7 is not a safe assumption on a compo
+machine. The browser cannot help either: `DecompressionStream` supports gzip, deflate and
+deflate-raw, and **no brotli**. So every route that is not a native exe pays deflate, and
+the 10 216 brotli figure is a fantasy number for this packaging — the real one is 11 267
+plus the dropper.
+
+That makes the gap 3 420 rather than 2 331, and it reframes the choice. Either accept
+deflate and find the bytes elsewhere, or go to a native exe, where Crinkler's context
+modelling beats brotli outright at this size. Two cheaper levers exist on stock Windows and
+are worth measuring before giving up on the script route: `RtlDecompressBuffer` in ntdll
+exposes LZMS, and `expand.exe` reads LZX cabinets. Both beat deflate; both cost dropper
+bytes to reach.
+
+### The dropper
+
+`intro.cmd` is a batch line that hands itself to PowerShell, which reads its own file,
+inflates everything past a fixed offset and opens the result. Because the dropper inflates,
+the payload sits in the file as **raw bytes** — no base64, no string escaping, no encoding
+overhead at all. The offset is written into the header and padded to a fixed width, so the
+digit count cannot move what it points at.
+
+Verified end to end: running `intro.cmd` writes a file byte-identical to the build's payload
+and the extracted page renders with no errors. `intro.html` still comes out for quick
+browser testing, but it carries base64 and reads about 30% too big; the deliverable is the
+`.cmd`.
 
 The remaining levers, largest first:
 

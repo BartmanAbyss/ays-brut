@@ -230,7 +230,32 @@ def main():
               '</script>')
     io.open(OUT, 'wb').write(loader.encode())
 
+    # ── the real deliverable: a self-extracting .cmd ────────────────────────────
+    # Stock Windows PowerShell is 5.1 on .NET Framework, which has DeflateStream but
+    # NOT BrotliStream, and pwsh 7 is not a safe assumption on a compo machine. So the
+    # dropper inflates deflate; brotli is only reachable from a native exe. Because the
+    # dropper inflates, the payload sits in the file as RAW BYTES - no base64, no string
+    # escaping, no encoding overhead at all.
+    head = ('@set "f=%~f0"&powershell -nop -ep bypass -c '
+            '"$b=[IO.File]::ReadAllBytes($env:f);'
+            '$m=New-Object IO.MemoryStream(,$b[@@@@@..($b.Length-1)]);'
+            # New-Object cannot tell CompressionMode 0 from CompressionLevel 0, so the
+            # enum is named explicitly - 33 bytes to stop an ambiguous-overload throw
+            '$d=New-Object IO.Compression.DeflateStream($m,[IO.Compression.CompressionMode]0);'
+            '$o=New-Object IO.MemoryStream;$d.CopyTo($o);'
+            "$h=$env:TEMP+'\\i.html';"
+            '[IO.File]::WriteAllBytes($h,$o.ToArray());start $h"&exit/b\r\n')
+    # the offset is written into the header itself, so it is padded to a fixed width to
+    # stop the digit count from moving what it points at
+    off = len(head.encode('ascii'))
+    head = head.replace('@@@@@', str(off).rjust(5, '0'))
+    assert len(head.encode('ascii')) == off, 'header length moved'
+    cmd = head.encode('ascii') + raw_deflate
+    io.open(os.path.join(ROOT, 'intro.cmd'), 'wb').write(cmd)
+
     print()
+    print('dropper header         %8d' % off)
+    print('intro.cmd (DELIVERABLE)%8d' % len(cmd))
     print('payload (uncompressed) %8d' % len(pb))
     print('deflate-raw            %8d' % len(raw_deflate))
     if br:
@@ -245,6 +270,8 @@ def main():
               'UNDER' if len(br) + drop <= budget else 'OVER by %d' % (len(br) + drop - budget)))
     print('self-extracting html   %8d   %s' % (len(loader.encode()),
           'UNDER' if len(loader.encode()) <= budget else 'OVER by %d' % (len(loader.encode()) - budget)))
+    print('intro.cmd              %8d   %s' % (len(cmd),
+          'UNDER' if len(cmd) <= budget else 'OVER by %d' % (len(cmd) - budget)))
 
 
 main()
