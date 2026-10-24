@@ -113,6 +113,14 @@ is why.
 sent a bisection at the wrong subsystem for several rounds. When a toggle's result is
 surprising, check the toggle before believing it.
 
+**A toggle that removes geometry does not measure the cost of sampling it.** `parts=0` looked
+like it proved the particle field cost 8 ms of render, and the conclusion written down was
+that an occupancy skip would recover it for free. It recovered 0.9. Turning the field off
+also deletes the spray, so rays stop marching around it and refracting through it and finish
+in fewer bounces — most of that 8 ms is what the spray costs to draw. Before calling a number
+overhead, ask what else the toggle changed; the honest test is a change that removes the work
+while keeping the picture, which is what the skip finally was.
+
 ## Conventions
 
 - WGSL and JS in one file; keep the dev scaffolding separable, since the build will strip it.
@@ -144,6 +152,8 @@ between two `str.index` results will happily swallow everything in between.
   Non-render passes are a flat ~3.8 ms. The one real win is skipping the particle-field sample
   where the band is empty (~8 ms, no visual change); `bounces` is ~1.1 ms each after that.
   Step count, reflections and photon count are **not** levers — measured, see the README.
+  Neither was the particle-field sample: skipping it exactly is worth 0.9 ms, not the 8 ms
+  that `parts=0` suggested. `bounces` (~1.1 ms each) is the only real one found so far.
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
   stale. The dropper is ~324 bytes, leaving ~7870 for the payload. The harness as it stands

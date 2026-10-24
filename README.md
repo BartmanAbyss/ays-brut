@@ -152,6 +152,8 @@ after warm-up, window on screen:
 | pour | 0.20 | 1.84 | 1.84 | 17.04 | **20.84** | 50 |
 | **tier2** | 0.20 | 1.84 | 1.84 | **22.61** | **26.48** | 38 |
 
+`tier2` is 25.5 after the occupancy skip described below; the rest are unchanged.
+
 Everything but `render` is flat at **~3.8 ms** regardless of shot or resolution. `render`
 swings 9.8–22.6 depending on how much glass and liquid the camera is looking through.
 
@@ -174,25 +176,36 @@ Measured on `tier2` at fill 88, the worst shot. Baseline render 22.61, total 26.
 | `steps` 160 –> 120 | 22.54 | 26.35 | 0.1 |
 | `refl=0` | 22.68 | 26.48 | 0.0 |
 
-Three of those are worth knowing because they are **not** levers. Step count does nothing —
-the march is bounce-limited, not step-limited, so rays are terminating on hits long before
-the cap and lowering it only risks artifacts. Reflections are free. Photons are nearly free,
-so the caustics cost almost nothing to keep.
+Four of those are worth knowing because they are **not** levers. Step count does nothing —
+the march is bounce-limited, not step-limited, so rays terminate on hits long before the cap
+and lowering it only risks artifacts. Reflections are free. Photons are nearly free, so the
+caustics cost almost nothing to keep.
 
-The two that matter:
+**`parts=0` is not a lever either, and reading it as one was a mistake.** It does not merely
+stop sampling the particle field: it removes the particle *geometry*, so rays no longer march
+around the stream or refract through droplets, and they finish in fewer bounces. That 8 ms is
+what the spray costs to draw, not overhead waiting to be optimised away.
 
-1. **The particle field costs 8 ms of render — a third of the frame — with ~460 particles
-   alive.** `build` is unchanged at 1.84 with `parts=0`, so this is not the grid build: it is
-   the per-step cost of sampling the narrow band inside `map()`, paid on every step of every
-   ray whether or not a particle is anywhere near. That is the one real optimisation, and it
-   is a correctness-free win: a coarse occupancy test that skips the trilerp where the band
-   is empty changes no pixel. Worth finding out first whether the cost is the 320³ fine
-   trilerp or the 32³ JFA lookup.
-2. **`bounces` is ~1.1 ms each.** Real quality is traded here, and 10 was chosen to fix the
-   checkerboard breakup deep in the tower, so this is the reserve rather than the first move.
+The test that settled it: a coarse occupancy grid (below) now skips the eight narrow-band
+fetches wherever the band is provably empty, leaving the geometry untouched. If the 8 ms had
+been fetch cost, that would have recovered most of it. Measured:
 
-Doing (1) alone brings `tier2` to roughly 18.5 ms, which clears the target without touching
-the look.
+| Shot | before | after | saved |
+|---|---|---|---|
+| tier2 | 26.41 | 25.49 | 0.92 |
+| pour | 20.84 | 20.77 | 0.07 |
+| tower | 13.57 | 13.76 | –0.19 (noise) |
+
+So the eight scattered reads were already close to free — they are coherent for coherent
+rays, and most of the 125 MiB buffer holds the same clamped BAND value, which caches well.
+The skip is kept because it is exact and helps the one shot that fails, but it is marginal
+and a fair candidate to drop during the size squeeze.
+
+**That leaves `bounces` as the only real lever**, at ~1.1 ms each, and it trades the quality
+it was raised to 10 to protect (checkerboard breakup deep in the tower). `tier2` at 25.5 ms
+needs ~6 ms, which is most of the way back to the artifacts. The better answers are probably
+not in the renderer: a throughput early-out already exists at `tp < 0.02` and could be raised,
+and the timeline does not have to hold on `tier2`, which is the only shot far over.
 
 **Measure with the window on screen.** The same tier2 shot read 36–40 ms with the browser pane
 hidden — roughly 3× inflated, because a background page runs at ~2 fps and the GPU
@@ -254,9 +267,10 @@ exploring costs nothing.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, puddle, bottle, lighting.
 
 Next:
-1. **Optimisation pass** — skip the particle-field sample where the narrow band is empty.
-   That is ~8 ms on the worst shot and costs nothing visually; see *What each lever actually
-   buys*. `bounces` is the reserve after that.
+1. **Optimisation pass** — still open. The occupancy skip is in and bought 0.9 ms on the
+   worst shot, not the 8 predicted; see *What each lever actually buys* for why. `tier2` is
+   25.5 ms against ~19. Untried: raising the `tp < 0.02` throughput cutoff, and keeping the
+   timeline off the shots that fail.
 2. Bloom.
 3. Fluid inside the bottle (it is an empty shell today).
 4. Camera and timeline.

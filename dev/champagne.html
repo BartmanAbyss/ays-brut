@@ -104,6 +104,7 @@ struct Particle { pos : vec3f, life : f32, vel : vec3f, _p : f32 };
 @group(0) @binding(11) var<storage, read_write> pud    : array<f32>;       // puddle depth on the table
 @group(0) @binding(12) var<storage, read_write> pudA   : array<atomic<u32>>;  // puddle inflow
 @group(0) @binding(13) var<storage, read_write> pudC   : array<vec4f>;     // maxH, nearest wet block xz, valid
+@group(0) @binding(14) var<storage, read_write> occ    : array<atomic<u32>>; // COARSE^3 narrow-band occupancy
 @group(1) @binding(0) var<uniform> j : J;
 
 // ── glass geometry (metres) ───────────────────────────────
@@ -720,6 +721,7 @@ fn clearFine(@builtin(global_invocation_id) g: vec3u) {
 fn clearCoarse(@builtin(global_invocation_id) g: vec3u) {
   if (g.x >= COARSE * COARSE * COARSE) { return; }
   coarse[g.x] = vec4f(0.0, 0.0, 0.0, 0.0);
+  atomicStore(&occ[g.x], 0u);
 }
 
 // narrow-band exact scatter. Each particle deposits a swept CAPSULE, not a sphere: over
@@ -759,6 +761,21 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
         if (d < BAND) {
           atomicMin(&fine[fIdx(cc)], u32(clamp(d / BAND, 0.0, 1.0) * QMAX));
         }
+      }
+    }
+  }
+
+  // Mark the coarse blocks this capsule can reach, DILATED BY ONE BLOCK, so that an
+  // unmarked block proves its whole one-block neighbourhood is untouched. liquidDist
+  // trilerps eight cells that straddle p and may fall into a neighbouring block, so the
+  // dilation is what makes skipping them exact rather than merely usually right.
+  let bs  = i32(FINE / COARSE);                 // 10 fine cells per block
+  let blo = clamp(lo / bs - vec3i(1), vec3i(0), vec3i(i32(COARSE) - 1));
+  let bhi = clamp(hi / bs + vec3i(1), vec3i(0), vec3i(i32(COARSE) - 1));
+  for (var z = blo.z; z <= bhi.z; z++) {
+    for (var y = blo.y; y <= bhi.y; y++) {
+      for (var x = blo.x; x <= bhi.x; x++) {
+        atomicStore(&occ[cIdx(vec3i(x, y, z))], 1u);
       }
     }
   }
@@ -824,15 +841,25 @@ fn liquidDist(p: vec3f) -> f32 {
   // the particle toggle must isolate ONLY the particle field - returning early here also
   // disabled the puddle, which made an earlier bisection point at the wrong thing
   if (u.pfield < 0.5) { return min(bulkSDF(p), dPud); }
-  let gp = (p - DOM_LO) / FCELL - 0.5;
-  let b  = floor(gp);
-  let f  = gp - b;
-  let c  = vec3i(b);
-  let x00 = mix(fineAt(c + vec3i(0,0,0)), fineAt(c + vec3i(1,0,0)), f.x);
-  let x10 = mix(fineAt(c + vec3i(0,1,0)), fineAt(c + vec3i(1,1,0)), f.x);
-  let x01 = mix(fineAt(c + vec3i(0,0,1)), fineAt(c + vec3i(1,0,1)), f.x);
-  let x11 = mix(fineAt(c + vec3i(0,1,1)), fineAt(c + vec3i(1,1,1)), f.x);
-  let tri = mix(mix(x00, x10, f.y), mix(x01, x11, f.y), f.z);
+  // The eight trilerp fetches are scattered reads out of a 125 MiB buffer and they were a
+  // third of the whole frame, paid on every march step whether or not a particle is within
+  // reach. One read of the 128 KiB occupancy grid - which stays in L2 - answers that, and
+  // an unmarked block guarantees all eight corners hold BAND (see the dilation in
+  // scatterFine), so this is exact, not an approximation. Clamp like fineAt does, so a
+  // point outside the domain tests the same border block its corners clamp into.
+  let oc = vec3i(clamp(floor((p - DOM_LO) / CCELL), vec3f(0.0), vec3f(f32(COARSE) - 1.0)));
+  var tri = BAND;
+  if (atomicLoad(&occ[cIdx(oc)]) != 0u) {
+    let gp = (p - DOM_LO) / FCELL - 0.5;
+    let b  = floor(gp);
+    let f  = gp - b;
+    let c  = vec3i(b);
+    let x00 = mix(fineAt(c + vec3i(0,0,0)), fineAt(c + vec3i(1,0,0)), f.x);
+    let x10 = mix(fineAt(c + vec3i(0,1,0)), fineAt(c + vec3i(1,1,0)), f.x);
+    let x01 = mix(fineAt(c + vec3i(0,0,1)), fineAt(c + vec3i(1,0,1)), f.x);
+    let x11 = mix(fineAt(c + vec3i(0,1,1)), fineAt(c + vec3i(1,1,1)), f.x);
+    tri = mix(mix(x00, x10, f.y), mix(x01, x11, f.y), f.z);
+  }
 
   // far field from the coarse jump-flood result
   let cc = vec3i(clamp(floor((p - DOM_LO) / CCELL), vec3f(0.0), vec3f(f32(COARSE) - 1.0)));
@@ -1415,6 +1442,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     { binding: 11, visibility: VIS, buffer: { type: 'storage' } },
     { binding: 12, visibility: VIS, buffer: { type: 'storage' } },
     { binding: 13, visibility: VIS, buffer: { type: 'storage' } },
+    { binding: 14, visibility: VIS, buffer: { type: 'storage' } },
   ]});
   const bgl1 = device.createBindGroupLayout({ entries: [
     { binding: 0, visibility: VIS, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 } },
@@ -1441,6 +1469,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   device.queue.writeBuffer(pud,  0, new Float32Array(PN * PN));
   device.queue.writeBuffer(pudA, 0, new Uint32Array(PN * PN));
   const pudC    = device.createBuffer({ size: PCN * PCN * 16, usage: S });
+  const occB    = device.createBuffer({ size: COARSE_N * 4, usage: S });
   device.queue.writeBuffer(pudC, 0, new Float32Array(PCN * PCN * 4));
   const glassRd = device.createBuffer({ size: NG * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const pudRd = device.createBuffer({ size: PCN * PCN * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
@@ -1479,6 +1508,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     { binding: 11, resource: { buffer: pud } },
     { binding: 12, resource: { buffer: pudA } },
     { binding: 13, resource: { buffer: pudC } },
+    { binding: 14, resource: { buffer: occB } },
   ]});
   const bg1 = device.createBindGroup({ layout: bgl1, entries: [
     { binding: 0, resource: { buffer: jbo, size: 16 } },
