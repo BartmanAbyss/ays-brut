@@ -387,6 +387,63 @@ also bans "purely generated effects or shaders". The NFO must carry this.
 
 ---
 
+## Build
+
+```bash
+python build/build.py
+```
+
+One source of truth: `dev/champagne.html`. The build strips the harness, inlines the values
+the debug panel used to supply, minifies, and packs the result into `build/intro.html`, a
+self-extracting page that inflates itself with `DecompressionStream`. It needs Python with
+`brotli`, and Node for `terser`.
+
+Dev-only code is bracketed with `//#D{` / `//#D}` in both the WGSL and the JS. Everything
+else goes by rule, so the harness cannot quietly end up in the release:
+
+- Lines mentioning `probe`, `fail(`, `setUI(`, `hasTS`, the readbacks or the query-set
+  plumbing are dropped. A handful of lines mix harness and release work in one statement
+  and are rewritten explicitly instead.
+- `cfg.*` and `ui.*` are replaced with literals — `ui.*` read straight out of the panel's
+  own `SPEC` table, so the release cannot drift from the defaults you tuned by hand. The
+  build asserts that none survive.
+- WGSL identifiers are renamed, except entry points and anything quoted in the JS.
+
+### Where it lands today (no music, first draft timeline)
+
+| Stage | WGSL | JS |
+|---|---|---|
+| source | 51 136 | 43 520 |
+| harness stripped | 47 351 | 24 259 |
+| dev code removed | 47 351 | 20 924 |
+| minified | 23 674 | 8 853 |
+
+| Packed | bytes |
+|---|---|
+| payload, uncompressed | 32 751 |
+| deflate-raw | 11 267 |
+| **brotli q11** | **10 199** |
+| `intro.html`, runnable | 15 292 |
+
+Against 8192 with a ~324-byte dropper, that is **10 523 — over by 2 331**, or about 28%.
+Which is close enough to be worth saying plainly: the squeeze is a known amount of work, not
+an open question, and that is before a single byte of music.
+
+The runnable `intro.html` is larger than the brotli figure for two reasons, both fixable:
+it carries the payload as base64, which costs a third, and browsers cannot inflate brotli
+from `DecompressionStream` — only deflate. A dropper that hands raw bytes to the page
+avoids both.
+
+The remaining levers, largest first:
+
+1. **WGSL local names.** Only globals are renamed today. Locals are most of the identifiers.
+2. **Dead branches.** `view`, `gridEnv`, `noliq` and the feature toggles are uniforms the
+   release never varies; a constant-folding pass would delete whole code paths.
+3. **The packer.** INCENDIUM's search over statement orderings, scored by compressed size.
+4. The occupancy skip, which buys 0.9 ms and costs bytes — a fair trade to reverse at the end.
+
+---
+
 ## Credits / prior art
 
 - **INCENDIUM** (Bercon + pestis, Revision 2025) — 4 kb WebGPU intro with a 3D fluid sim and

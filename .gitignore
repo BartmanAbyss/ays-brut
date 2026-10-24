@@ -1,4 +1,11 @@
 recovered.txt
 *.log
-build/
 .DS_Store
+
+# build outputs - the script is tracked, what it produces is not
+# regenerate with: python build/build.py
+build/intro.html
+build/min.wgsl
+build/min.js
+build/strip.js
+build/_min.js

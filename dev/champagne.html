@@ -1231,6 +1231,7 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
 
   var col = tonemap(acc * u.expo);
 
+//#D{
   let v = u.view;
   if (v > 0.5 && v < 1.5) {
     col = turbo(steps / (u.maxSteps * 2.0));
@@ -1324,6 +1325,7 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
     }
   }
 
+//#D}
   col = pow(max(col, vec3f(0.0)), vec3f(0.4545));
   return vec4f(col, 1.0);
 }
@@ -1373,6 +1375,7 @@ const FINE = 320, COARSE = 32, NG = 14, WN = 32, CN = 768, PN = 384, PCN = 48;
 const FINE_N = FINE ** 3, COARSE_N = COARSE ** 3;
 const JFA_STRIDES = [16, 8, 4, 2, 1];
 
+//#D{
 const errEl = document.getElementById('err');
 const hudEl = document.getElementById('hud');
 const errors = [];
@@ -1390,6 +1393,7 @@ const probe = {
   drift: 0, resyncs: 0, step: 0, showT: 0, shot: 0,
 };
 window.__probe = () => JSON.parse(JSON.stringify(probe));
+//#D}
 
 (async function main() {
   const canvas = document.getElementById('c');
@@ -1546,6 +1550,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   if (verr) fail('pipeline', verr.message);
 
   // ── timing: 3 labelled pass groups ──
+  //#D{
   const LABELS = ['sim', 'build', 'photon', 'render'];
   let qset = null, qres = null, qrd = null, qbusy = false;
   if (hasTS) {
@@ -1554,6 +1559,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     qrd  = device.createBuffer({ size: LABELS.length * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   }
   const ts = i => hasTS ? { querySet: qset, beginningOfPassWriteIndex: i * 2, endOfPassWriteIndex: i * 2 + 1 } : undefined;
+  //#D}
 
   let lastVW = -1, lastVH = -1;
   function resize() {
@@ -1630,6 +1636,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     device.queue.writeBuffer(ubo, 0, f32);
   }
 
+  //#D{
   async function readTimestamps() {
     if (!hasTS || qbusy || qrd.mapState !== 'unmapped') return;
     qbusy = true;
@@ -1714,6 +1721,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     gbusy = false;
   }
 
+  //#D}
   const WG = (n, s) => Math.ceil(n / s);
 
   function frame() {
@@ -1858,8 +1866,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     if (!cfg.still || frameNo < cfg.warm) requestAnimationFrame(frame); else updateHud();
   }
 
+  //#D{
   function frameOnce() { const was = cfg.paused; cfg.paused = false; frame(); cfg.paused = was; }
+  //#D}
 
+  //#D{
   function updateHud() {
     const g = probe.gpuMs;
     const f = k => g[k] !== undefined ? g[k].toFixed(2) : '—';
@@ -1880,6 +1891,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       (errors.length ? '\nERRORS ' + errors.length : '');
   }
 
+  //#D}
   // ── timeline ──
   // Keys are [t, angle deg, dist, camY, tgtY, simSpeed, ease]. Two keys sharing a t are
   // a CUT: the later one wins at that instant, so the change is immediate rather than a
@@ -1914,6 +1926,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const m = k => a[k] + (b[k] - a[k]) * u;
     return { shot: i, angle: m(1), dist: m(2), camY: m(3), tgtY: m(4), speed: m(5) };
   }
+  //#D{
   // Sim seconds elapsed by show time t. A seek needs the same integral the frame loop
   // builds step by step, or scrubbing would land somewhere playback never visits.
   function showIntegral(t) {
@@ -1938,7 +1951,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     if (cfg.paused) { requestAnimationFrame(frameOnce); }
   }
 
+  //#D}
   // ── debug panel ──
+  //#D{
   const SPEC = [
     ['show',     'check', false],
     ['showT',    'range', 0,    0,    SHOW_END, 0.05, 2],
@@ -2121,10 +2136,12 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   window.__pause  = () => { setPaused(true);  return 'paused'; };
   window.__resume = () => { setPaused(false); return 'running'; };
   setPaused(cfg.paused);
+  //#D}
 
   if (!cfg.paused) requestAnimationFrame(frame);
 
   // frame-count driven, not wall-clock: rAF pauses when the page isn't painting
+  //#D{
   function runSelftest() {
     {
       const r = {};
@@ -2139,6 +2156,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       console.log('SELFTEST ' + (r.PASS ? 'PASS' : 'FAIL') + ' ' + JSON.stringify(r));
     }
   }
+  //#D}
 })().catch(e => fail('main', e));
 </script>
 </body>

@@ -167,6 +167,29 @@ held the old document in its back-cache. Commit before structural edits.
 When patching with a script, anchor on unique strings and assert the match count. Replacing
 between two `str.index` results will happily swallow everything in between.
 
+## Building
+
+`python build/build.py` produces `build/intro.html`. Dev-only code sits between `//#D{` and
+`//#D}`; everything else the build decides by rule (see the README). Three things it has
+already cost, all of which look like success until you check:
+
+**A renamed entry point is a WARNING, not an error.** The minifier renamed `vs` and `fs`
+because `@vertex fn vs(` sits on one line and the guard pattern expected a newline. The
+shader compiled clean, the pipelines came back invalid, and WebGPU said so at warning level
+— so `read_console_messages` with `onlyErrors` showed nothing and the screen was simply
+black. Entry points are now protected twice: by attribute, and by every quoted word in the
+JS. When the build renders black, check the console WITHOUT the error filter first.
+
+**The console buffer survives navigation.** After fixing it, the same invalid-pipeline
+warnings were still listed — left over from the broken loads. Open a fresh tab before
+believing a console check.
+
+**Generated names must contain a digit.** A two-letter pool produced `as`, a WGSL reserved
+word. Everything past the single letters now carries a digit.
+
+Bisect a broken build by stage, not by reading: comments, then whitespace, then renaming,
+each as its own payload. That found the renamer in three page loads.
+
 ## Ground rules
 
 - Performance budget is **16.6 ms** at **1920×1080** (confirmed) on the compo PC, an **RTX
