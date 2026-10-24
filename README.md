@@ -483,6 +483,52 @@ One parser incompatibility cost a confusing round: `.5` is a valid WGSL literal,
 wgslender rejects a leading dot, fails, and the build falls back silently to an unshaken
 shader. Literals keep their leading zero.
 
+### The packer search
+
+`build/pack.py` replaces the regex renamer. It tokenises the shader once into its 137
+module-scope declarations and treats packing as a search over two kinds of move, both
+semantics-preserving by construction:
+
+- **order** — module-scope declarations may appear in any order in WGSL, so items shuffle
+  freely; so do the four parts of the page (a module script is deferred, so it can sit
+  ahead of the shader and canvas it reads);
+- **names** — which candidate name goes to which of 119 globals, 162 locals and 52 struct
+  fields. Fields live in their own namespace (`p.pos` vs a local `pos` never collide), and
+  a local may take the name of any global its function does not touch, which is the
+  shadowing trick Shader Minifier uses.
+
+Scored by brotli q11 of the whole payload, because a cheaper proxy is no proxy: q9 is 790
+bytes off. Late-acceptance hill climbing, as in Pakettic, one chain per core as an island
+model — each round the worse half of the islands restart from the global best.
+
+| | brotli |
+|---|---|
+| regex renamer (previous build) | 9 698 |
+| packer, default state | 9 479 |
+| **packer, searched** (32 islands × 40 rounds × 300) | **9 184** |
+
+The default state already gains 219 bytes, from field renaming and shadowing alone. The
+search adds 295 more. It converged: by the end every island sat within 2 bytes of the
+others, and the last 15 rounds bought about 30, so more of the same is not where the next
+bytes are.
+
+The result lives in `build/pack_state.json`, keyed by **source** names, and every build
+reuses it without searching. It survives edits: anything it knows keeps its place, anything
+new falls in where the default would put it. Re-run the search after big shader changes:
+
+```bash
+python build/pack.py --rounds 40 --per-round 300
+```
+
+It only saves when it beats the stored score.
+
+**What limits it.** One evaluation is 21 ms: brotli 17.1 ms (81%), rendering the candidate
+in Python 3.9 ms (19%). So it is brotli-bound, and the Python could at best buy back a
+fifth. Across cores it reaches 730 evaluations/s against 48/s on one core — 15× on a
+16-core, 32-thread Ryzen 9 9950X. It scales with physical cores and SMT adds nothing:
+brotli q11's optimal parsing saturates a core on its own. Faster search means fewer or
+smarter evaluations, not faster ones.
+
 ### Where it lands today (no music, first draft timeline)
 
 | Stage | WGSL | JS |

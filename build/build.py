@@ -420,43 +420,63 @@ def minify_js(js):
     return js, 'fallback'
 
 
-def main():
+def prepare(verbose=False):
+    """Everything up to the point where names and order get decided: harness stripped,
+    controls inlined, uniforms and branches folded, dead code shaken, comments gone, JS
+    minified. Shared by the build and by pack.py's search so both see the same shader."""
+    say = print if verbose else (lambda *a: None)
     src = read(SRC)
     wgsl = re.search(r'<script type="text/wgsl" id="wgsl-main">(.*?)</script>', src, re.S).group(1)
     js = re.search(r'<script type="module">(.*?)</script>', src, re.S).group(1)
     ui = spec_defaults(js)
     ui.update(UI_OVERRIDE)
 
-    print('source           wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
+    say('source           wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
     wgsl, js = cut_dev(wgsl), cut_dev(js)
-    print('harness stripped wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
+    say('harness stripped wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
     js = strip_js(js, ui)
-    print('dev code removed wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
-
+    say('dev code removed wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
     io.open(os.path.join(ROOT, 'strip.js'), 'wb').write(js.encode())
+
     wgsl, folded = fold_uniforms(wgsl, ui)
-    print('uniforms folded  %d references to release constants' % folded)
+    say('uniforms folded  %d references to release constants' % folded)
     wgsl, branches = fold_branches(wgsl)
-    print('branches folded  %d if-statements resolved at build time' % branches)
+    say('branches folded  %d if-statements resolved at build time' % branches)
     wgsl, shaken = tree_shake(wgsl)
     if shaken:
-        print('tree-shaken      wgsl %7d   (wgslender: dead code + syntax)' % len(wgsl.encode()))
-    wmin = minify_wgsl(wgsl, js)
+        say('tree-shaken      wgsl %7d   (wgslender: dead code + syntax)' % len(wgsl.encode()))
+    wgsl = re.sub(r'/\*.*?\*/', '', wgsl, flags=re.S)
+    wgsl = re.sub(r'//[^\n]*', '', wgsl)
     jmin, how = minify_js(js)
-    print('minified (%-8s) wgsl %7d   js %7d' % (how, len(wmin.encode()), len(jmin.encode())))
+    say('js minified with %s' % how)
+    return wgsl, js, jmin
+
+
+def main():
+    sys.path.insert(0, ROOT)      # -I keeps the script's own directory off sys.path
+    import pack
+    wgsl, js, jmin = prepare(verbose=True)
+    try:
+        prog = pack.Program(wgsl, _protected(wgsl, js), WGSL_KEEP)
+        saved = pack.load_state()
+        st = prog.adopt(saved)
+        wmin = prog.render(st)
+        parts = st['parts']
+        print('packed with %s state (%d items, %d globals, %d locals, %d fields)' % (
+            'searched' if saved else 'default', len(prog.items), len(prog.globals),
+            len(prog.all_locals), len(prog.fields)))
+    except Exception as e:
+        # the regex minifier is the fallback, not the path: say so loudly if it is taken
+        print('  PACKER FAILED (%s) - falling back to the regex minifier' % e)
+        wmin, parts = minify_wgsl(wgsl, js), ['style', 'canvas', 'wgsl', 'js']
+    print('minified         wgsl %7d   js %7d' % (len(wmin.encode()), len(jmin.encode())))
 
     # keep the intermediates: a broken shader is unreadable from the packed page
     io.open(os.path.join(ROOT, 'min.wgsl'), 'wb').write(wmin.encode())
     io.open(os.path.join(ROOT, 'min.js'), 'wb').write(jmin.encode())
 
-    # document.write replaces the loader's own body, so the payload carries its own style.
-    # Without it the canvas keeps the 300x150 default and resize() reads that as the size.
-    payload = ('<style>html,body{margin:0;height:100%;overflow:hidden;background:#000}'
-               'canvas{display:block;width:100%;height:100%}</style>'
-               '<canvas id=c></canvas><script type="text/wgsl" id="wgsl-main">' + wmin
-               + '</script><script type="module">' + jmin + '</script>')
-    pb = payload.encode()
-
+    pb = pack.assemble(wmin, jmin, parts)
+    payload = pb.decode()
     raw_deflate = zlib.compress(pb, 9)[2:-4]          # raw deflate stream
     try:
         import brotli

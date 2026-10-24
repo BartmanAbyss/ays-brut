@@ -255,6 +255,21 @@ And keep the leading zero on literals: wgslender rejects `.5`, and its failure m
 build fall back to the unshaken shader without stopping - watch for the `tree-shaken`
 line in the build output.
 
+**`build/pack_state.json` is a build input, not a cache.** It is the search result, it is
+committed, and every build applies it. It is keyed by source names, so it degrades
+gracefully as the shader changes — but a big refactor leaves it mostly default, and the
+search is worth re-running (`python build/pack.py`). Validate the shader in the browser
+after any search: correctness is by construction, and construction has had bugs.
+
+**Multi-character operators must be single tokens.** The packer's tokenizer first split
+`->` into `-` `>`, then its own rule against fusing operators kept them apart, and every
+signature came out `)- >f32`: black screen, WebGPU warnings only. Same failure shape as the
+renamed entry points; same remedy - compile it, then look at it in a fresh tab.
+
+**The search is brotli-bound.** 81% of an evaluation is brotli q11, 19% Python. It scales
+with physical cores, not threads. Do not score with a lower quality to go faster: q9 is
+790 bytes off and would optimise for the wrong compressor.
+
 **Never rename a member access.** The substitution uses a `(?<![.\w])` guard so a rename of
 `pos` cannot touch `p.pos`.
 

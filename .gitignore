@@ -20,3 +20,4 @@ build/pre.wgsl
 build/wl_*.wgsl
 build/combo*
 build/err.txt
+build/search.log
