@@ -752,6 +752,25 @@ In the harness the same path runs with `?gate=1`; `?tick=1` adds a click every h
 to check sync. Measured: show time advances 1.00 s per second of audio, drift one step.
 If fullscreen is refused, the 16:9 canvas is stretched to the window.
 
+#### Browsers (24 Oct 2026)
+
+The release was run in Chrome 152 (the app pane), Edge 156 and Firefox 157, served byte for
+byte as the dropper serves it. All three decode `Content-Encoding: br` over plain
+http://localhost (Firefox included), compile the shader with no messages and render the same
+picture; a frozen dev-harness frame matched in Firefox and Chrome. Speed is the same: at
+2560x1440 Edge and Firefox were within ~10% of each other over the first 45 s of the show
+(~65-80 fps on the opening, 24-27 on the heaviest stretch, t = 28-36 s), Firefox ahead as
+often as behind.
+
+Two things it showed:
+- **The release renders at the SCREEN's size** (`screen.width/height`). On a 1440p monitor
+  that is 1.78x the pixels the 1080p budget is set for, so it looks slow on any browser.
+- **Chromium compiles pipelines lazily.** "click" appears ~0.5 s after load, but on a cold
+  shader cache (a fresh profile, as on the compo machine) the first frame then waits 3-7 s
+  while the audio clock already runs, so the picture starts that far into the show.
+  Firefox compiles inside `createComputePipeline` and shows "click" only after (~2.9 s),
+  so it has no stall.
+
 #### Non-feature pass: 8 333 -> 7 967
 
 | Change | bytes | picture |
