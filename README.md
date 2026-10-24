@@ -373,9 +373,31 @@ and its buffer. The duplication test (+3.9 ms) overstated them: a repeated fetch
 same eight cells is cache-hot, the first one is not, yet it is still cheap next to
 everything else in the lookup.
 
-Where the rest is: the spray lookup minus the trilerp is still the biggest item, and the
-10.7% of rays that run out of bounces (inside spray and glass, ending in constant haze
-anyway) pay for ~30% of the marching.
+**The rays that run out of bounces are not a cheap lever either.** They are not lost in
+the spray: per ray they entered 0.7 spray drops, 1.0 glass walls and 0.5 bulk surfaces
+from air, plus 1.85 total internal reflections; the rest of the ten bounces are glass ↔
+liquid inside the coupes, where one filled coupe costs four (air → glass → liquid → glass →
+air). They still carry energy at the end, 45% of them above half throughput. And although
+they take ~30% of all march steps, most of those steps are in the early bounces every ray
+shares; any cap only removes the late ones. Measured on the same frozen frame, steps saved
+against pixels changed by more than 4/255:
+
+| variant | steps saved | pixels changed (>4 / >16) |
+|---|---|---|
+| total-internal-reflection cap 3 | 2.5% | 1.9% / 0.7% |
+| total-internal-reflection cap 2 | 6.7% | 4.9% / 2.2% (≈1.5 ms) |
+| throughput cut 0.10 → haze | 1.0% | 0.6% / 0.1% |
+| throughput cut 0.20 → haze | 2.2% | 2.2% / 0.3% |
+| a spray-drop cap (ignore spray after 2) | 0% | — |
+| `bounces` 8 | 6.6% | 6.7% / 2.9% |
+| `bounces` 6 | 15.8% | 13.4% / 7.1% |
+
+Roughly one percent of steps per percent of changed pixels, whichever way it is cut, and the
+changes land on the rim glints and the golden ring where the liquid meets the glass — the
+glass's character. None was adopted; `bounces` remains the knob for that trade.
+
+Where the rest is: the primary ray is 46% of all march steps, and the spray lookup minus
+the trilerp is still the biggest component.
 
 ### WebGPU limits that must be requested
 
@@ -437,7 +459,11 @@ reflection traces, rays ending per bounce and per reason, march steps per bounce
 map is in the comment above `__profile`. `await window.__xc(bits)` renders with one
 component evaluated twice to rank what it costs (`__xc(0)` restores);
 `__variant({...})` takes arbitrary pipeline constants, and `{ PROF: 1, ... }` profiles a
-variant. All of it is dev-only and absent from the release.
+variant. `const a = await __grab()` reads the frame on screen; `__diff(a, b)` reports the
+share of pixels that changed by more than 4, 16 and 48 levels and overlays |a − b| × 8 on
+the canvas (`__diff()` clears it) — on a frozen frame, two grabs of the same state differ
+by exactly 0, so this is how a look-changing optimisation gets judged. All of it is
+dev-only and absent from the release.
 
 ---
 

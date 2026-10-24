@@ -158,6 +158,13 @@ deltas are not additive — register pressure inflates them past the frame — s
 order suspects, then confirm with a real A/B. The atomic-load finding came from a
 four-instruction lookup out-ranking the 8-fetch trilerp by 4×.
 
+**"X takes 30% of the steps" does not mean capping X saves 30%.** The rays that ran out of
+bounces took ~30% of all march steps, but most of that was in the early bounces every ray
+shares; a cap only removes the late ones, and even `bounces` 6 saved 16%. Ask what the
+change actually removes. Judge a look-changing cut with `__grab`/`__diff` on a frozen
+frame, steps from `__profile` (exact), and time only from interleaved repeats — the GPU's
+baseline drifted by 3 ms within one session here.
+
 **A particle smaller than a voxel vanishes.** The fine cell is 1.94 mm, so a drop only
 registers if it lands near a cell centre. Keep `dropRad` above the cell half-diagonal
 (~1.68 mm) or raise `FINE`. Symptom: a dense stream renders as four scattered drops.
@@ -361,9 +368,10 @@ with physical cores, not threads. Do not score with a lower quality to go faster
   tier2 frame (step 3120): **26.9 total, 21.8 render** after the packed far field (was 29.9).
   Non-render passes are ~5 ms there. Step count, reflections and photon count are **not**
   levers, and neither was skipping empty particle blocks (0.9 ms, not the 8 that `parts=0`
-  suggested), nor wasted trilerps (exact block reach cut them 36% for 0.4 ms). What is
-  left, from the profile in the README: the rest of the spray lookup, and the 10.7% of rays
-  that exhaust the bounce budget while taking ~30% of the march steps.
+  suggested), nor wasted trilerps (exact block reach cut them 36% for 0.4 ms), nor the rays
+  that exhaust the bounce budget (every cap trades ~1% of steps for ~1% of changed pixels,
+  on the rim glints). What is left, from the profile in the README: the primary ray (46% of
+  march steps) and the rest of the spray lookup.
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
   stale. The dropper is ~324 bytes, leaving ~7870 for the payload. The harness as it stands

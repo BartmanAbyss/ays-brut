@@ -117,7 +117,7 @@ override PROF : bool = false;
 // 1 tower, 2 liquidDist, 4 bulk liquid, 8 bottle, 16 spray trilerp, 32 spray far field.
 override XC : u32 = 0u;
 //#D}
-var<private> pc : array<u32, 48>;
+var<private> pc : array<u32, 64>;
 @group(1) @binding(0) var<uniform> j : J;
 
 // ── glass geometry (metres) ───────────────────────────────
@@ -1311,6 +1311,9 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
   var fin = false;
   var firstHit = 0.0;
   var firstN = vec3f(0.0);
+//#D{
+  var pSpray = 0u; var pGlass = 0u; var pBulk = 0u;   // profiler: entries per ray
+//#D}
 
   for (var b = 0; b < i32(u.bounces); b++) {
     var s = 1.0;
@@ -1399,6 +1402,12 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
       d = reflect(d, n);
       p = hp + d * SURF_EPS;
     } else {
+//#D{
+      if (PROF && med == 0) {
+        if (medA == 1) { pGlass += 1u; }
+        if (medA == 2) { if (abs(bulkSDF(hp)) < 0.004) { pBulk += 1u; } else { pSpray += 1u; } }
+      }
+//#D}
       tp *= (1.0 - F);
       d = rf;
       p = hp + d * SURF_EPS;
@@ -1415,10 +1424,25 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
   // shards. A constant degrades to a soft haze. (Dropping it to black instead quantises
   // into concentric rings, which is what this replaced.)
   if (!fin) {
-    if (PROF) { pc[16u + min(u32(u.bounces), 10u)] += 1u; pc[30] += 1u; }
+    if (PROF) {
+      pc[16u + min(u32(u.bounces), 10u)] += 1u; pc[30] += 1u;
+      // what the budget-exhausted rays were doing: 42 their TIR reflections; 44..47 their
+      // remaining throughput <.25 <.5 <.75 >=.75; 48..52 the medium they ended in (air,
+      // glass, liquid, -, bottle); 53/54/55 spray-drop / glass / bulk-liquid entries
+      pc[42] += u32(tir);
+      let mt = max(tp.x, max(tp.y, tp.z));
+      pc[44u + min(u32(mt * 4.0), 3u)] += 1u;
+      pc[48u + u32(clamp(med, 0, 4))] += 1u;
+//#D{
+      pc[53] += pSpray; pc[54] += pGlass; pc[55] += pBulk;
+//#D}
+    }
     acc += tp * vec3f(0.055, 0.052, 0.060);
   }
 
+//#D{
+  if (PROF) { pc[56] += u32(tir); pc[57] += pSpray; pc[58] += pGlass; pc[59] += pBulk; }
+//#D}
   var col = tonemap(acc * u.expo);
 
 //#D{
@@ -1520,7 +1544,7 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
   if (PROF) {
     pc[0] = 1u;
     let bank = ((u32(fc.x) * 7u + u32(fc.y) * 13u) & 63u) * 64u;
-    for (var k = 0u; k < 48u; k++) { if (pc[k] != 0u) { atomicAdd(&prof[bank + k], pc[k]); } }
+    for (var k = 0u; k < 64u; k++) { if (pc[k] != 0u) { atomicAdd(&prof[bank + k], pc[k]); } }
   }
   return vec4f(col, 1.0);
 }
@@ -1777,18 +1801,50 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     return JSON.stringify(c);
   };
   window.__xc = n => window.__variant(n ? { XC: n } : {});
+  // Image A/B. __grab() reads the frame on screen (after one more paint); __diff(a, b)
+  // returns how many pixels differ and by how much, and shows |a - b| x8 over the canvas
+  // until __diff() is called with no arguments.
+  const nextFrame = () => new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+  window.__grab = async () => {
+    await nextFrame();
+    const c2 = document.createElement('canvas'); c2.width = canvas.width; c2.height = canvas.height;
+    const g = c2.getContext('2d'); g.drawImage(canvas, 0, 0);
+    return g.getImageData(0, 0, c2.width, c2.height);
+  };
+  let diffEl = null;
+  window.__diff = (a, b) => {
+    if (diffEl) { diffEl.remove(); diffEl = null; }
+    if (!a) return 'diff overlay off';
+    const n = a.width * a.height, out = new ImageData(a.width, a.height);
+    let sum = 0, gt4 = 0, gt16 = 0, gt48 = 0, mx = 0;
+    for (let i = 0; i < n; i++) {
+      let m = 0;
+      for (let k = 0; k < 3; k++) { const d = Math.abs(a.data[i*4+k] - b.data[i*4+k]); m = Math.max(m, d); out.data[i*4+k] = Math.min(255, d * 8); }
+      out.data[i*4+3] = 255; sum += m; mx = Math.max(mx, m);
+      if (m > 4) gt4++; if (m > 16) gt16++; if (m > 48) gt48++;
+    }
+    diffEl = document.createElement('canvas'); diffEl.width = a.width; diffEl.height = a.height;
+    diffEl.getContext('2d').putImageData(out, 0, 0);
+    diffEl.style.cssText = 'position:fixed;pointer-events:none;z-index:5';
+    const r = canvas.getBoundingClientRect();
+    Object.assign(diffEl.style, { left: r.left + 'px', top: r.top + 'px', width: r.width + 'px', height: r.height + 'px' });
+    document.body.appendChild(diffEl);
+    const pc = x => +(100 * x / n).toFixed(2);
+    return { meanAbs: +(sum / n).toFixed(3), max: mx, pctOver4: pc(gt4), pctOver16: pc(gt16), pctOver48: pc(gt48) };
+  };
   // One profiled frame: counters cleared, the profiling pipeline used, banks read back and
   // summed. Index map: 0 pixels, 1 map, 2 liquidDist, 3 spray trilerp, 4 spray far field,
   // 5 wave fetch, 6 coupe calls, 7 coupe exact, 8 bottle exact, 9 marches, 10 march steps,
   // 11 over-relaxation fallbacks, 12 reflection traces, 13 reflection steps, 14 normals,
   // 15 medium lookups, 16..26 rays ending at bounce 0..10, 27 missed everything, 28 table,
-  // 29 too dim to matter, 30 out of bounces, 31..41 march steps at bounce 0..10, 43 bubbles.
+  // 29 too dim to matter, 30 out of bounces, 31..41 march steps at bounce 0..10, 43 bubbles,
+  // 42/44..55 what out-of-bounce rays were doing (see the fs end), 56..59 the same for all rays.
   window.__profile = () => new Promise(res => { profReq = res; if (cfg.paused) requestAnimationFrame(frameOnce); });
   function flushProfile(r) {
     profRd.mapAsync(GPUMapMode.READ).then(() => {
       const a = new Uint32Array(profRd.getMappedRange().slice(0)); profRd.unmap();
-      const t = new Array(48).fill(0);
-      for (let b = 0; b < 64; b++) for (let k = 0; k < 48; k++) t[k] += a[b * 64 + k];
+      const t = new Array(64).fill(0);
+      for (let b = 0; b < 64; b++) for (let k = 0; k < 64; k++) t[k] += a[b * 64 + k];
       r(t);
     });
   }
