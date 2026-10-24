@@ -438,12 +438,15 @@ deflate-raw, and **no brotli**. So every route that is not a native exe pays def
 the 10 216 brotli figure is a fantasy number for this packaging — the real one is 11 267
 plus the dropper.
 
-That makes the gap 3 420 rather than 2 331, and it reframes the choice. Either accept
-deflate and find the bytes elsewhere, or go to a native exe, where Crinkler's context
-modelling beats brotli outright at this size. Two cheaper levers exist on stock Windows and
-are worth measuring before giving up on the script route: `RtlDecompressBuffer` in ntdll
-exposes LZMS, and `expand.exe` reads LZX cabinets. Both beat deflate; both cost dropper
-bytes to reach.
+But brotli is still reachable, and INCENDIUM shows how: **don't decompress — serve.** Its
+324-byte bootstrapper hands its own bytes to the Windows built-in HTTP server at an offset
+into itself, and the browser decodes `Content-Encoding: br` natively. Their README is
+explicit that brotli content can only be served over HTTP, never opened as a local file.
+That is the next change to the dropper here, and it is worth about 1 050 bytes
+(11 267 deflate against 10 216 brotli) for a bootstrapper no larger than the one we have.
+
+After that the gap is roughly 2 350, and the levers are the WGSL locals, the dead uniform
+branches, and the packer.
 
 ### The dropper
 
@@ -454,7 +457,8 @@ overhead at all. The offset is written into the header and padded to a fixed wid
 digit count cannot move what it points at.
 
 Verified end to end: running `intro.cmd` writes a file byte-identical to the build's payload
-and the extracted page renders with no errors. `intro.html` still comes out for quick
+and the extracted page renders with no errors. It inflates rather than serves, so it is a
+deflate dropper; see above for why serving would be better. `intro.html` still comes out for quick
 browser testing, but it carries base64 and reads about 30% too big; the deliverable is the
 `.cmd`.
 

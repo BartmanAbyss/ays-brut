@@ -76,6 +76,16 @@ energy to black quantises into rings; sampling `env(d)` directionally shatters i
 checkerboard shards, because after several refractions neighbouring pixels point in wildly
 different directions. Resolving to a constant haze degrades gracefully.
 
+**The shutter streak is per SIM STEP; the narrow band is rebuilt per FRAME.** Those are the
+same thing only at 60 fps. Below it a particle moves `simSteps` steps between rendered
+frames while its streak still spans one, so the gap reopens and the pour returns to the bead
+chain the swept capsule exists to prevent — and fast drops pin to the length cap, which is
+what "clamped" looks like. The shutter is now scaled by the steps the frame stands for
+(bounded at 4, and never taken from a seek burst, which runs thousands in one frame). The
+cap moved with it: `2.88 * u.shut` is exactly the old 24 mm at the default half-shutter and
+one step. General form of the trap: anything sized in sim steps that is CONSUMED once per
+frame is wrong as soon as the two rates diverge.
+
 **A particle smaller than a voxel vanishes.** The fine cell is 1.94 mm, so a drop only
 registers if it lands near a cell centre. Keep `dropRad` above the cell half-diagonal
 (~1.68 mm) or raise `FINE`. Symptom: a dense stream renders as four scattered drops.
@@ -192,11 +202,14 @@ each as its own payload. That found the renamer in three page loads.
 
 ## Packaging
 
-**Brotli is not available to a dropper, and this is measured.** Stock Windows PowerShell is
-5.1 on .NET Framework: `DeflateStream` yes, `BrotliStream` no, and no `pwsh` 7 to fall back
-on. The browser is no help either — `DecompressionStream` does gzip, deflate and
-deflate-raw, never brotli. Any brotli figure in a size estimate is only real if the entry is
-a native exe. Check before planning against a number.
+**Brotli needs no decompressor — it needs a web server.** Stock Windows PowerShell is 5.1
+on .NET Framework: `DeflateStream` yes, `BrotliStream` no, no `pwsh` 7. And the browser's
+`DecompressionStream` does gzip, deflate and deflate-raw, never brotli. Both true, and both
+beside the point: INCENDIUM's 324-byte bootstrapper **serves its own bytes over HTTP** from
+the Windows built-in HTTP server, at an offset into itself, and the browser decodes
+`Content-Encoding: br` natively. Their README says it plainly — brotli content can only be
+served by a web server, not opened as a local file. So brotli is reachable without a native
+exe; our dropper inflates deflate instead and pays ~1050 bytes for it.
 
 **`New-Object ...DeflateStream($m,0)` throws on an ambiguous overload**, because 0 fits both
 `CompressionMode` and `CompressionLevel`. Name the enum. Costs 33 bytes in the dropper.

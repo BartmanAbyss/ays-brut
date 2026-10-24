@@ -743,7 +743,12 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
 
   var v = p.vel * u.shut;
   let L = length(v);
-  if (L > 0.024) { v = v * (0.024 / L); }      // cap the streak so the loop stays bounded
+  // The cap bounds the scatter loop, so it has to grow with the shutter window rather than
+  // sit at a constant: a fixed 24 mm stops the streak growing while the gap between frames
+  // keeps growing, which reads as the pour clamping. 2.88 * u.shut is exactly 24 mm at the
+  // default half-shutter and one step, so this changes nothing at 60 fps.
+  let cap = 2.88 * u.shut;
+  if (L > cap) { v = v * (cap / L); }
   let a = p.pos - v * 0.5;
   let b = p.pos + v * 0.5;
 
@@ -1390,7 +1395,7 @@ function fail(where, e) {
 const probe = {
   ok: false, adapter: null, features: [], errors,
   frameMs: 0, fps: 0, gpuMs: {}, frames: 0, time: 0, live: 0, selftest: null,
-  drift: 0, resyncs: 0, step: 0, showT: 0, shot: 0,
+  drift: 0, resyncs: 0, step: 0, showT: 0, shot: 0, frameSteps: 1, streakMM: 0,
 };
 window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D}
@@ -1590,6 +1595,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   let clockT = 0;              // master clock, seconds; the sim step index derives from it
   let showStep = 0;            // show time in whole SIM_DT steps - the clock the music owns
   let showPend = 0, showT = 0, burstSteps = 0;
+  let frameSteps = 1;          // sim steps this rendered frame stands for; sizes the streak
   const f32 = new Float32Array(48);
   const t0 = performance.now();
   let last = t0, acc = 0, accN = 0, frameNo = 0, simStep = 0, ffSteps = 0;
@@ -1629,7 +1635,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     f32[22] = cfg.single ? 1 : 0; f32[23] = cfg.noliq ? 1 : 0;
     f32[24] = ui.bubbles ? 1 : 0; f32[25] = ui.expo; f32[26] = ui.waves ? 1 : 0; f32[27] = ui.drops ? 1 : 0; f32[28] = ui.bounces; f32[29] = ui.reflect ? 1 : 0; f32[30] = ui.autofill ? -1 : ui.fill / 100; f32[31] = ui.gridEnv ? 1 : 0; f32[32] = ui.rtrace ? 1 : 0;
     f32[33] = ui.lightAz * Math.PI / 180; f32[34] = ui.lightEl * Math.PI / 180;
-    f32[35] = ui.dropRad * 0.001; f32[36] = ui.foam; f32[39] = ui.shutter * SIM_DT;
+    f32[35] = ui.dropRad * 0.001; f32[36] = ui.foam; f32[39] = ui.shutter * SIM_DT * frameSteps;
     f32[40] = ui.botTilt * Math.PI / 180; f32[41] = ui.botAz * Math.PI / 180;
     f32[42] = ui.bottle ? 1 : 0;
     f32[43] = pudBound[0]; f32[44] = pudBound[1]; f32[45] = pudBound[2]; f32[46] = ui.puddle ? 1 : 0;
@@ -1768,11 +1774,20 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       probe.resyncs++;
     }
 
+    // The narrow band is rebuilt ONCE per frame, but a particle moved `simSteps` steps to
+    // get where it is. A streak sized to one step therefore leaves a gap whenever the
+    // frame rate is under 60 - the pour breaks back into the bead chain the swept capsule
+    // was introduced to fix, and fast drops pin to the length cap. Size the shutter to the
+    // motion this frame actually represents.
+    // Bounded, and never from a deliberate burst: a seek runs thousands of steps in one
+    // frame and would size the streak to all of them.
+    frameSteps = (ffNow + burst > 0) ? 1 : Math.max(1, Math.min(simSteps, 4));
     const time = cfg.t !== null ? cfg.t : clockT;
     probe.time  = time;
     probe.step  = simStep + simSteps;
     probe.drift = clockT - probe.step * SIM_DT;
     probe.showT = showT; probe.shot = ui.show ? evalShow(showT).shot : -1;
+    probe.frameSteps = frameSteps; probe.streakMM = ui.shutter * SIM_DT * frameSteps * 1000;
     writeUniforms(time);
 
     const enc = device.createCommandEncoder();
