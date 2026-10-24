@@ -602,8 +602,14 @@ the debug panel used to supply, minifies, packs, and writes:
 | `build/min.wgsl`, `build/min.js` | what ships, as packed |
 | `build/min.pretty.wgsl`, `build/min.pretty.js` | the same, re-indented to read |
 
-It needs Python with `brotli`, and Node for `terser` and `wgslender` (the build runs
-without wgslender, ~290 bytes heavier).
+It needs **Python 3 with `brotli`** (`pip install brotli`) and **Node.js 16+** on PATH.
+That is all: wgslender 1.5.1 and terser 5.51.2 are vendored in `build/vendor/node_modules`
+(committed, 5.5 MB, plain JS and WebAssembly, so the same files on every OS) and run with
+`node` from there - no npm, no npx, no network. A fresh clone builds the same `intro.cmd`,
+byte for byte, or the build stops with `BUILD FAILED` and the reason. There are no
+fallbacks: a missing Node, a missing tool, or a tool or the packer failing ends the build
+rather than quietly producing a bigger intro. To change a tool version, see the
+description in `build/vendor/package.json`.
 
 Dev-only code is bracketed with `//#D{` / `//#D}` in both the WGSL and the JS. Everything
 else goes by rule, so the harness cannot quietly end up in the release:
@@ -663,7 +669,8 @@ So the build takes its analysis and keeps our naming: `--no-mangle --no-whitespa
 our renamer. Worth **287 bytes** over either alone. `--no-whitespace` is not optional:
 globals are found with a line-anchored pattern, which a one-line file defeats.
 
-The pre-pass is optional — the build runs without Node, 287 bytes heavier. Two notes for
+The pre-pass is required (vendored, see *Build*); it used to be optional, which meant a
+machine without Node built an intro 287 bytes heavier without saying so. Two notes for
 anyone repeating this: wgslender's validator rejects our `atomicAdd` calls as `@must_use`
 where Dawn accepts them, so `validate` reports errors on a shader that compiles and runs;
 and all 17 entry points survive its tree-shaking, which is worth re-checking whenever a
@@ -689,8 +696,8 @@ Fed the folded shader without the branch folder it shrank 66 bytes and the brotl
 bytes *worse*. With the folder: **9 698**, 186 better.
 
 One parser incompatibility cost a confusing round: `.5` is a valid WGSL literal, but
-wgslender rejects a leading dot, fails, and the build falls back silently to an unshaken
-shader. Literals keep their leading zero.
+wgslender rejects a leading dot and fails; back then the build fell back silently to an
+unshaken shader, now it stops. Literals keep their leading zero.
 
 ### The packer search
 

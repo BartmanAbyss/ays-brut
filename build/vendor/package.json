@@ -1,0 +1,9 @@
+{
+  "name": "comparade26-build-tools",
+  "private": true,
+  "description": "Build tools, vendored: node_modules is committed so the build needs no npm and no network. To change a version, edit it here, run `npm install --omit=dev --ignore-scripts` in this folder, delete node_modules/.bin, and commit node_modules with the lockfile.",
+  "dependencies": {
+    "terser": "5.51.2",
+    "wgslender": "1.5.1"
+  }
+}

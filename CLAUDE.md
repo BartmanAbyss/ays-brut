@@ -371,9 +371,14 @@ a compute pass.
 **wgslender tree-shakes; it does not constant-fold.** Inlining the release uniforms alone
 made the brotli 13 bytes worse. The build's own `fold_branches` evaluates the literal
 comparisons and deletes dead ifs; only then does tree-shaking find unreferenced helpers.
-And keep the leading zero on literals: wgslender rejects `.5`, and its failure makes the
-build fall back to the unshaken shader without stopping - watch for the `tree-shaken`
-line in the build output.
+And keep the leading zero on literals: wgslender rejects `.5`, and the build stops on it.
+
+**The build has no fallbacks, on purpose.** wgslender and terser are vendored in
+`build/vendor/node_modules` (committed) and run with plain `node`; it used to be
+`npx --yes`, which fetched whatever was newest, and a missing tool or a failing packer
+fell back to a weaker path that built a bigger intro with only a log line to say so. The
+user builds at the party on a laptop: the same sources must give the same `intro.cmd`, or
+`BUILD FAILED`. Keep it that way - never add a silent fallback.
 
 **`build/pack_state.json` is a build input, not a cache.** It is the search result, it is
 committed, and every build applies it. It is keyed by source names, so it degrades

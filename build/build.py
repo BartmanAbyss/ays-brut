@@ -35,6 +35,36 @@ def read(path):
     return io.open(path, 'rb').read().decode('utf-8').replace('\r\n', '\n')
 
 
+# ── external tools ───────────────────────────────────────────────────────────────
+# wgslender and terser are VENDORED in build/vendor/node_modules (committed, versions
+# pinned in build/vendor/package.json), and run from there with plain `node`: no npm, no
+# npx, no network. `npx --yes` used to fetch whatever version was newest, and a missing
+# tool fell back to a weaker path that built a bigger intro without stopping. Now any
+# failure stops the build: the intro comes out the same on every machine, or not at all.
+VENDOR = os.path.join(ROOT, 'vendor', 'node_modules')
+TOOLS = {'wgslender': os.path.join(VENDOR, 'wgslender', 'bin', 'wgslender'),
+         'terser':    os.path.join(VENDOR, 'terser', 'bin', 'terser')}
+
+
+class BuildError(Exception):
+    pass
+
+
+def run_tool(tool, args):
+    """Run a vendored Node tool; return its stdout as text, or stop the build."""
+    if not os.path.exists(TOOLS[tool]):
+        raise BuildError('%s is missing from build/vendor/node_modules - it is committed; '
+                         'check out the whole repository' % tool)
+    try:
+        r = subprocess.run(['node', TOOLS[tool]] + args, capture_output=True, timeout=300)
+    except FileNotFoundError:
+        raise BuildError('`node` is not on PATH - install Node.js (16 or newer)')
+    if r.returncode != 0:
+        raise BuildError('%s failed (exit %d):\n%s' % (tool, r.returncode,
+                         r.stderr.decode(errors='replace')[:1500]))
+    return r.stdout.decode()
+
+
 def spec_defaults(js):
     """Pull the panel's default values straight out of SPEC so they cannot drift."""
     m = re.search(r'const SPEC = \[(.*?)\n  \];', js, re.S)
@@ -320,26 +350,23 @@ def tree_shake(w):
     and keep our own naming. --no-whitespace matters too: our renamer finds globals with a
     line-anchored pattern, which a one-line file would defeat.
 
-    Optional: if wgslender is not installed the build still works, 287 bytes heavier.
+    Required. It used to be optional, and without it the intro came out 287 bytes heavier
+    with nothing but a missing log line to say so. A failure here is usually a shader its
+    parser rejects (a leading-dot literal like `.5`, for one): the error says where.
     """
     tmp_in = os.path.join(ROOT, '_shake_in.wgsl')
     tmp_out = os.path.join(ROOT, '_shake_out.wgsl')
     try:
         io.open(tmp_in, 'wb').write(w.encode())
-        r = subprocess.run('npx --yes wgslender --no-mangle --no-whitespace "%s" -o "%s"'
-                           % (tmp_in, tmp_out), capture_output=True, timeout=300, shell=True)
-        if r.returncode == 0 and os.path.exists(tmp_out):
-            out = io.open(tmp_out, encoding='utf-8').read()
-            if len(out) > 1000:
-                return out, True
-        print('  wgslender failed: %s' % r.stderr.decode()[:200])
-    except Exception as e:
-        print('  wgslender unavailable (%s)' % e)
+        run_tool('wgslender', ['--no-mangle', '--no-whitespace', tmp_in, '-o', tmp_out])
+        out = io.open(tmp_out, encoding='utf-8').read() if os.path.exists(tmp_out) else ''
+        if len(out) < 1000:
+            raise BuildError('wgslender produced no usable output (%d chars)' % len(out))
+        return out, True
     finally:
         for f in (tmp_in, tmp_out):
             if os.path.exists(f):
                 os.remove(f)
-    return w, False
 
 
 def _pool(w):
@@ -466,16 +493,10 @@ def pretty_js(js):
     tmp = os.path.join(ROOT, '_pretty.js')
     try:
         io.open(tmp, 'wb').write(js.encode())
-        r = subprocess.run('npx --yes terser "%s" --format beautify=true --module' % tmp,
-                           capture_output=True, timeout=300, shell=True)
-        if r.returncode == 0 and r.stdout:
-            return r.stdout.decode()
-    except Exception:
-        pass
+        return run_tool('terser', [tmp, '--format', 'beautify=true', '--module'])
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
-    return js.replace(';', ';\n')
 
 
 def minify_js(js):
@@ -483,21 +504,13 @@ def minify_js(js):
     try:
         io.open(tmp, 'wb').write(js.encode())
         # terser reads a FILE here: piping source through stdin fails on Windows.
-        r = subprocess.run('npx --yes terser "%s" --compress --mangle --module' % tmp,
-                           capture_output=True, timeout=300, shell=True)
-        if r.returncode == 0 and len(r.stdout) > 200:
-            return r.stdout.decode(), 'terser'
-        print('  terser failed: %s' % r.stderr.decode()[:300])
-    except Exception as e:
-        print('  terser unavailable (%s)' % e)
+        out = run_tool('terser', [tmp, '--compress', '--mangle', '--module'])
+        if len(out) < 200:
+            raise BuildError('terser produced no usable output (%d chars)' % len(out))
+        return out, 'terser 5.51.2 (vendored)'
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
-    js = re.sub(r'/\*.*?\*/', '', js, flags=re.S)
-    js = re.sub(r'(?m)^\s*//[^\n]*$', '', js)
-    js = re.sub(r'\s*//(?:[^\n\'"`]*)$', '', js, flags=re.M)
-    js = '\n'.join(l.strip() for l in js.split('\n') if l.strip())
-    return js, 'fallback'
 
 
 def prepare(verbose=False):
@@ -534,8 +547,7 @@ def prepare(verbose=False):
     wgsl, tidied = peephole(wgsl)
     say('peephole         %d folded leftovers simplified' % tidied)
     wgsl, shaken = tree_shake(wgsl)
-    if shaken:
-        say('tree-shaken      wgsl %7d   (wgslender: dead code + syntax)' % len(wgsl.encode()))
+    say('tree-shaken      wgsl %7d   (wgslender 1.5.1, vendored: dead code + syntax)' % len(wgsl.encode()))
     jmin, how = minify_js(js)
     say('js minified with %s' % how)
     wgsl, js, jmin, n = short_entries(wgsl, js, jmin)
@@ -564,19 +576,16 @@ def main():
     sys.path.insert(0, ROOT)      # -I keeps the script's own directory off sys.path
     import pack
     wgsl, js, jmin = prepare(verbose=True)
-    try:
-        prog = pack.Program(wgsl, _protected(wgsl, js), WGSL_KEEP)
-        saved = pack.load_state()
-        st = prog.adopt(saved)
-        wmin = prog.render(st)
-        parts = st['parts']
-        print('packed with %s state (%d items, %d globals, %d locals, %d fields)' % (
-            'searched' if saved else 'default', len(prog.items), len(prog.globals),
-            len(prog.all_locals), len(prog.fields)))
-    except Exception as e:
-        # the regex minifier is the fallback, not the path: say so loudly if it is taken
-        print('  PACKER FAILED (%s) - falling back to the regex minifier' % e)
-        wmin, parts = minify_wgsl(wgsl, js), ['style', 'canvas', 'wgsl', 'js']
+    # No fallback: the regex minifier (minify_wgsl, kept for experiment.py) builds a bigger
+    # intro, and a build that quietly changes size is worse than one that stops.
+    prog = pack.Program(wgsl, _protected(wgsl, js), WGSL_KEEP)
+    saved = pack.load_state()
+    st = prog.adopt(saved)
+    wmin = prog.render(st)
+    parts = st['parts']
+    print('packed with %s state (%d items, %d globals, %d locals, %d fields)' % (
+        'searched' if saved else 'default', len(prog.items), len(prog.globals),
+        len(prog.all_locals), len(prog.fields)))
     print('minified         wgsl %7d   js %7d' % (len(wmin.encode()), len(jmin.encode())))
 
     # keep the intermediates: a broken shader is unreadable from the packed page
@@ -591,9 +600,9 @@ def main():
     raw_deflate = zlib.compress(pb, 9)[2:-4]          # raw deflate stream
     try:
         import brotli
-        br = brotli.compress(pb, quality=11, lgwin=24)
     except ImportError:
-        br = None
+        raise BuildError('the Python `brotli` module is missing - pip install brotli')
+    br = brotli.compress(pb, quality=11, lgwin=24)
 
     b64 = __import__('base64').b64encode(raw_deflate).decode()
     loader = ('<body style=margin:0;overflow:hidden><script>'
@@ -634,7 +643,6 @@ def main():
             break
     head = head.replace('@@', str(off))
     assert len(head.encode('ascii')) == off, 'header length moved'
-    assert br, 'brotli module required for the dropper'
     cmd = head.encode('ascii') + br
     io.open(os.path.join(ROOT, 'intro.cmd'), 'wb').write(cmd)
 
@@ -644,8 +652,7 @@ def main():
     print('intro.cmd (DELIVERABLE)%8d' % len(cmd))
     print('payload (uncompressed) %8d' % len(pb))
     print('deflate-raw            %8d' % len(raw_deflate))
-    if br:
-        print('brotli q11             %8d' % len(br))
+    print('brotli q11             %8d' % len(br))
     print('intro.html (runnable)  %8d' % len(loader.encode()))
     print()
     budget = 8192
@@ -655,4 +662,8 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except BuildError as e:
+        print('\nBUILD FAILED: %s' % e, file=sys.stderr)
+        sys.exit(1)
