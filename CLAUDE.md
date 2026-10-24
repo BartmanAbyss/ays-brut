@@ -126,6 +126,25 @@ reflection that escapes returns `env(d)` either way. Painting the traced pixels 
 answered it in one frame. Also: capping droplet interactions per ray made it SLOWER - rays
 dying in the spray had been saving the tower traversal behind it.
 
+**Anything racy in a distance field shows up as flicker.** The coarse far field kept one
+particle per cell with a plain store - whichever thread wrote last - and jump-flooded in
+place, threads reading cells others were writing. Both changed every frame, so the steps
+rays took past the spray changed, and drops flickered with the simulation frozen. Now the
+seed is the particle nearest the cell centre (atomicMin on a packed key) and the flood
+ping-pongs between two regions. Test for determinism the way it was caught: freeze the sim
+(`simSpeed=0`) and compare two frames.
+
+**Fast and slightly wrong was beating correct by 10 ms.** Replacing that field with a
+provably safe occupancy bound fixed the flicker but cost 10 ms on tier2, because a proven-
+empty-neighbourhood bound only allows ~20 mm steps near spray while the nearest-seed
+distance allows 100+. The kept fix removes only the nondeterminism; the field still uses
+the old 0.85 safety factor on an estimate, now identically every frame.
+
+**Measure the state the user measures.** A fast-forwarded state is lighter than natural
+evolution - bursts do not reproduce it - and tier2 read 25 ms there against 29-34 in a
+real run. For a heavy, reproducible state: `det=1`, run naturally to step 3120 (t = 52 s),
+then set `simSpeed` 0. It takes about two minutes of wall time.
+
 **A particle smaller than a voxel vanishes.** The fine cell is 1.94 mm, so a drop only
 registers if it lands near a cell centre. Keep `dropRad` above the cell half-diagonal
 (~1.68 mm) or raise `FINE`. Symptom: a dense stream renders as four scattered drops.

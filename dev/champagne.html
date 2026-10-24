@@ -760,8 +760,8 @@ fn clearFine(@builtin(global_invocation_id) g: vec3u) {
 @compute @workgroup_size(64)
 fn clearCoarse(@builtin(global_invocation_id) g: vec3u) {
   if (g.x >= COARSE * COARSE * COARSE) { return; }
-  coarse[g.x] = vec4f(0.0, 0.0, 0.0, 0.0);
   atomicStore(&occ[g.x], 0u);
+  atomicStore(&occ[COARSE * COARSE * COARSE + g.x], 0xFFFFFFFFu);
 }
 
 // narrow-band exact scatter. Each particle deposits a swept CAPSULE, not a sphere: over
@@ -826,15 +826,26 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
   }
 }
 
+// Coarse far field, now deterministic. The occupancy buffer holds, after the 32^3 blocks,
+// three more 32^3 regions of particle indices: seed keys, then two jump-flood buffers.
+//
+// Seeding used to be a plain store of one particle per cell - whichever thread wrote last,
+// which changed every frame - and the flood ran in place, threads reading cells other
+// threads were writing. Both made the far field differ from frame to frame, so the steps a
+// ray took near the spray differed, and drops flickered with the simulation frozen. Now the
+// seed is the particle nearest the cell centre (atomicMin on distance << 16 | index) and
+// every flood pass reads one region and writes the other.
 @compute @workgroup_size(64)
 fn seedCoarse(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
   if (i >= u32(u.nPart)) { return; }
-  let p = parts[i];
-  if (p.life <= 0.0) { return; }
-  let c = vec3i(floor((p.pos - DOM_LO) / CCELL));
+  let pt = parts[i];
+  if (pt.life <= 0.0) { return; }
+  let c = vec3i(floor((pt.pos - DOM_LO) / CCELL));
   if (any(c < vec3i(0)) || any(c >= vec3i(i32(COARSE)))) { return; }
-  coarse[cIdx(c)] = vec4f(p.pos, 1.0);
+  let cp = DOM_LO + (vec3f(c) + 0.5) * CCELL;
+  let qd = u32(clamp(length(pt.pos - cp) / CCELL, 0.0, 0.999) * 65535.0);
+  atomicMin(&occ[COARSE * COARSE * COARSE + cIdx(c)], (qd << 16u) | (i & 0xFFFFu));
 }
 
 // jump flooding on the coarse grid (in place) — far-field nearest-particle field
@@ -842,26 +853,27 @@ fn seedCoarse(@builtin(global_invocation_id) g: vec3u) {
 fn jfaCoarse(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
   if (i >= COARSE * COARSE * COARSE) { return; }
+  let src = u32(j._a);
   let c  = c3(i);
   let cp = DOM_LO + (vec3f(c) + 0.5) * CCELL;
-  var best = coarse[i];
+  var best = atomicLoad(&occ[src + i]);
   var bd = 1e9;
-  if (best.w > 0.5) { bd = length(cp - best.xyz); }
-  let s = i32(j.stride);
+  if (best != 0xFFFFFFFFu) { bd = length(cp - parts[best & 0xFFFFu].pos); }
+  let st = i32(j.stride);
   for (var dz = -1; dz <= 1; dz++) {
     for (var dy = -1; dy <= 1; dy++) {
       for (var dx = -1; dx <= 1; dx++) {
-        let nc = c + vec3i(dx, dy, dz) * s;
+        let nc = c + vec3i(dx, dy, dz) * st;
         if (any(nc < vec3i(0)) || any(nc >= vec3i(i32(COARSE)))) { continue; }
-        let q = coarse[cIdx(nc)];
-        if (q.w > 0.5) {
-          let d = length(cp - q.xyz);
-          if (d < bd) { bd = d; best = q; }
-        }
+        let v = atomicLoad(&occ[src + cIdx(nc)]);
+        if (v == 0xFFFFFFFFu) { continue; }
+        let dd = length(cp - parts[v & 0xFFFFu].pos);
+        if (dd < bd) { bd = dd; best = v; }
       }
     }
   }
-  coarse[i] = best;
+  if (best != 0xFFFFFFFFu) { best = best & 0xFFFFu; }
+  atomicStore(&occ[u32(j._b) + i], best);
 }
 
 @compute @workgroup_size(512)
@@ -908,9 +920,9 @@ fn liquidDist(p: vec3f) -> f32 {
 
   // far field from the coarse jump-flood result
   let cc = vec3i(clamp(floor((p - DOM_LO) / CCELL), vec3f(0.0), vec3f(f32(COARSE) - 1.0)));
-  let q  = coarse[cIdx(cc)];
+  let qi = atomicLoad(&occ[2u * COARSE * COARSE * COARSE + cIdx(cc)]);
   var dc = 1.0;
-  if (q.w > 0.5) { dc = (length(p - q.xyz) - u.prad) * 0.85; }
+  if (qi != 0xFFFFFFFFu) { dc = (length(p - parts[qi].pos) - u.prad) * 0.85; }
 
   var d = dc;
   if (tri < BAND * 0.98) { d = tri - u.prad; }        // inside the exact band
@@ -1424,7 +1436,7 @@ const cfg = {
   still:    Q.get('still') === '1',
   selftest: Q.get('selftest') === '1',
   steps:    qf('steps', 160),
-  npart:    qf('npart', 65536),
+  npart:    Math.min(qf('npart', 65536), 65536),   // the coarse seed key holds a 16-bit index
   spawnMod: qf('spawnmod', 1600),
   pvol:     qf('pvol', 2e-8),
   warm:     qf('warm', 400),
@@ -1540,7 +1552,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   const S = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
   const ubo     = device.createBuffer({ size: 208, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const SUBSLOT = JFA_STRIDES.length;        // sub-step indices live after the JFA strides
-  const jbo     = device.createBuffer({ size: 256 * (JFA_STRIDES.length + 16), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const CJSLOT  = JFA_STRIDES.length + 16;   // coarse-flood passes: stride, source, destination
+  const jbo     = device.createBuffer({ size: 256 * (CJSLOT + JFA_STRIDES.length), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   const partBuf = device.createBuffer({ size: cfg.npart * 32, usage: S });
   const fineBuf = device.createBuffer({ size: FINE_N * 4, usage: S });
   const fineF   = device.createBuffer({ size: FINE_N * 4, usage: S });
@@ -1556,7 +1569,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   device.queue.writeBuffer(pud,  0, new Float32Array(PN * PN));
   device.queue.writeBuffer(pudA, 0, new Uint32Array(PN * PN));
   const pudC    = device.createBuffer({ size: PCN * PCN * 16, usage: S });
-  const occB    = device.createBuffer({ size: COARSE_N * 4, usage: S });
+  const occB    = device.createBuffer({ size: COARSE_N * 4 * 4, usage: S });   // blocks, seed keys, two flood regions
   device.queue.writeBuffer(pudC, 0, new Float32Array(PCN * PCN * 4));
   const glassRd = device.createBuffer({ size: NG * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const pudRd = device.createBuffer({ size: PCN * PCN * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
@@ -1578,6 +1591,16 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   }
   for (let i = 0; i < 16; i++) {
     device.queue.writeBuffer(jbo, (SUBSLOT + i) * 256, new Float32Array([i, 0, 0, 0]));
+  }
+  // Ping-pong: keys -> R1 -> R2 -> R1 -> R2 -> R1, so with five strides the result lands in
+  // R1, the region liquidDist reads. Regions are offsets into the occupancy buffer.
+  {
+    const KEYS = COARSE_N, R1 = 2 * COARSE_N, R2 = 3 * COARSE_N;
+    for (let i = 0; i < JFA_STRIDES.length; i++) {
+      const src = i === 0 ? KEYS : (i % 2 ? R1 : R2), dst = i % 2 ? R2 : R1;
+      device.queue.writeBuffer(jbo, (CJSLOT + i) * 256, new Float32Array([JFA_STRIDES[i], src, dst, 0]));
+    }
+    console.assert(JFA_STRIDES.length % 2 === 1, 'coarse flood must end in R1');
   }
 
   const bg0 = device.createBindGroup({ layout: bgl0, entries: [
@@ -1910,7 +1933,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     cp.setPipeline(P.seed);    cp.dispatchWorkgroups(WG(cfg.npart, 64));
     cp.setPipeline(P.jfa);
     for (let i = 0; i < JFA_STRIDES.length; i++) {
-      cp.setBindGroup(1, bg1, [i * 256]);
+      cp.setBindGroup(1, bg1, [(CJSLOT + i) * 256]);
       cp.dispatchWorkgroups(WG(COARSE_N, 64));
     }
     cp.setBindGroup(1, bg1, [0]);
