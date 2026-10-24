@@ -413,9 +413,41 @@ convex bounds as well (domain box, puddle slab, bottle sphere) removed 6.5% more
 **no** time — out in empty sky every SDF early-outs, so those steps were cheap — and was
 dropped.
 
-Heavy tier2 now: **render 19.5, total 23.5** (was 24.8 / 29.9 when this profile started).
-Still ~4.5 ms over the 19 ms target. The steps left are inside the domain box, and the
-spray lookup minus the trilerp is still the biggest component.
+**What limits the steps inside the domain box.** For each march step in air inside the
+box, the profiler records which component gave the minimum and so set the step:
+
+| limiter | share of steps | mean step |
+|---|---|---|
+| bulk liquid | 30.0% | 17.5 mm |
+| tower | 29.3% | 13.3 mm (a third from the coupe's bounding cylinder) |
+| spray | 26.7% | 19.9 mm (half narrow band, half far-field estimate) |
+| puddle | 7.8% | **8.2 mm** |
+| bottle | 6.3% | 61.8 mm |
+
+27% of those steps are under 1 mm, the usual cost of approaching surfaces. A further 20 M
+steps are inside a medium. Bulk, tower and spray are limited by geometry that is really
+there. The puddle was not: its bound used the global depth cap, a slab 20 mm deep over every
+wet block, which rays crossed in 0.8 mm steps over a film usually a millimetre thick.
+`puddleCoarse` now stores the tallest rendered film within one block of each block
+(including the smoothing skirt), and `puddleSDF` bounds by that locally and by the global
+cap a block away. Puddle-limited steps fell 5.1 M → 1.4 M at three times the length; all
+steps −5%, **render 19.15 → 18.02**.
+
+Two candidates that failed. **Stacked cylinders for the coupe** (bowl, stem, foot instead of
+one rim-wide cylinder over the full height) were a valid bound and cut exact coupe
+evaluations 19%, but saved no steps and were **0.9 ms slower**: three bounds on every coupe
+call cost more than they save. A first version of the puddle bound dropped the horizontal
+distance term from the "beyond a block" case and *added* 26% steps. That was caught by the
+step count before anything was timed.
+
+**Drops scatter under any change to the march path.** A bound that is perfectly valid still
+changes which point on a 2 mm drop a ray lands on, and refraction through it amplifies that
+into different pixels. The stacked cylinders changed 6.5% of pixels, all on drops, with
+the glass untouched. The puddle bound changed 0.04%, specks on the low drops. A pixel diff
+judges such changes only together with *where* the pixels are (`__diff` shows that).
+
+Heavy tier2 now: **render ~18.0, total ~22.1** (was 24.8 / 29.9 when this profile started).
+Still ~3 ms over the 19 ms target.
 
 ### WebGPU limits that must be requested
 

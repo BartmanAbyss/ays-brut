@@ -117,7 +117,14 @@ override PROF : bool = false;
 // 1 tower, 2 liquidDist, 4 bulk liquid, 8 bottle, 16 spray trilerp, 32 spray far field.
 override XC : u32 = 0u;
 //#D}
-var<private> pc : array<u32, 96>;
+var<private> pc : array<u32, 112>;
+// step-limiter accounting (profiler only): which component set each march step
+var<private> profMarchS : f32 = 0.0;      // the march's sign while map() is called from it, else 0
+var<private> profSprayD : f32 = 1e9;
+var<private> profBulkD : f32 = 1e9;
+var<private> profSpraySrc : u32 = 0u;     // 0 narrow band, 1 far-field estimate, 2 band floor
+var<private> profCoupeB : bool = false;   // the last sdCoupe answered from its bounding cylinder
+var<private> profTowerB : bool = false;   // ...and so did the coupe sdTower's min came from
 // primary-ray step accounting (profiler only): set by fs around the bounce-0 march
 var<private> profPrim : bool = false;
 var<private> profTpl : f32 = 0.0;
@@ -219,21 +226,19 @@ fn puddleSDF(p: vec3f) -> f32 {
   let b  = pudC[u32(cc.y) * PCN + u32(cc.x)];
   var dh = 1e9;                                     // horizontal distance to wet table
   if (b.w > 0.5) { dh = max(length(p.xz - b.yz) - PBCELL * 0.75, 0.0); }
-  let dv = p.y - PMAXH;                             // the pool is never deeper than this
-  if (dh > 0.004 || dv > 0.004) { return max(dh, max(dv, 0.0008)); }
-
-  var wet = false;
-  for (var dy = -1; dy <= 1; dy++) {
-    for (var dx = -1; dx <= 1; dx++) {
-      let q = clamp(cc + vec2i(dx, dy), vec2i(0), vec2i(i32(PCN) - 1));
-      if (pudC[u32(q.y) * PCN + u32(q.x)].x > PMIN) { wet = true; }
-    }
-  }
-  if (wet) {
+  // PMAXH (20 mm) is the deepest the pool can be anywhere, and bounding by it alone was a
+  // slab over every wet block that rays crossed in 0.8 mm steps, though the film under
+  // them is usually a millimetre: 7% of the steps in the domain box. Within a block of p
+  // the rendered film is at most b.x (puddleCoarse); anything taller is at least a block
+  // away. Either way it is wet table, so dh still holds. 5% fewer steps, -1.1 ms on tier2.
+  let dv = p.y - PMAXH;
+  let bl = max(dh, min(p.y - (b.x + 0.0005), max(PBCELL, dv)));
+  if (bl > 0.004) { return bl; }
+  if (b.x > PMIN) {                                 // b.x covers the 3x3 the old loop tested
     let h = samplePuddle(p.xz);
     if (h >= PMIN) { return max(p.y - h, -p.y); }
   }
-  return max(max(dh, dv), 0.0008);
+  return max(bl, 0.0008);
 }
 const R_IN  = SPH_R - GLASS_T;         // bowl interior (particle collision)
 // the liquid body deliberately OVERLAPS into the glass shell: coincident surfaces let
@@ -359,8 +364,8 @@ fn sdCoupe(p: vec3f) -> f32 {
   // needed within a few mm of it. sdTower evaluates three coupes per sample and a point is
   // usually far from at least two of them: the tiers are 17 cm apart.
   let bnd = max(length(p.xz) - (RIM_R + 0.002), max(-p.y - 0.002, p.y - (RIM_Y + 0.002)));
-  if (bnd > 0.004) { return bnd; }
-  if (PROF) { pc[7] += 1u; }
+  if (bnd > 0.004) { if (PROF) { profCoupeB = true; } return bnd; }
+  if (PROF) { pc[7] += 1u; profCoupeB = false; }
   // bowl: a spherical cap shell, cut at the rim and thinned towards it
   var bowl = abs(length(p - vec3f(0.0, SPH_CY, 0.0)) - SPH_R) - GLASS_T;
   bowl = max(bowl, p.y - RIM_Y);
@@ -411,6 +416,18 @@ fn sdTower(p: vec3f) -> f32 {
   var d = sdCoupe(vec3f(p.x - f0.x, p.y, p.z - f0.y));
   let p1 = p - vec3f(0.0, GH, 0.0);
   let f1 = SP * (clamp(round(p1.xz / SP - 0.5), vec2f(-1.0), vec2f(0.0)) + 0.5);
+//#D{
+  if (PROF) {   // the same, noting whether the winning coupe answered from its bound
+    var tb = profCoupeB;
+    let d1 = sdCoupe(vec3f(p1.x - f1.x, p1.y, p1.z - f1.y));
+    if (d1 < d) { tb = profCoupeB; }
+    d = min(d, d1);
+    let d2 = sdCoupe(p - vec3f(0.0, 2.0 * GH, 0.0));
+    if (d2 < d) { tb = profCoupeB; }
+    profTowerB = tb;
+    return min(d, d2);
+  }
+//#D}
   d = min(d, sdCoupe(vec3f(p1.x - f1.x, p1.y, p1.z - f1.y)));
   d = min(d, sdCoupe(p - vec3f(0.0, 2.0 * GH, 0.0)));
   return d;
@@ -640,8 +657,16 @@ fn puddleCoarse(@builtin(global_invocation_id) g: vec3u) {
   for (var y = 0; y < 8; y++) {
     for (var x = 0; x < 8; x++) { m = max(m, pud[pIdx(b + vec2i(x, y))]); }
   }
+  // x: the tallest the RENDERED film gets anywhere within one block of this one - the 3x3
+  // blocks around it, plus 3 cells, since samplePuddle's smoothed bilinear tap reads up to
+  // two cells from a point's own. puddleSDF bounds by it out to a block's distance. (The
+  // wet flag in w stays this block's own.)
+  var mh = 0.0;
+  for (var y = -11; y < 19; y++) {
+    for (var x = -11; x < 19; x++) { mh = max(mh, pud[pIdx(b + vec2i(x, y))]); }
+  }
   let ctr = (vec2f(c) + 0.5) * PBCELL - vec2f(PEXT);
-  var seed = vec4f(m, ctr.x, ctr.y, 0.0);
+  var seed = vec4f(mh, ctr.x, ctr.y, 0.0);
   if (m > PMIN) { seed.w = 1.0; }
   pudC[i] = seed;
 }
@@ -932,7 +957,7 @@ fn fineAt(c: vec3i) -> f32 {
   return fineF[fIdx(cc)];
 }
 fn liquidDist(p: vec3f) -> f32 {
-  if (PROF) { pc[2] += 1u; }
+  if (PROF) { pc[2] += 1u; profSprayD = 1e9; profBulkD = 1e9; }
   if (u.noliq > 0.5) { return 1e9; }          // debug: dry glass
   var dPud = 1e9;
   if (u.pudOn > 0.5) { dPud = puddleSDF(p); }
@@ -988,9 +1013,20 @@ fn liquidDist(p: vec3f) -> f32 {
 //#D}
 
   var d = dc;
-  if (tri < BAND * 0.98) { d = tri - u.prad; }        // inside the exact band
-  else { d = max(BAND - u.prad, dc); if (PROF) { pc[4] += 1u; } }
+  if (tri < BAND * 0.98) { d = tri - u.prad; if (PROF) { profSpraySrc = 0u; } }  // inside the exact band
+  else {
+    d = max(BAND - u.prad, dc);
+    if (PROF) { pc[4] += 1u; profSpraySrc = select(2u, 1u, dc > BAND - u.prad); }
+  }
   // particle field (spray/stream), the analytic bulk in each glass, and the table puddle
+//#D{
+  if (PROF) {
+    let dsp = max(d, sdBoxDom(p));
+    let dbk = bulkSDF(p);
+    profSprayD = dsp; profBulkD = dbk;
+    return min(min(dsp, dbk), dPud);
+  }
+//#D}
   return min(min(max(d, sdBoxDom(p)), bulkSDF(p)), dPud);
 }
 
@@ -1075,6 +1111,36 @@ fn map(p: vec3f) -> f32 {
     if ((XC & 8u) != 0u) { d = min(d, sdBottle(q) + 1.0); }
     return d;
   }
+  if (PROF) {
+  let dT = sdTower(p);
+  let dL = liquidDist(p);
+  let dB = sdBottle(p);
+  let m  = min(min(dT, dL), dB);
+  if (profMarchS != 0.0 && sdBoxDom(p) <= 0.0) {
+    if (profMarchS > 0.0) {
+      // march steps in air inside the domain box, by what limited them:
+      // 80..84 count  tower / spray / bulk liquid / puddle / bottle
+      // 85..89 summed step size of each, in 0.1 mm
+      // 90..94 step size <0.25 mm, <1, <4, <16, >=16 mm (all limiters)
+      // 96/97/98 spray from the narrow band / far-field estimate / band floor
+      // 100/101 tower from a coupe's bounding cylinder / its exact shape
+      var k = 3u;
+      if (dB == m) { k = 4u; } else if (dT == m) { k = 0u; }
+      else if (profSprayD == m) { k = 1u; } else if (profBulkD == m) { k = 2u; }
+      pc[80u + k] += 1u;
+      pc[85u + k] += u32(clamp(m, 0.0, 1.0) * 1e4);
+      let mm = m * 1000.0;
+      var hb = 4u;
+      if (mm < 0.25) { hb = 0u; } else if (mm < 1.0) { hb = 1u; } else if (mm < 4.0) { hb = 2u; } else if (mm < 16.0) { hb = 3u; }
+      pc[90u + hb] += 1u;
+      if (k == 1u) { pc[96u + profSpraySrc] += 1u; }
+      if (k == 0u) { pc[select(101u, 100u, profTowerB)] += 1u; }
+    } else {
+      pc[103] += 1u;    // steps inside a medium, inside the box
+    }
+  }
+  return m;
+  }
 //#D}
   return min(min(sdTower(p), liquidDist(p)), sdBottle(p));
 }
@@ -1120,7 +1186,9 @@ fn marchS(ro: vec3f, rd: vec3f, s: f32, tmax: f32) -> Hit {
       else if (sdBoxDom(ro + rd * t) > 0.0) { pc[65] += 1u; }
       else { pc[66] += 1u; }
     }
+    if (PROF) { profMarchS = s; }
     let d = map(ro + rd * t) * s;
+    if (PROF) { profMarchS = 0.0; }
     if (w > 1.0 && (d < 0.0 || d + rPrev < stepL)) {
       if (PROF) { pc[11] += 1u; }
       // Overshot: either the spheres don't overlap, so a surface could sit in the gap, or
@@ -1572,7 +1640,7 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
   if (PROF) {
     pc[0] = 1u;
     let bank = ((u32(fc.x) * 7u + u32(fc.y) * 13u) & 63u) * 128u;
-    for (var k = 0u; k < 96u; k++) { if (pc[k] != 0u) { atomicAdd(&prof[bank + k], pc[k]); } }
+    for (var k = 0u; k < 112u; k++) { if (pc[k] != 0u) { atomicAdd(&prof[bank + k], pc[k]); } }
   }
   return vec4f(col, 1.0);
 }
@@ -1871,8 +1939,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   function flushProfile(r) {
     profRd.mapAsync(GPUMapMode.READ).then(() => {
       const a = new Uint32Array(profRd.getMappedRange().slice(0)); profRd.unmap();
-      const t = new Array(96).fill(0);
-      for (let b = 0; b < 64; b++) for (let k = 0; k < 96; k++) t[k] += a[b * 128 + k];
+      const t = new Array(112).fill(0);
+      for (let b = 0; b < 64; b++) for (let k = 0; k < 112; k++) t[k] += a[b * 128 + k];
       r(t);
     });
   }

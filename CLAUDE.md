@@ -173,6 +173,13 @@ analytically has to hand its distance to the march as a `tmax`. Stop on the last
 empty sphere reaching it (`tPrev + rPrev >= tmax`), never on `t` passing it, or an
 over-relaxed step jumps a surface just in front.
 
+**A global cap is a plane wherever its other axis is zero.** The puddle bound was
+`max(dh, y - PMAXH)`: bounded horizontally, as the trap above demands, but over every wet
+block `dh` is 0 and what remains is a plane 20 mm up, crossed in 0.8 mm steps. Bound by the
+local maximum (puddleCoarse keeps it per block, over the neighbourhood the renderer reads),
+and fall back to the global cap only where it is provably far. Keep the other axis's term in
+the fallback too: dropping `dh` there capped every low step in the scene at one block.
+
 **A particle smaller than a voxel vanishes.** The fine cell is 1.94 mm, so a drop only
 registers if it lands near a cell centre. Keep `dropRad` above the cell half-diagonal
 (~1.68 mm) or raise `FINE`. Symptom: a dense stream renders as four scattered drops.
@@ -373,14 +380,15 @@ with physical cores, not threads. Do not score with a lower quality to go faster
 - Performance budget is **16.6 ms** at **1920×1080** (confirmed) on the compo PC, an **RTX
   5070**. Dev is on a 4070, ~15–20% slower, so the number to hit here is **~19 ms**. It is
   camera-dependent and only the worst shots fail. The worst measured is the heavy natural
-  tier2 frame (step 3120): **23.5 total, 19.5 render** after the packed far field and the
-  plane-bounded march (was 29.9). Non-render passes are ~4 ms there. Step count, reflections and photon count are **not**
+  tier2 frame (step 3120): **~22.1 total, ~18.0 render** after the packed far field, the
+  plane-bounded march and the local puddle bound (was 29.9). Non-render passes are ~4 ms. Step count, reflections and photon count are **not**
   levers, and neither was skipping empty particle blocks (0.9 ms, not the 8 that `parts=0`
   suggested), nor wasted trilerps (exact block reach cut them 36% for 0.4 ms), nor the rays
   that exhaust the bounce budget (every cap trades ~1% of steps for ~1% of changed pixels,
   on the rim glints), nor bounding the march by the scene's bounds (steps in empty sky are
-  cheap). What is left, from the profile in the README: steps inside the domain box, and
-  the rest of the spray lookup.
+  cheap), nor a tighter coupe bound (fewer exact evaluations, no fewer steps, slower).
+  Inside the domain box the steps are now limited by geometry that is really there - bulk
+  liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
   stale. The dropper is ~324 bytes, leaving ~7870 for the payload. The harness as it stands
