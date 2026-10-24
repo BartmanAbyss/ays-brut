@@ -1886,7 +1886,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     let ang, dist = ui.dist, camY = ui.camY, tgtY = ui.tgtY;
     if (ui.show) {
       const sh = evalShow(showT);
-      ang = sh.angle * Math.PI / 180; dist = sh.dist; camY = sh.camY; tgtY = sh.tgtY;
+      ang = sh.angle / 57.3; dist = sh.dist; camY = sh.camY; tgtY = sh.tgtY;   // deg -> rad, 0.007% off: -6 bytes
       // Sliders follow for readout only. Driving the camera THROUGH them would quantise it
       // to the slider step - dist steps by 0.01, visible stepping on a push-in that only
       // covers 0.01 in eight seconds.
