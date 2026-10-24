@@ -98,18 +98,23 @@ struct Particle { pos : vec3f, life : f32, vel : vec3f, _p : f32 };
 @group(0) @binding(1) var<storage, read_write> parts  : array<Particle>;
 @group(0) @binding(2) var<storage, read_write> fine   : array<atomic<u32>>;
 @group(0) @binding(3) var<storage, read_write> fineF  : array<f32>;
-@group(0) @binding(4) var<storage, read_write> coarse : array<vec4f>;
-@group(0) @binding(5) var<storage, read_write> glass  : array<vec4f>;        // x=level  y=spare
-@group(0) @binding(6) var<storage, read_write> gvol   : array<atomic<u32>>;  // [0..13] inflow, [14..27] overflow
-@group(0) @binding(7) var<storage, read_write> wave   : array<vec4f>;        // eta, etaOld, foam
-@group(0) @binding(8) var<storage, read_write> wimp   : array<atomic<i32>>;  // [0..N) impulse, [N..2N) foam
-@group(0) @binding(9) var<storage, read_write> caust : array<atomic<u32>>;  // RGB photon map
-@group(0) @binding(10) var<storage, read_write> caustF : array<vec4f>;       // blurred caustics
-@group(0) @binding(11) var<storage, read_write> pud    : array<f32>;       // puddle depth on the table
-@group(0) @binding(12) var<storage, read_write> pudA   : array<atomic<u32>>;  // puddle inflow
-@group(0) @binding(13) var<storage, read_write> pudC   : array<f32>;       // tallest film within a block of each block
-@group(0) @binding(14) var<storage, read_write> occ    : array<atomic<u32>>; // COARSE^3 narrow-band occupancy
-@group(0) @binding(15) var<storage, read_write> prof : array<atomic<u32>>;  // profiler banks
+// The small buffers share three bindings by element type. Fourteen storage buffers needed
+// requiredLimits (the default is 8 per stage, and every binding here is visible to both
+// compute and fragment); its four long limit names cost 81 compressed bytes. The two
+// 125 MB narrow-band buffers stay apart: one binding may not exceed 128 MiB by default.
+// Offsets are abstract integers, so they add to i32 and u32 indices alike.
+@group(0) @binding(4) var<storage, read_write> atom : array<atomic<u32>>;
+const A_GVOL  = 4 * 32 * 32 * 32;          // occupancy, seed keys, two flood regions | then:
+const A_WIMP  = A_GVOL + 2 * 14;           // glass inflow [0..13], overflow [14..27]
+const A_PUDA  = A_WIMP + 2 * 14 * 32 * 32; // wave impulses [0..N), foam [N..2N) - i32 bits
+const A_CAUST = A_PUDA + 384 * 384;        // puddle inflow; then the RGB photon map
+@group(0) @binding(5) var<storage, read_write> vecs : array<vec4f>;
+const V_GLASS  = 32 * 32 * 32;             // coarse far field, packed for the render | then:
+const V_WAVE   = V_GLASS + 14;             // glass level (x)
+const V_CAUSTF = V_WAVE + 14 * 32 * 32;    // waves: eta, etaOld, foam; then blurred caustics
+@group(0) @binding(6) var<storage, read_write> flts : array<f32>;
+const F_PUDC = 384 * 384;                  // puddle depth; then the tallest film per block
+@group(0) @binding(7) var<storage, read_write> prof : array<atomic<u32>>;  // profiler banks
 // Profiler. Counters compile into the profiling pipeline only (constants: { PROF: 1 }); the
 // normal pipeline compiles every `if (PROF)` away, so its timing is untouched, and the
 // release build substitutes false and folds the branches out. Index map in __profile().
@@ -205,7 +210,7 @@ fn samplePuddle(xz: vec2f) -> f32 {
       let q = c + vec2i(dx, dy);
       var m = 0.0;
       for (var ky = -1; ky <= 1; ky++) {
-        for (var kx = -1; kx <= 1; kx++) { m += pud[pIdx(q + vec2i(kx, ky))]; }
+        for (var kx = -1; kx <= 1; kx++) { m += flts[pIdx(q + vec2i(kx, ky))]; }
       }
       acc += w * m / 9.0;
     }
@@ -227,7 +232,7 @@ fn puddleSDF(p: vec3f) -> f32 {
   let n = p.xz / (2.0 * PEXT) + 0.5;
   let cc = vec2i(clamp(n, vec2f(0.0), vec2f(0.999)) * f32(PCN));
   // b: the tallest the rendered film gets within a block of p's block (puddleCoarse).
-  let b  = pudC[u32(cc.y) * PCN + u32(cc.x)];
+  let b  = flts[F_PUDC + u32(cc.y) * PCN + u32(cc.x)];
   // Horizontal distance to wet table: if there is no film within a block, it is at least a
   // block away, which is all a bound needs. (A jump flood used to compute it exactly; it
   // cost a kernel, five dispatches and three channels per block for longer steps over dry
@@ -296,8 +301,8 @@ fn sampleWave(g: i32, xz: vec2f) -> vec4f {
   let b = floor(t);
   let f = t - b;
   let c = vec2i(b);
-  let a0 = mix(wave[wIdx(g, c)],                  wave[wIdx(g, c + vec2i(1,0))], f.x);
-  let a1 = mix(wave[wIdx(g, c + vec2i(0,1))],     wave[wIdx(g, c + vec2i(1,1))], f.x);
+  let a0 = mix(vecs[V_WAVE + wIdx(g, c)],                  vecs[V_WAVE + wIdx(g, c + vec2i(1,0))], f.x);
+  let a1 = mix(vecs[V_WAVE + wIdx(g, c + vec2i(0,1))],     vecs[V_WAVE + wIdx(g, c + vec2i(1,1))], f.x);
   var r = mix(a0, a1, f.y);
   if (u.wav < 0.5) { r.x = 0.0; }               // waves off: a flat surface, foam kept
   return r;
@@ -318,7 +323,7 @@ fn bubbleSDF(ql: vec3f) -> f32 {
 // liquid body of one glass: sphere-cap interior cut by the (wavy) surface plane
 fn bulkSDF(p: vec3f) -> f32 {
   let g = glassIdx(p);
-  let L = glass[g].x;
+  let L = vecs[V_GLASS + g].x;
   if (L <= 0.0002) { return 1.0; }
   let q  = p - glassOff(g);
   let dS = length(q - vec3f(0.0, SPH_CY, 0.0)) - R_LIQ;
@@ -487,9 +492,9 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
         // CAS, not sub-then-add-back: a plain atomicSub underflows u32 and invents volume
         var took = false;
         for (var tries = 0; tries < 3; tries++) {
-          let cur = atomicLoad(&gvol[u32(NG + g)]);
+          let cur = atomicLoad(&atom[A_GVOL + u32(NG + g)]);
           if (cur < PV) { break; }
-          let r = atomicCompareExchangeWeak(&gvol[u32(NG + g)], cur, cur - PV);
+          let r = atomicCompareExchangeWeak(&atom[A_GVOL + u32(NG + g)], cur, cur - PV);
           if (r.exchanged) { took = true; break; }
         }
         if (took) {
@@ -544,14 +549,14 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
 
     if (wasIn) {
       // absorbed into the bulk once below the surface
-      let top = Y0 + glass[g].x + sampleWave(g, q.xz).x;
+      let top = Y0 + vecs[V_GLASS + g].x + sampleWave(g, q.xz).x;
       if (q.y <= top) {
-        atomicAdd(&gvol[u32(g)], PV);
+        atomicAdd(&atom[A_GVOL + u32(g)], PV);
         let t  = (q.xz / (2.0 * RIM_R) + 0.5) * f32(WN);
         let hit = vec2i(t);
-        atomicAdd(&wimp[wIdx(g, hit)], i32(clamp(-p.vel.y, 0.0, 3.0) * 0.00035 / WUNIT));
+        atomicAdd(&atom[A_WIMP + wIdx(g, hit)], u32(i32(clamp(-p.vel.y, 0.0, 3.0) * 0.00035 / WUNIT)));
         // mousse: CO2 foam is generated by the impact itself
-        atomicAdd(&wimp[wIdx(g, hit) + NWCELL], i32(clamp(-p.vel.y, 0.15, 4.0) * 0.02 / FUNIT));
+        atomicAdd(&atom[A_WIMP + wIdx(g, hit) + NWCELL], u32(i32(clamp(-p.vel.y, 0.15, 4.0) * 0.02 / FUNIT)));
         p.life = 0.0;
         parts[i] = p;
         return;
@@ -570,7 +575,7 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
       // join the puddle rather than bouncing and quietly expiring
       let pc = vec2i(floor((np.xz / (2.0 * PEXT) + 0.5) * f32(PN)));
       if (all(pc >= vec2i(0)) && all(pc < vec2i(i32(PN)))) {
-        atomicAdd(&pudA[pIdx(pc)], PV);
+        atomicAdd(&atom[A_PUDA + pIdx(pc)], PV);
       }
       p.life = 0.0;
       parts[i] = p;
@@ -588,18 +593,18 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
 // Run by the first NG threads of puddleUpdate - the two are independent, and a kernel of
 // its own was 14 threads and an entry point.
 fn glassUpdate(g: i32) {
-  let inflow = f32(atomicExchange(&gvol[u32(g)], 0u)) * VUNIT;
-  if (u.fillOv >= 0.0) { glass[g] = vec4f(u.fillOv * LMAX, 0.0, 0.0, 0.0); return; }
-  var L = glass[g].x;
+  let inflow = f32(atomicExchange(&atom[A_GVOL + u32(g)], 0u)) * VUNIT;
+  if (u.fillOv >= 0.0) { vecs[V_GLASS + g] = vec4f(u.fillOv * LMAX, 0.0, 0.0, 0.0); return; }
+  var L = vecs[V_GLASS + g].x;
   let y  = Y0 + L;
   let r2 = max(R_IN * R_IN - (y - SPH_CY) * (y - SPH_CY), 1e-6);
   let A  = PI * r2;
   L += inflow / A;
   if (L > LMAX) {
-    atomicAdd(&gvol[u32(NG + g)], u32(max((L - LMAX) * A, 0.0) / VUNIT));
+    atomicAdd(&atom[A_GVOL + u32(NG + g)], u32(max((L - LMAX) * A, 0.0) / VUNIT));
     L = LMAX;
   }
-  glass[g] = vec4f(L, 0.0, 0.0, 0.0);
+  vecs[V_GLASS + g] = vec4f(L, 0.0, 0.0, 0.0);
 }
 
 // ── surface waves: 2D wave equation on each glass's disc ──
@@ -610,14 +615,14 @@ fn waveUpdate(@builtin(global_invocation_id) gi: vec3u) {
   let g = i32(n / (WN * WN));
   let c = vec2i(i32(n % WN), i32((n / WN) % WN));
 
-  let imp = f32(atomicExchange(&wimp[n], 0)) * WUNIT;
-  let fin = f32(atomicExchange(&wimp[n + NWCELL], 0)) * FUNIT;
-  let e   = wave[n];
+  let imp = f32(i32(atomicExchange(&atom[A_WIMP + n], 0u))) * WUNIT;
+  let fin = f32(i32(atomicExchange(&atom[A_WIMP + n + NWCELL], 0u))) * FUNIT;
+  let e   = vecs[V_WAVE + n];
   var eta = e.x;
   let old = e.y;
 
-  let lap = wave[wIdx(g, c + vec2i(1,0))].x + wave[wIdx(g, c - vec2i(1,0))].x
-          + wave[wIdx(g, c + vec2i(0,1))].x + wave[wIdx(g, c - vec2i(0,1))].x - 4.0 * eta;
+  let lap = vecs[V_WAVE + wIdx(g, c + vec2i(1,0))].x + vecs[V_WAVE + wIdx(g, c - vec2i(1,0))].x
+          + vecs[V_WAVE + wIdx(g, c + vec2i(0,1))].x + vecs[V_WAVE + wIdx(g, c - vec2i(0,1))].x - 4.0 * eta;
 
   var nw = 2.0 * eta - old + 0.25 * lap - 0.06 * (eta - old) - imp;
 
@@ -627,7 +632,7 @@ fn waveUpdate(@builtin(global_invocation_id) gi: vec3u) {
   nw = clamp(nw, -WMAX, WMAX);
 
   let foam = clamp(e.z * 0.978 + fin, 0.0, 1.6);   // mousse collapses over a few seconds
-  wave[n] = vec4f(nw, eta, foam, 0.0);
+  vecs[V_WAVE + n] = vec4f(nw, eta, foam, 0.0);
 }
 
 // ── caustics: trace photons from the key light through glass+champagne onto the table ──
@@ -639,18 +644,18 @@ fn puddleUpdate(@builtin(global_invocation_id) g: vec3u) {
   if (i >= PN * PN) { return; }
   if (i < u32(NG)) { glassUpdate(i32(i)); }
   let c = vec2i(i32(i % PN), i32(i / PN));
-  var h = pud[i] + f32(atomicExchange(&pudA[i], 0u)) * VUNIT / PAREA;
+  var h = flts[i] + f32(atomicExchange(&atom[A_PUDA + i], 0u)) * VUNIT / PAREA;
 
-  let hl = pud[pIdx(c - vec2i(1,0))];
-  let hr = pud[pIdx(c + vec2i(1,0))];
-  let hd = pud[pIdx(c - vec2i(0,1))];
-  let hu = pud[pIdx(c + vec2i(0,1))];
+  let hl = flts[pIdx(c - vec2i(1,0))];
+  let hr = flts[pIdx(c + vec2i(1,0))];
+  let hd = flts[pIdx(c - vec2i(0,1))];
+  let hu = flts[pIdx(c + vec2i(0,1))];
   // Yield threshold, not plain diffusion. Liquid only flows where the surface slope beats
   // PSLOPE, which is what surface tension and contact angle do: a real spill stops at a
   // definite edge. Without it the film creeps outward forever and ends up covering the
   // whole table in a sub-millimetre sheet whose radial structure reads as ripple rings.
   h += 0.24 * (pflow(h, hl) + pflow(h, hr) + pflow(h, hd) + pflow(h, hu));
-  pud[i] = clamp(h, 0.0, 0.05);
+  flts[i] = clamp(h, 0.0, 0.05);
 }
 
 @compute @workgroup_size(64)
@@ -663,9 +668,9 @@ fn puddleCoarse(@builtin(global_invocation_id) g: vec3u) {
   // two cells from a point's own. puddleSDF bounds by it out to a block's distance.
   var mh = 0.0;
   for (var y = -11; y < 19; y++) {
-    for (var x = -11; x < 19; x++) { mh = max(mh, pud[pIdx(b + vec2i(x, y))]); }
+    for (var x = -11; x < 19; x++) { mh = max(mh, flts[pIdx(b + vec2i(x, y))]); }
   }
-  pudC[i] = mh;
+  flts[F_PUDC + i] = mh;
 }
 
 
@@ -673,7 +678,7 @@ fn puddleCoarse(@builtin(global_invocation_id) g: vec3u) {
 fn causticDecay(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
   if (i >= CN * CN * 3u) { return; }
-  atomicStore(&caust[i], (atomicLoad(&caust[i]) * 236u) / 256u);   // temporal fade
+  atomicStore(&atom[A_CAUST + i], (atomicLoad(&atom[A_CAUST + i]) * 236u) / 256u);   // temporal fade
 }
 
 @compute @workgroup_size(256)
@@ -685,7 +690,7 @@ fn causticBlur(@builtin(global_invocation_id) g: vec3u) {
   for (var dy = -2; dy <= 2; dy++) {
     for (var dx = -2; dx <= 2; dx++) { sum += causFetch(c + vec2i(dx, dy)); }
   }
-  caustF[i] = vec4f(sum / 25.0, 0.0);
+  vecs[V_CAUSTF + i] = vec4f(sum / 25.0, 0.0);
 }
 
 @compute @workgroup_size(64)
@@ -720,9 +725,9 @@ fn photons(@builtin(global_invocation_id) g: vec3u) {
       if (all(t >= vec2f(0.0)) && all(t < vec2f(f32(CN)))) {
         let k = causIdx(vec2i(t));
         let e = w * CSCALE * clamp(-d.y, 0.0, 1.0);
-        atomicAdd(&caust[k],      u32(max(e.x, 0.0)));
-        atomicAdd(&caust[k + 1u], u32(max(e.y, 0.0)));
-        atomicAdd(&caust[k + 2u], u32(max(e.z, 0.0)));
+        atomicAdd(&atom[A_CAUST + k],      u32(max(e.x, 0.0)));
+        atomicAdd(&atom[A_CAUST + k + 1u], u32(max(e.y, 0.0)));
+        atomicAdd(&atom[A_CAUST + k + 2u], u32(max(e.z, 0.0)));
       }
       return;
     }
@@ -732,14 +737,18 @@ fn photons(@builtin(global_invocation_id) g: vec3u) {
   }
 }
 
-@compute @workgroup_size(512)
+// Two cells per thread, at the default 256-wide groups: one cell each would take 128 000
+// groups, past the 65 535 cap per dimension, and 512-wide groups need a raised limit.
+const FHALF = FINE * FINE * FINE / 2u;
+@compute @workgroup_size(256)
 fn clearFine(@builtin(global_invocation_id) g: vec3u) {
-  if (g.x >= FINE * FINE * FINE) { return; }
+  if (g.x >= FHALF) { return; }
   atomicStore(&fine[g.x], INFQ);
+  atomicStore(&fine[g.x + FHALF], INFQ);
   // the coarse occupancy blocks and far-field seed keys, in the same dispatch
   if (g.x < COARSE * COARSE * COARSE) {
-    atomicStore(&occ[g.x], 0u);
-    atomicStore(&occ[COARSE * COARSE * COARSE + g.x], 0xFFFFFFFFu);
+    atomicStore(&atom[g.x], 0u);
+    atomicStore(&atom[COARSE * COARSE * COARSE + g.x], 0xFFFFFFFFu);
   }
 }
 
@@ -767,7 +776,7 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
   if (all(sc >= vec3i(0)) && all(sc < vec3i(i32(COARSE)))) {
     let cp = DOM_LO + (vec3f(sc) + 0.5) * CCELL;
     let qd = u32(clamp(length(p.pos - cp) / CCELL, 0.0, 0.999) * 65535.0);
-    atomicMin(&occ[COARSE * COARSE * COARSE + cIdx(sc)], (qd << 16u) | (i & 0xFFFFu));
+    atomicMin(&atom[COARSE * COARSE * COARSE + cIdx(sc)], (qd << 16u) | (i & 0xFFFFu));
   }
 
   var v = p.vel * u.shut;
@@ -814,7 +823,7 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
   for (var z = blo.z; z <= bhi.z; z++) {
     for (var y = blo.y; y <= bhi.y; y++) {
       for (var x = blo.x; x <= bhi.x; x++) {
-        atomicStore(&occ[cIdx(vec3i(x, y, z))], 1u);
+        atomicStore(&atom[cIdx(vec3i(x, y, z))], 1u);
       }
     }
   }
@@ -847,7 +856,7 @@ fn jfaCoarse(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups) n
   let src = select(select(3u, 2u, k % 2u == 1u), 1u, k == 0u) * COARSE * COARSE * COARSE;
   let c  = c3(i);
   let cp = DOM_LO + (vec3f(c) + 0.5) * CCELL;
-  var best = atomicLoad(&occ[src + i]);
+  var best = atomicLoad(&atom[src + i]);
   var bd = 1e9;
   if (best != 0xFFFFFFFFu) { bd = length(cp - parts[best & 0xFFFFu].pos); }
   let st = i32(16u >> k);
@@ -856,7 +865,7 @@ fn jfaCoarse(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups) n
       for (var dx = -1; dx <= 1; dx++) {
         let nc = c + vec3i(dx, dy, dz) * st;
         if (any(nc < vec3i(0)) || any(nc >= vec3i(i32(COARSE)))) { continue; }
-        let v = atomicLoad(&occ[src + cIdx(nc)]);
+        let v = atomicLoad(&atom[src + cIdx(nc)]);
         if (v == 0xFFFFFFFFu) { continue; }
         let dd = length(cp - parts[v & 0xFFFFu].pos);
         if (dd < bd) { bd = dd; best = v; }
@@ -864,24 +873,28 @@ fn jfaCoarse(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups) n
     }
   }
   if (best != 0xFFFFFFFFu) { best = best & 0xFFFFu; }
-  atomicStore(&occ[select(2u, 3u, k % 2u == 1u) * COARSE * COARSE * COARSE + i], best);
+  atomicStore(&atom[select(2u, 3u, k % 2u == 1u) * COARSE * COARSE * COARSE + i], best);
 }
 
-@compute @workgroup_size(512)
-fn resolveFine(@builtin(global_invocation_id) g: vec3u) {
-  let i = g.x;
-  if (i >= FINE * FINE * FINE) { return; }
+fn resolveCell(i: u32) {
   let q = atomicLoad(&fine[i]);
   var d = BAND;
   if (q != INFQ) { d = f32(q) / QMAX * BAND; }
   fineF[i] = d;
+}
+@compute @workgroup_size(256)
+fn resolveFine(@builtin(global_invocation_id) g: vec3u) {
+  let i = g.x;
+  if (i >= FHALF) { return; }
+  resolveCell(i);
+  resolveCell(i + FHALF);         // two cells per thread, as in clearFine
   // and pack the coarse cells for the render (see the note above)
   if (i < COARSE * COARSE * COARSE) {
-    let qi = atomicLoad(&occ[2u * COARSE * COARSE * COARSE + i]);
+    let qi = atomicLoad(&atom[2u * COARSE * COARSE * COARSE + i]);
     var v = vec4f(0.0);
     if (qi != 0xFFFFFFFFu) { v = vec4f(parts[qi].pos, 1.0); }
-    if (atomicLoad(&occ[i]) != 0u) { v.w += 2.0; }
-    coarse[i] = v;
+    if (atomicLoad(&atom[i]) != 0u) { v.w += 2.0; }
+    vecs[i] = v;
   }
 }
 
@@ -910,7 +923,7 @@ fn liquidDist(p: vec3f) -> f32 {
   // dependent read of the seed particle cost 3.1 ms of tier2's 24.8 ms render, for values
   // that are bit-identical once packed.
   let oc = vec3i(clamp(floor((p - DOM_LO) / CCELL), vec3f(0.0), vec3f(f32(COARSE) - 1.0)));
-  let cq = coarse[cIdx(oc)];                 // xyz seed particle, w: +1 seed, +2 occupied
+  let cq = vecs[cIdx(oc)];                 // xyz seed particle, w: +1 seed, +2 occupied
   var tri = BAND;
   if (cq.w > 1.5) {
     if (PROF) { pc[3] += 1u; }
@@ -941,7 +954,7 @@ fn liquidDist(p: vec3f) -> f32 {
 //#D{
   if ((XC & 32u) != 0u) {
     let c2 = vec3i(clamp(floor((p + u._w2 - DOM_LO) / CCELL), vec3f(0.0), vec3f(f32(COARSE) - 1.0)));
-    let q2 = coarse[cIdx(c2)];
+    let q2 = vecs[cIdx(c2)];
     if (fract(q2.w * 0.5) > 0.25) { dc = min(dc, (length(p - q2.xyz) - u.prad) * 0.85 + 1.0); }
   }
 //#D}
@@ -1239,11 +1252,11 @@ fn causIdx(c: vec2i) -> u32 {
 }
 fn causFetch(c: vec2i) -> vec3f {
   let k = causIdx(c);
-  return vec3f(f32(atomicLoad(&caust[k])), f32(atomicLoad(&caust[k + 1u])), f32(atomicLoad(&caust[k + 2u])));
+  return vec3f(f32(atomicLoad(&atom[A_CAUST + k])), f32(atomicLoad(&atom[A_CAUST + k + 1u])), f32(atomicLoad(&atom[A_CAUST + k + 2u])));
 }
 fn causFetchF(c: vec2i) -> vec3f {
   let q = clamp(c, vec2i(0), vec2i(i32(CN) - 1));
-  return caustF[u32(q.y) * CN + u32(q.x)].xyz;
+  return vecs[V_CAUSTF + u32(q.y) * CN + u32(q.x)].xyz;
 }
 fn causticAt(xz: vec2f) -> vec3f {
   let n = xz / (2.0 * CEXT) + 0.5;
@@ -1497,9 +1510,9 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
       let q = ro + rd * tpl;
       let n = q.xz / (2.0 * PEXT) + 0.5;
       if (all(n >= vec2f(0.0)) && all(n <= vec2f(1.0))) {
-        let h = pud[pIdx(vec2i(n * f32(PN)))];
+        let h = flts[pIdx(vec2i(n * f32(PN)))];
         // RED overlay: where the renderer actually thinks there is a liquid surface just
-        // above the table. This is what the camera hits, as opposed to what pud[] holds.
+        // above the table. This is what the camera hits, as opposed to what flts[] holds.
         let probe1 = puddleSDF(vec3f(q.x, 0.0012, q.z));
         if (probe1 < 0.0003) { col = vec3f(1.0, 0.1, 0.1); }
         else if (h < PMIN) {
@@ -1666,15 +1679,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['timestamp-query', 'shader-f16', 'subgroups', 'float32-filterable'].includes(f));
 //#D}
 
-  // The defaults bite: 8 storage buffers per stage (we bind 15), and 320^3 / 256-wide
-  // workgroups would be one over the per-dimension cap, so the big passes are 512-wide.
-  // A limit the browser does not know is dropped rather than failing the device.
-  const want = { maxStorageBuffersPerShaderStage: 16, maxStorageBuffersInFragmentStage: 16,
-                 maxComputeWorkgroupSizeX: 512, maxComputeInvocationsPerWorkgroup: 512 };
-  for (const k in want) if (!(k in adapter.limits)) delete want[k];
+  // No limits requested: everything fits the defaults (6 storage buffers, 256-wide groups),
+  // so the intro runs on any WebGPU device and the release asks for nothing.
   const device = await adapter.requestDevice({
     requiredFeatures: hasTS ? ['timestamp-query'] : [],
-    requiredLimits: want,
   });
   device.addEventListener('uncapturederror', e => fail('gpu', e.error.message));
   device.lost.then(i => { if (i.reason !== 'destroyed') fail('device-lost', i.message); });
@@ -1700,23 +1708,16 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     cfg.npart * 32,           //  1 particles
     FINE_N * 4,               //  2 narrow band, quantised (atomic)
     FINE_N * 4,               //  3 narrow band, resolved
-    COARSE_N * 16,            //  4 coarse far field, packed for the render
-    NG * 16,                  //  5 glass levels
-    NG * 2 * 4,               //  6 inflow / overflow volumes
-    NG * WN * WN * 16,        //  7 wave field
-    NG * WN * WN * 2 * 4,     //  8 wave and foam impulses
-    CN * CN * 3 * 4,          //  9 photon map
-    CN * CN * 16,             // 10 photon map, blurred
-    PN * PN * 4,              // 11 puddle depth
-    PN * PN * 4,              // 12 puddle inflow
-    PCN * PCN * 4,            // 13 puddle blocks: tallest film within a block
-    COARSE_N * 4 * 4,         // 14 occupancy, seed keys, two flood regions
+    // 4 atomics: occupancy + seeds + floods, volumes, wave impulses, puddle inflow, photons
+    (COARSE_N * 4 + NG * 2 + NG * WN * WN * 2 + PN * PN + CN * CN * 3) * 4,
+    (COARSE_N + NG + NG * WN * WN + CN * CN) * 16,   // 5 vec4: coarse field, glass, waves, caustics
+    (PN * PN + PCN * PCN) * 4,                       // 6 f32: puddle depth, puddle blocks
 //#D{
-    64 * 128 * 4,             // 15 profiler banks
+    64 * 128 * 4,             // 7 profiler banks
 //#D}
   ].map((size, i) => device.createBuffer({ size, usage: i ? 140 : 72 }));
 //#D{
-  const [, partBuf, , , , glassB, , , , , , , , pudC, , profB] = bufs;
+  const [, partBuf, , , , vecB, fltB, profB] = bufs;
   const profRd  = device.createBuffer({ size: 64 * 128 * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const glassRd = device.createBuffer({ size: NG * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const pudRd   = device.createBuffer({ size: PCN * PCN * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
@@ -2096,9 +2097,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // 2 — structures for rendering, from the final state, once per frame
     pass(1, [
       ['puddleCoarse', WG(PCN * PCN, 64)],
-      ['clearFine', WG(FINE_N, 512)], ['scatterFine', WG(cfg.npart, 64)],
+      ['clearFine', WG(FINE_N / 2, 256)], ['scatterFine', WG(cfg.npart, 64)],
       ...JFA_STRIDES.map((_, k) => ['jfaCoarse', WG(COARSE_N, 64), k]),
-      ['resolveFine', WG(FINE_N, 512)],
+      ['resolveFine', WG(FINE_N / 2, 256)],
     ]);
 
     // 2b — caustics: fade the photon map, shoot this frame's photons, blur. A redraw keeps
@@ -2120,9 +2121,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       enc.resolveQuerySet(qset, 0, LABELS.length * 2, qres, 0);
       enc.copyBufferToBuffer(qres, 0, qrd, 0, LABELS.length * 16);
     }
-    if (gbusy === false && glassRd.mapState === 'unmapped') enc.copyBufferToBuffer(glassB, 0, glassRd, 0, NG * 16);
+    if (gbusy === false && glassRd.mapState === 'unmapped') enc.copyBufferToBuffer(vecB, COARSE_N * 16, glassRd, 0, NG * 16);
     if (pbusy === false && partRd.mapState === 'unmapped') enc.copyBufferToBuffer(partBuf, 0, partRd, 0, PSAMP * 32);
-    if (dbusy === false && pudRd.mapState === 'unmapped') enc.copyBufferToBuffer(pudC, 0, pudRd, 0, PCN * PCN * 4);
+    if (dbusy === false && pudRd.mapState === 'unmapped') enc.copyBufferToBuffer(fltB, PN * PN * 4, pudRd, 0, PCN * PCN * 4);
     if (doProf) { enc.copyBufferToBuffer(profB, 0, profRd, 0, 64 * 128 * 4); }
     device.queue.submit([enc.finish()]);
     if (doProf) { const r = profReq; profReq = null; flushProfile(r); }
