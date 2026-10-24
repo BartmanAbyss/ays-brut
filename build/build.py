@@ -457,7 +457,26 @@ def prepare(verbose=False):
         say('tree-shaken      wgsl %7d   (wgslender: dead code + syntax)' % len(wgsl.encode()))
     jmin, how = minify_js(js)
     say('js minified with %s' % how)
+    wgsl, js, jmin, n = short_entries(wgsl, js, jmin)
+    say('entry points     %d compute entries renamed Z0, Z1, ...' % n)
     return wgsl, js, jmin
+
+
+def short_entries(wgsl, js, jmin):
+    """Compute entry points are addressed by name from the JS, so the packer must leave
+    them alone - and their long, readable names then ship twice, once in each language.
+    Rename them here, consistently in both: 115 bytes compressed. The names carry a digit
+    (never a WGSL keyword) and come from the end of the packer's pool, which hands out
+    shortest first and avoids anything it is not itself renaming."""
+    ents = re.findall(r'@compute\b[\s\S]{0,80}?\bfn\s+(\w+)', wgsl)
+    pool = [x + str(d) for x in 'ZYXWV' for d in range(10)]
+    pool = [n for n in pool if not any(re.search(r'\b%s\b' % n, s) for s in (wgsl, js, jmin))]
+    assert len(ents) <= len(pool), 'more compute entry points than free short names'
+    for name, short in zip(ents, pool):
+        pat = r'\b%s\b' % name
+        wgsl = re.sub(pat, short, wgsl)
+        js, jmin = re.sub(pat, short, js), re.sub(pat, short, jmin)
+    return wgsl, js, jmin, len(ents)
 
 
 def main():
