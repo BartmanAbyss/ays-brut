@@ -294,6 +294,21 @@ hidden — roughly 3× inflated, because a background page runs at ~2 fps and th
 downclocks between frames. An earlier 17.7 ms figure was taken at the pane's own 1100×880 and
 was never comparable to the budget at all.
 
+### The traced reflection
+
+Measured in the spill state (autofill, tower overflowing), 1920×1080, RTX 4070:
+
+| shot | glass + drops traced (before) | bulk liquid only (`rtrace` 1) |
+|---|---|---|
+| pour | 34.1 | **22.7** |
+| tier2 | 39.1 | **28.6** |
+| tower | 23.8 | **18.2** |
+
+The traced reflection was 41% of the render pass. It exists for one artefact — the
+champagne's free surface mirroring the sky as an opaque disc near grazing — and now runs
+only there. Droplets and glass use the environment lookup; the visible difference is a
+slightly more silvery spill curtain. `rtrace` 2 restores the old behaviour for comparison.
+
 ### WebGPU limits that must be requested
 
 Several defaults were within a few percent of biting:

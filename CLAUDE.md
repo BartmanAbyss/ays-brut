@@ -103,6 +103,25 @@ finite-difference normals of points just above it. The fix that has neither: mak
 surface (a profiled stem radius). Check junctions in `view=normals`, which shows a kink
 plainly where refracting glass hides it.
 
+**Measure with the scene in the state the intro is actually in.** `fill=88` pins the levels,
+so there is almost no spill, and the pour shot measured 21 ms; with autofill and the tower
+overflowing it is 34. Spray is where the cost is. For a reproducible spill state use
+`det=1`, click `ff +20s`, and measure after step ~1300.
+
+**A toggle that multiplies a result by zero still pays for computing it.** `refl=0` said
+reflections were free, because it only scaled the traced reflection; the trace itself kept
+running. The real switch was `rtrace`, and the trace turned out to be 41% of the render
+pass: up to three extra marches per pixel, at two bounces, on every surface past ~53°.
+Sweeping `bounces` from 1 upward is what exposed it - half the render pass was the FIRST
+bounce. Now it traces only where air meets the bulk champagne surface (`rtrace` 1), the one
+place it was ever needed; drops and glass use the environment.
+
+**When a change is cheap, prove it is running.** The bulk-surface trace measured 0.2 ms,
+indistinguishable from "never fires", and side-by-side frames looked identical because a
+reflection that escapes returns `env(d)` either way. Painting the traced pixels magenta
+answered it in one frame. Also: capping droplet interactions per ray made it SLOWER - rays
+dying in the spray had been saving the tower traversal behind it.
+
 **A particle smaller than a voxel vanishes.** The fine cell is 1.94 mm, so a drop only
 registers if it lands near a cell centre. Keep `dropRad` above the cell half-diagonal
 (~1.68 mm) or raise `FINE`. Symptom: a dense stream renders as four scattered drops.

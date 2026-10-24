@@ -1241,7 +1241,16 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
 
     let rdir = reflect(d, n);
     var rcol = env(rdir);
-    if (u.rtrace > 0.5 && b < 2 && F > 0.05) { rcol = reflColour(hp + rdir * SURF_EPS, rdir, med); }
+    // The traced reflection is the most expensive thing in the frame - up to three more
+    // full marches per pixel, at two bounces, on every surface past ~53 degrees. Measured on
+    // the pour shot it was 41% of the render pass. It exists for one artefact: the
+    // champagne's free surface, seen from air near grazing, mirroring the sky as an opaque
+    // disc. So by default it runs only there (rtrace 1): air meeting the BULK liquid, not a
+    // droplet - a 2 mm drop mirroring the environment is fine, and the spill curtain is
+    // thousands of them. rtrace 2 traces glass too, as it used to, kept for A/B.
+    let wantTrace = (u.rtrace > 1.5) ||
+                    (u.rtrace > 0.5 && med == 0 && medA == 2 && abs(bulkSDF(hp)) < 0.0006);
+    if (wantTrace && b < 2 && F > 0.05) { rcol = reflColour(hp + rdir * SURF_EPS, rdir, med); }
     acc += tp * F * rcol * u.refl;
 
     let rf = refract(d, n, i1 / i2);
@@ -1663,7 +1672,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     f32[16] = simStep; f32[17] = Math.max(1, Math.round((cfg.npart / 6) / ui.pourRate)); f32[18] = cfg.npart; f32[19] = ui.dropVol * 1e-9;
     f32[20] = cfg.nphoton; f32[21] = ui.cgain;
     f32[22] = cfg.single ? 1 : 0; f32[23] = cfg.noliq ? 1 : 0;
-    f32[24] = ui.bubbles ? 1 : 0; f32[25] = ui.expo; f32[26] = ui.waves ? 1 : 0; f32[27] = ui.drops ? 1 : 0; f32[28] = ui.bounces; f32[29] = ui.reflect ? 1 : 0; f32[30] = ui.autofill ? -1 : ui.fill / 100; f32[31] = ui.gridEnv ? 1 : 0; f32[32] = ui.rtrace ? 1 : 0;
+    f32[24] = ui.bubbles ? 1 : 0; f32[25] = ui.expo; f32[26] = ui.waves ? 1 : 0; f32[27] = ui.drops ? 1 : 0; f32[28] = ui.bounces; f32[29] = ui.reflect ? 1 : 0; f32[30] = ui.autofill ? -1 : ui.fill / 100; f32[31] = ui.gridEnv ? 1 : 0; f32[32] = ui.rtrace;
     f32[33] = ui.lightAz * Math.PI / 180; f32[34] = ui.lightEl * Math.PI / 180;
     f32[35] = ui.dropRad * 0.001; f32[36] = ui.foam; f32[39] = ui.shutter * SIM_DT * frameSteps;
     f32[40] = ui.botTilt * Math.PI / 180; f32[41] = ui.botAz * Math.PI / 180;
@@ -2011,7 +2020,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['lightAz',  'range', -45,  -180, 180,  1,    0],
     ['lightEl',  'range', 45.6,   5,  85,  0.5,  1],
     ['gridEnv',  'check', false],
-    ['rtrace',   'check', true],
+    ['rtrace',   'range', 1,    0,    2,    1,    0],
     ['drops',    'check', true],
     ['bubbles',  'check', true],
     ['waves',    'check', true],
@@ -2056,7 +2065,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     lightAz: 'Key light azimuth in degrees: swings the light around the tower. Moves the specular, the shadows and the caustics together.',
     lightEl: 'Key light elevation in degrees above the horizon. Low is raking and dramatic, high is overhead.',
     gridEnv: 'Swap the environment for a lat-long UV test grid: green horizon, magenta poles, orange dot at the key light. Shows which direction a reflection or refraction samples.',
-    rtrace: 'Trace real reflection rays instead of just sampling the environment. Off is cheaper but paints flat bright discs on near-grazing surfaces.',
+    rtrace: 'Traced reflections. 0 = environment lookup only (cheapest; near-grazing champagne turns into a flat bright disc). 1 = trace only where air meets the champagne surface, the case that needs it. 2 = trace glass reflections too - how it used to be, and on the pour shot about 40% of the render pass.',
     drops: 'Render the particle field: pour stream, splashes and droplets. Off leaves only the bulk liquid, but the simulation keeps running so the glasses still fill.',
     bubbles: 'Rising CO2 bubbles, carved out of the liquid as real geometry, so light refracts through every one.',
     puddle: 'The spreading pool of spilled champagne on the table. Off removes it from the scene entirely.',
