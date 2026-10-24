@@ -714,7 +714,7 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-24 Oct 2026, after the lossless size pass below.
+24 Oct 2026, after the lossless size pass below and a fresh packer search on its result.
 
 | Stage | WGSL | JS |
 |---|---|---|
@@ -727,16 +727,21 @@ smarter evaluations, not faster ones.
 | Packed | bytes |
 |---|---|
 | payload, uncompressed | 24 379 |
-| brotli q11 | 8 637 |
+| brotli q11 (searched state) | 8 325 |
 | dropper header | 371 |
-| **`intro.cmd`, the deliverable** | **9 008** |
+| **`intro.cmd`, the deliverable** | **8 696** |
 
-**9 008 against 8 192: over by 816**, before the click-to-start screen, the music player,
+**8 696 against 8 192: over by 504**, before the click-to-start screen, the music player,
 the song and any text. Those need room too, so the target for what exists now is about
-**5.8 KB** - another ~3 KB, which has to come from features (cut or simplified), not from
-packing. The size map below says where it is.
+**5.8 KB** - another ~2.6 KB of brotli output, which has to come from features (cut or
+simplified), not from packing: the search was still finding about a byte a round when it
+stopped. The size map below says where it is.
 
-#### The lossless pass: 10 181 -> 9 008
+The packer search (`python build/pack.py --rounds 40 --per-round 300`, ~8 minutes on 32
+threads) took this shader from 8 637 to 8 325: worth re-running after any big edit, and
+the last thing to do before a release.
+
+#### The lossless pass: 10 181 -> 9 008 (8 696 after re-searching)
 
 Every step verified on the same frame before and after (pinned-level step 2400, three
 cameras), measured, committed separately:

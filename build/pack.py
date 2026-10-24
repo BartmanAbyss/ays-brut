@@ -320,8 +320,8 @@ def load_state():
     return {}
 
 
-def save_state(st, s):
-    st = dict(st, score=s)
+def save_state(st, s, src=None):
+    st = dict(st, score=s, src=src)
     io.open(STATE, 'w', encoding='utf-8', newline='\n').write(json.dumps(st, indent=1))
 
 
@@ -347,9 +347,15 @@ if __name__ == '__main__':
         score(prog, prog.default_state(), jmin), score(prog, st, jmin)))
     best, bs = search(wgsl, protected, B.WGSL_KEEP, jmin, st, a.rounds, a.per_round,
                       a.workers, a.seed)
-    prev = load_state().get('score')
+    # A stored score only means something for the input it was searched on: after a shader
+    # or JS change it is a different problem, and comparing against the old score would
+    # discard a valid search whenever the payload grew.
+    import hashlib
+    src = hashlib.sha1((wgsl + jmin).encode()).hexdigest()[:16]
+    old = load_state()
+    prev = old.get('score') if old.get('src') == src else None
     if prev is None or bs < prev:
-        save_state(best, bs)
-        print('saved: %d (was %s)' % (bs, prev))
+        save_state(best, bs, src)
+        print('saved: %d (was %s for this input)' % (bs, prev))
     else:
         print('kept existing state %d; this run reached %d' % (prev, bs))
