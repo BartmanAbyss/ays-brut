@@ -108,7 +108,7 @@ struct Particle { pos : vec3f, life : f32, vel : vec3f, _p : f32 };
 @group(0) @binding(10) var<storage, read_write> caustF : array<vec4f>;       // blurred caustics
 @group(0) @binding(11) var<storage, read_write> pud    : array<f32>;       // puddle depth on the table
 @group(0) @binding(12) var<storage, read_write> pudA   : array<atomic<u32>>;  // puddle inflow
-@group(0) @binding(13) var<storage, read_write> pudC   : array<vec4f>;     // maxH, nearest wet block xz, valid
+@group(0) @binding(13) var<storage, read_write> pudC   : array<f32>;       // tallest film within a block of each block
 @group(0) @binding(14) var<storage, read_write> occ    : array<atomic<u32>>; // COARSE^3 narrow-band occupancy
 @group(0) @binding(15) var<storage, read_write> prof : array<atomic<u32>>;  // profiler banks
 // Profiler. Counters compile into the profiling pipeline only (constants: { PROF: 1 }); the
@@ -228,18 +228,23 @@ fn puddleSDF(p: vec3f) -> f32 {
   // different distances - which banded into concentric rings on the table.
   let n = p.xz / (2.0 * PEXT) + 0.5;
   let cc = vec2i(clamp(n, vec2f(0.0), vec2f(0.999)) * f32(PCN));
+  // b: the tallest the rendered film gets within a block of p's block (puddleCoarse).
   let b  = pudC[u32(cc.y) * PCN + u32(cc.x)];
-  var dh = 1e9;                                     // horizontal distance to wet table
-  if (b.w > 0.5) { dh = max(length(p.xz - b.yz) - PBCELL * 0.75, 0.0); }
+  // Horizontal distance to wet table: if there is no film within a block, it is at least a
+  // block away, which is all a bound needs. (A jump flood used to compute it exactly; it
+  // cost a kernel, five dispatches and three channels per block for longer steps over dry
+  // table that the plane-bounded march hardly takes.)
+  var dh = 0.0;
+  if (b <= PMIN) { dh = PBCELL; }
   // PMAXH (20 mm) is the deepest the pool can be anywhere, and bounding by it alone was a
   // slab over every wet block that rays crossed in 0.8 mm steps, though the film under
   // them is usually a millimetre: 7% of the steps in the domain box. Within a block of p
-  // the rendered film is at most b.x (puddleCoarse); anything taller is at least a block
-  // away. Either way it is wet table, so dh still holds. 5% fewer steps, -1.1 ms on tier2.
+  // the rendered film is at most b; anything taller is at least a block away. Either way
+  // it is wet table, so dh still holds. 5% fewer steps, -1.1 ms on tier2.
   let dv = p.y - PMAXH;
-  let bl = max(dh, min(p.y - (b.x + 0.0005), max(PBCELL, dv)));
+  let bl = max(dh, min(p.y - (b + 0.0005), max(PBCELL, dv)));
   if (bl > 0.004) { return bl; }
-  if (b.x > PMIN) {                                 // b.x covers the 3x3 the old loop tested
+  if (b > PMIN) {
     let h = samplePuddle(p.xz);
     if (h >= PMIN) { return max(p.y - h, -p.y); }
   }
@@ -578,10 +583,10 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u) {
 }
 
 // ── bulk level per glass: dL/dt = Q / A(L), overflow spills at the rim ──
-@compute @workgroup_size(64)
-fn glassUpdate(@builtin(global_invocation_id) gi: vec3u) {
-  let g = i32(gi.x);
-  if (g >= NG) { return; }
+// One glass's level for this step, from the volume poured in; the excess goes to overflow.
+// Run by the first NG threads of puddleUpdate - the two are independent, and a kernel of
+// its own was 14 threads and an entry point.
+fn glassUpdate(g: i32) {
   let inflow = f32(atomicExchange(&gvol[u32(g)], 0u)) * VUNIT;
   if (u.fillOv >= 0.0) { glass[g] = vec4f(u.fillOv * LMAX, 0.0, 0.0, 0.0); return; }
   var L = glass[g].x;
@@ -631,6 +636,7 @@ fn waveUpdate(@builtin(global_invocation_id) gi: vec3u) {
 fn puddleUpdate(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
   if (i >= PN * PN) { return; }
+  if (i < u32(NG)) { glassUpdate(i32(i)); }
   let c = vec2i(i32(i % PN), i32(i / PN));
   var h = pud[i] + f32(atomicExchange(&pudA[i], 0u)) * VUNIT / PAREA;
 
@@ -650,50 +656,17 @@ fn puddleUpdate(@builtin(global_invocation_id) g: vec3u) {
 fn puddleCoarse(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
   if (i >= PCN * PCN) { return; }
-  let c = vec2i(i32(i % PCN), i32(i / PCN));
-  let b = c * 8;
-  // x: the tallest the RENDERED film gets anywhere within one block of this one - the 3x3
+  let b = vec2i(i32(i % PCN), i32(i / PCN)) * 8;
+  // The tallest the RENDERED film gets anywhere within one block of this one - the 3x3
   // blocks around it, plus 3 cells, since samplePuddle's smoothed bilinear tap reads up to
-  // two cells from a point's own. puddleSDF bounds by it out to a block's distance. (The
-  // wet flag in w stays this block's own.)
-  var m = 0.0;
+  // two cells from a point's own. puddleSDF bounds by it out to a block's distance.
   var mh = 0.0;
   for (var y = -11; y < 19; y++) {
-    for (var x = -11; x < 19; x++) {
-      let v = pud[pIdx(b + vec2i(x, y))];
-      mh = max(mh, v);
-      if (all(vec2i(x, y) >= vec2i(0)) && all(vec2i(x, y) < vec2i(8))) { m = max(m, v); }
-    }
+    for (var x = -11; x < 19; x++) { mh = max(mh, pud[pIdx(b + vec2i(x, y))]); }
   }
-  let ctr = (vec2f(c) + 0.5) * PBCELL - vec2f(PEXT);
-  var seed = vec4f(mh, ctr.x, ctr.y, 0.0);
-  if (m > PMIN) { seed.w = 1.0; }
-  pudC[i] = seed;
+  pudC[i] = mh;
 }
 
-// jump flood over the 48x48 blocks, so every point has a real distance to wet table
-@compute @workgroup_size(64)
-fn puddleJFA(@builtin(global_invocation_id) g: vec3u) {
-  let i = g.x;
-  if (i >= PCN * PCN) { return; }
-  let c   = vec2i(i32(i % PCN), i32(i / PCN));
-  let ctr = (vec2f(c) + 0.5) * PBCELL - vec2f(PEXT);
-  var best = pudC[i];
-  var bd = 1e9;
-  if (best.w > 0.5) { bd = length(ctr - best.yz); }
-  let st = i32(j.stride);
-  for (var dy = -1; dy <= 1; dy++) {
-    for (var dx = -1; dx <= 1; dx++) {
-      let q = clamp(c + vec2i(dx, dy) * st, vec2i(0), vec2i(i32(PCN) - 1));
-      let o = pudC[u32(q.y) * PCN + u32(q.x)];
-      if (o.w > 0.5) {
-        let d = length(ctr - o.yz);
-        if (d < bd) { bd = d; best = vec4f(best.x, o.y, o.z, 1.0); }
-      }
-    }
-  }
-  pudC[i] = best;
-}
 
 @compute @workgroup_size(256)
 fn causticDecay(@builtin(global_invocation_id) g: vec3u) {
@@ -1732,7 +1705,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     CN * CN * 16,             // 10 photon map, blurred
     PN * PN * 4,              // 11 puddle depth
     PN * PN * 4,              // 12 puddle inflow
-    PCN * PCN * 16,           // 13 puddle coarse blocks
+    PCN * PCN * 4,            // 13 puddle blocks: tallest film within a block
     COARSE_N * 4 * 4,         // 14 occupancy, seed keys, two flood regions
 //#D{
     64 * 128 * 4,             // 15 profiler banks
@@ -1742,7 +1715,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   const [, partBuf, , , , glassB, , , , , , , , pudC, , profB] = bufs;
   const profRd  = device.createBuffer({ size: 64 * 128 * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const glassRd = device.createBuffer({ size: NG * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-  const pudRd   = device.createBuffer({ size: PCN * PCN * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const pudRd   = device.createBuffer({ size: PCN * PCN * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const PSAMP   = Math.min(cfg.npart, 16384);
   const partRd  = device.createBuffer({ size: PSAMP * 32, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
 //#D}
@@ -1756,16 +1729,13 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ({ binding, resource: { buffer } })) });
 
   // Per-dispatch uniforms, one 256-byte slot each, picked by dynamic offset:
-  // 0..4 puddle flood strides, 5..20 the sim sub-step index (16, so no two sub-steps of a
-  // frame share an RNG stream), 21..25 the coarse flood as [stride, source, destination].
+  // 0..15 the sim sub-step index (16, so no two sub-steps of a frame share an RNG stream),
+  // 16..20 the coarse flood as [stride, source, destination].
   // The coarse flood ping-pongs keys -> R1 -> R2 -> R1 -> R2 -> R1, ending in R1, the region
   // liquidDist reads - which needs an odd number of strides. Regions are offsets into occ.
-  const SUBSLOT = 5, CJSLOT = 21, KEYS = COARSE_N, R1 = 2 * COARSE_N, R2 = 3 * COARSE_N;
-  const jd = new Float32Array(64 * 26);
-  JFA_STRIDES.map((st, i) => {
-    jd[64 * i] = st;
-    jd.set([st, i ? (i % 2 ? R1 : R2) : KEYS, i % 2 ? R2 : R1], 64 * (CJSLOT + i));
-  });
+  const SUBSLOT = 0, CJSLOT = 16, KEYS = COARSE_N, R1 = 2 * COARSE_N, R2 = 3 * COARSE_N;
+  const jd = new Float32Array(64 * 21);
+  JFA_STRIDES.map((st, i) => jd.set([st, i ? (i % 2 ? R1 : R2) : KEYS, i % 2 ? R2 : R1], 64 * (CJSLOT + i)));
   for (let i = 0; i < 16; i++) jd[64 * (SUBSLOT + i)] = i;
   const jbo = device.createBuffer({ size: jd.length * 4, usage: 72 });
   device.queue.writeBuffer(jbo, 0, jd);
@@ -1774,7 +1744,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   ]});
 
   const P = {};
-  for (const n of ('simParticles puddleUpdate glassUpdate waveUpdate puddleCoarse puddleJFA ' +
+  for (const n of ('simParticles puddleUpdate waveUpdate puddleCoarse ' +
                    'clearFine scatterFine jfaCoarse resolveFine ' +
                    'causticDecay photons causticBlur').split(' '))
     P[n] = device.createComputePipeline({ layout, compute: { module, entryPoint: n } });
@@ -1989,7 +1959,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       let mx = 0, wet = 0, x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9;
       const PEXT = 0.55, CELL = 2 * PEXT / PCN;
       for (let k = 0; k < PCN * PCN; k++) {
-        const h = a[k * 4];
+        const h = a[k];
         if (h > mx) mx = h;
         if (h > 0.0004) {
           wet++;
@@ -2132,14 +2102,13 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     for (let k = 0; k < simSteps; k++) {
       const sl = SUBSLOT + k % 16, wv = ['waveUpdate', WG(NG * WN * WN, 64), sl];
       sim.push(['simParticles', WG(cfg.npart, 64), sl], ['puddleUpdate', WG(PN * PN, 256), sl],
-               ['glassUpdate', 1, sl], wv, wv, wv);
+               wv, wv, wv);
     }
     pass(0, sim);
 
     // 2 — structures for rendering, from the final state, once per frame
     pass(1, [
       ['puddleCoarse', WG(PCN * PCN, 64)],
-      ...JFA_STRIDES.map((_, k) => ['puddleJFA', WG(PCN * PCN, 64), k]),
       ['clearFine', WG(FINE_N, 512)], ['scatterFine', WG(cfg.npart, 64)],
       ...JFA_STRIDES.map((_, k) => ['jfaCoarse', WG(COARSE_N, 64), CJSLOT + k]),
       ['resolveFine', WG(FINE_N, 512)],
@@ -2166,7 +2135,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     }
     if (gbusy === false && glassRd.mapState === 'unmapped') enc.copyBufferToBuffer(glassB, 0, glassRd, 0, NG * 16);
     if (pbusy === false && partRd.mapState === 'unmapped') enc.copyBufferToBuffer(partBuf, 0, partRd, 0, PSAMP * 32);
-    if (dbusy === false && pudRd.mapState === 'unmapped') enc.copyBufferToBuffer(pudC, 0, pudRd, 0, PCN * PCN * 16);
+    if (dbusy === false && pudRd.mapState === 'unmapped') enc.copyBufferToBuffer(pudC, 0, pudRd, 0, PCN * PCN * 4);
     if (doProf) { enc.copyBufferToBuffer(profB, 0, profRd, 0, 64 * 128 * 4); }
     device.queue.submit([enc.finish()]);
     if (doProf) { const r = profReq; profReq = null; flushProfile(r); }
