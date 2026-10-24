@@ -1635,6 +1635,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   let showStep = 0;            // show time in whole SIM_DT steps - the clock the music owns
   let showPend = 0, showT = 0, burstSteps = 0;
   let frameSteps = 1;          // sim steps this rendered frame stands for; sizes the streak
+  // A redraw while paused (a slider moved) must re-render the CURRENT state and nothing
+  // else. As a plain frame it stepped the sim whenever the clock was ahead - and pausing in
+  // det mode always leaves exactly one step pending - and re-shot the photons, so every
+  // slider drag advanced the spill and nudged the caustics. A/B on one frame was impossible.
+  let redrawOnly = false;
   const f32 = new Float32Array(48);
   const t0 = performance.now();
   let last = t0, acc = 0, accN = 0, frameNo = 0, simStep = 0, ffSteps = 0;
@@ -1783,7 +1788,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // audio clock). The sim clock is the INTEGRAL of the timeline's speed over those
     // steps - integrating against the wall delta instead would make a timeline that
     // varies speed frame-rate dependent all over again, the bug this replaced.
-    showPend += cfg.det ? SIM_DT : Math.min((now - last) / 1000, 0.25);
+    showPend += redrawOnly ? 0 : (cfg.det ? SIM_DT : Math.min((now - last) / 1000, 0.25));
     const nShow = Math.floor(showPend / SIM_DT);
     showPend -= nShow * SIM_DT;
     for (let i = 0; i < nShow; i++) {
@@ -1804,8 +1809,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // bug that used to thin the pour whenever a frame ran long.
     const burst = burstSteps; burstSteps = 0;
     const want = Math.floor(clockT / SIM_DT) - simStep;
-    const simSteps = Math.max(0, Math.min(16 + ffNow + burst, want));
-    if (want - simSteps > LAG_STEPS) {
+    const simSteps = redrawOnly ? 0 : Math.max(0, Math.min(16 + ffNow + burst, want));
+    if (!redrawOnly && want - simSteps > LAG_STEPS) {
       // Persistently too slow to hold the clock. In a demo sync beats continuity: drop
       // the steps we cannot afford so the picture stays with the music, and count it so
       // the cost is visible rather than silent.
@@ -1820,7 +1825,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // motion this frame actually represents.
     // Bounded, and never from a deliberate burst: a seek runs thousands of steps in one
     // frame and would size the streak to all of them.
-    frameSteps = (ffNow + burst > 0) ? 1 : Math.max(1, Math.min(simSteps, 4));
+    if (!redrawOnly) { frameSteps = (ffNow + burst > 0) ? 1 : Math.max(1, Math.min(simSteps, 4)); }
     const time = cfg.t !== null ? cfg.t : clockT;
     probe.time  = time;
     probe.step  = simStep + simSteps;
@@ -1880,9 +1885,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // 2b — caustics: fade the photon map, then shoot this frame's photons
     cp = enc.beginComputePass({ timestampWrites: ts(2) });
     cp.setBindGroup(0, bg0); cp.setBindGroup(1, bg1, [0]);
-    cp.setPipeline(P.decay);  cp.dispatchWorkgroups(WG(CN * CN * 3, 256));
-    cp.setPipeline(P.photon); cp.dispatchWorkgroups(WG(cfg.nphoton, 64));
-    cp.setPipeline(P.cblur);  cp.dispatchWorkgroups(WG(CN * CN, 256));
+    if (!redrawOnly) {           // a redraw keeps the photon map it already has
+      cp.setPipeline(P.decay);  cp.dispatchWorkgroups(WG(CN * CN * 3, 256));
+      cp.setPipeline(P.photon); cp.dispatchWorkgroups(WG(cfg.nphoton, 64));
+      cp.setPipeline(P.cblur);  cp.dispatchWorkgroups(WG(CN * CN, 256));
+    }
     cp.end();
 
     // 3 — render
@@ -1916,12 +1923,19 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     acc += dt; accN++;
     if (acc > 400) { probe.frameMs = acc / accN; probe.fps = 1000 / probe.frameMs; acc = 0; accN = 0; updateHud(); }
     if (cfg.selftest && !probe.selftest && frameNo > 10 && probe.gpuMs.total !== undefined) runSelftest();
-    if (cfg.paused) { updateHud(); return; }
+    // A redraw must not schedule anything: frameOnce un-pauses so that frame() runs, and
+    // this line used to see 'not paused' and queue a full frame - which stepped the sim
+    // before noticing the pause. Every slider move on a paused page cost one hidden step.
+    if (cfg.paused || redrawOnly) { updateHud(); return; }
     if (!cfg.still || frameNo < cfg.warm) requestAnimationFrame(frame); else updateHud();
   }
 
   //#D{
-  function frameOnce() { const was = cfg.paused; cfg.paused = false; frame(); cfg.paused = was; }
+  function frameOnce() {
+    const was = cfg.paused; cfg.paused = false; redrawOnly = true;
+    frame();
+    redrawOnly = false; cfg.paused = was;
+  }
   //#D}
 
   //#D{

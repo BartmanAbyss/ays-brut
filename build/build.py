@@ -68,7 +68,7 @@ REWRITES = [
     ('    if (hasTS) desc.timestampWrites = ts(3);', ''),
     ('    frameNo++; simStep += simSteps; probe.frames = frameNo; probe.ok = true;',
      '    simStep += simSteps;'),
-    ('    if (cfg.paused) { updateHud(); return; }', ''),
+    ('    if (cfg.paused || redrawOnly) { updateHud(); return; }', ''),
     ('    if (!cfg.still || frameNo < cfg.warm) requestAnimationFrame(frame); else updateHud();',
      '    requestAnimationFrame(frame);'),
     ("""    if (hasTS && !qbusy && qrd.mapState === 'unmapped') {
