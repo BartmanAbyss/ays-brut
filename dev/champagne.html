@@ -84,8 +84,7 @@ struct U {
   pudCZ    : f32,
   pudR     : f32,
   pudOn    : f32,
-  flareH   : f32,       // stem-to-foot flare height, m
-  flareR   : f32,       // flare radius where it meets the foot, m
+  _w2      : f32,
 };
 struct J { stride : f32, _a : f32, _b : f32, _c : f32 };
 
@@ -123,6 +122,8 @@ const GLASS_T  = 0.0007;                // wall half-thickness
 const STEM_R   = 0.0026;                // slender stem (0.04 D)
 const FOOT_R   = 0.0374;                // 0.67 D
 const FOOT_H   = 0.0077;
+const FLARE_H  = 0.015;                 // stem-to-foot trumpet: height
+const FLARE_R  = 0.011;                 // ...and radius where it meets the foot
 const GH       = RIM_Y;                 // tier spacing = glass height
 const SP       = 2.0 * RIM_R;           // rims touching
 
@@ -339,28 +340,30 @@ fn sdCoupe(p: vec3f) -> f32 {
   var bowl = abs(length(p - vec3f(0.0, SPH_CY, 0.0)) - SPH_R) - GLASS_T;
   bowl = max(bowl, p.y - RIM_Y);
   // slender stem, and the solid glass knuckle the bowl sits on
-  let stem = sdCyl(p, STEM_R, FOOT_H * 0.4, BOWL_BOT + 0.005);
+  // Stem, flaring into the foot like a trumpet as in the reference: ONE profiled surface,
+  // radius STEM_R + (FLARE_R - STEM_R)(1-t)^2.5 over FLARE_H. It used to be a separate flare
+  // primitive. smin-ing it to the stem inflated the near-coincident surfaces into a collar
+  // (up to k/4), and even with min its flat top cap, though never on the surface, bent the
+  // finite-difference normals just above it into a seam line. One surface has neither.
+  // (1-t)^2.5 brings slope AND curvature to zero at the top: no crease even in a highlight.
+  // The radial distance is scaled by the LOCAL steepness, 1/sqrt(1 + r'(y)^2), which is 1
+  // up the plain stem, so the long straight part marches at full speed.
+  let fr = length(p.xz);
+  let ft = clamp((p.y - 0.0030) / FLARE_H, 0.0, 1.0);
+  let sr = STEM_R + (FLARE_R - STEM_R) * pow(1.0 - ft, 2.5);
+  let fk = 2.5 * (FLARE_R - STEM_R) / FLARE_H * pow(1.0 - ft, 1.5);
+  let stem = max(max((fr - sr) / sqrt(1.0 + fk * fk), p.y - (BOWL_BOT + 0.005)), -p.y);
   let knuc = length((p - vec3f(0.0, BOWL_BOT + 0.0045, 0.0)) * vec3f(1.0, 0.62, 1.0)) - 0.0080;
   // Foot: a thin plate, 2.2 mm at the rim rising to 4.4 mm at the centre, flat underneath
   // at y = 0, rim rounded. It used to be a rounded cylinder spanning y = -1.3..7.7 mm - a
   // 9 mm puck, sunk 1.3 mm into the table - where the reference (a thin plate, photo 5) is
   // a quarter of that. Cross-section: a capsule along r whose centre height and radius
   // both taper linearly, so it is flat-bottomed and its top is a shallow cone.
-  let fr = length(p.xz);
   let fs = clamp(fr / (FOOT_R - 0.0011), 0.0, 1.0);
   let fh = mix(0.0022, 0.0011, fs);
   let foot = (length(vec2f(max(fr - (FOOT_R - 0.0011), 0.0), p.y - fh)) - fh) * 0.95;
-  // The stem flares into the foot like a trumpet, concave, as in the reference - before, a
-  // 6 mm smooth-min fillet stood in for it. Height and base radius are sliders (flareH,
-  // flareR). The radial distance is scaled by 1/sqrt(1 + slope^2) at the profile's steepest
-  // point (the base, slope 2(R - r)/H), so it stays a lower bound for any slider setting.
-  let ft = clamp((p.y - 0.0030) / u.flareH, 0.0, 1.0);
-  let fl = STEM_R + (u.flareR - STEM_R) * (1.0 - ft) * (1.0 - ft);
-  let fk = 2.0 * (u.flareR - STEM_R) / u.flareH;
-  let flare = max(max((fr - fl) / sqrt(1.0 + fk * fk), p.y - (0.0030 + u.flareH)), -p.y);
   var d = smin(stem, knuc, 0.0070);
   d = smin(d, bowl, 0.0045);
-  d = smin(d, flare, 0.0020);
   d = smin(d, foot, 0.0020);
   // The knuckle and the top of the stem are blended into the shell for the fillet UNDER
   // the bowl, but they reached up INTO it. Scaling y by 0.62 inside length() stretches the
@@ -1623,7 +1626,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   let showStep = 0;            // show time in whole SIM_DT steps - the clock the music owns
   let showPend = 0, showT = 0, burstSteps = 0;
   let frameSteps = 1;          // sim steps this rendered frame stands for; sizes the streak
-  const f32 = new Float32Array(52);   // 49 fields, struct padded to 208 bytes
+  const f32 = new Float32Array(48);
   const t0 = performance.now();
   let last = t0, acc = 0, accN = 0, frameNo = 0, simStep = 0, ffSteps = 0;
   const pudBound = [0, 0, 0.02];   // wet-region bounding circle, from the coarse readback
@@ -1666,7 +1669,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     f32[40] = ui.botTilt * Math.PI / 180; f32[41] = ui.botAz * Math.PI / 180;
     f32[42] = ui.bottle ? 1 : 0;
     f32[43] = pudBound[0]; f32[44] = pudBound[1]; f32[45] = pudBound[2]; f32[46] = ui.puddle ? 1 : 0;
-    f32[47] = ui.flareH * 0.001; f32[48] = ui.flareR * 0.001;
     device.queue.writeBuffer(ubo, 0, f32);
   }
 
@@ -2022,8 +2024,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['dropRad',  'range', 2.0,  0.4,  6.0,  0.1,  1],
     ['foam',     'range', 1.0,  0.0,  3.0,  0.05, 2],
     ['bottle',   'check', true],
-    ['flareH',   'range', 20,   4,    40,   0.5,  1],
-    ['flareR',   'range', 11,   4,    18,   0.25, 2],
     ['botTilt',  'range', 118,  0,    170,  1,    0],
     ['botAz',    'range', 205, -180,  180,  1,    0],
     ['pourWander','range', 9,   0,    30,   0.5,  1],
@@ -2067,8 +2067,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     pourRate: 'Drops leaving the bottle per frame. Raise it for a dense continuous stream, lower it for separate falling drops.',
     wanderSpd: 'How quickly the bottle drifts around. Higher makes the pour restless and the stream whip about; lower is a slow lazy sway.',
     bottle: 'Show the magnum. It is an analytic shape only - there is no fluid simulated inside it yet.',
-    flareH: 'Coupe: height in mm over which the stem flares out into the foot. The reference glass flares like a trumpet - concave, widening fastest at the bottom.',
-    flareR: 'Coupe: radius in mm of the flare where it meets the foot. The stem itself is 2.6 mm; the foot is 37.4 mm.',
     botTilt: 'Tilt from upright, in degrees. 0 is standing up; pouring needs to go past horizontal, so 110-130 is the useful range. The mouth stays at the pour point and the body swings around it.',
     botAz: 'Which direction the magnum is held from, in degrees.',
     pourWander: 'How far the bottle drifts while pouring, in mm. A real pour is not perfectly aimed; the stream inherits the drift so it trails rather than falling dead straight. 0 is a perfectly steady pour.',

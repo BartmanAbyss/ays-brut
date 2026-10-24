@@ -46,8 +46,8 @@ V = π·h·(3R² + h²)/6    →   R = 56 mm, V = 280 ml  ⇒  h = 46.3 mm
 
 Slender 5.2 mm stem, a solid glass knuckle under the bowl (smooth-min), and a thin foot:
 a plate 2.2 mm at the rim rising to 4.4 mm at the centre, flat underneath, which the stem
-meets through a concave trumpet flare (sliders `flareH`, `flareR`; 20 mm and 11 mm by
-default). The bowl's cavity is carved back out last, so nothing the fillets or the knuckle
+flares into as one surface, a concave trumpet 15 mm tall widening to 11 mm (`FLARE_H`,
+`FLARE_R`). The bowl's cavity is carved back out last, so nothing the fillets or the knuckle
 do underneath can show up inside the bowl. The tower is 1+4+9 = 14 glasses by SDF domain folding, 0.51 m tall, 0.336 m wide.
 
 **Magnum** — 345 mm tall, 116 mm body, 30 mm neck, 3 mm wall, deep punt, hollowed to a shell

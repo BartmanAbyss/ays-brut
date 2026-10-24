@@ -94,6 +94,15 @@ guards against every fillet, not just this one. The foot had a related problem: 
 cylinder whose rounding pushed it to y = -1.3..7.7 mm, a 9 mm puck sunk into the table.
 Measure a primitive's real extent, don't read it off its parameters.
 
+**Don't smin two surfaces that already meet tangentially.** The stem's foot flare met the
+stem tangentially, so near the junction the two ran within a couple of mm of each other -
+and a polynomial smin of near-coincident surfaces inflates them by up to k/4, then stops
+dead where one primitive ends: a collar ring round every stem. `min` removed the collar but
+left a seam line, because the flare's flat top cap, though never on the surface, bent the
+finite-difference normals of points just above it. The fix that has neither: make it one
+surface (a profiled stem radius). Check junctions in `view=normals`, which shows a kink
+plainly where refracting glass hides it.
+
 **A particle smaller than a voxel vanishes.** The fine cell is 1.94 mm, so a drop only
 registers if it lands near a cell centre. Keep `dropRad` above the cell half-diagonal
 (~1.68 mm) or raise `FINE`. Symptom: a dense stream renders as four scattered drops.
