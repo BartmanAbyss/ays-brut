@@ -1,0 +1,2 @@
+# Vendored build tools: keep them byte-exact on every checkout (no line-ending rewrites).
+build/vendor/** -text
