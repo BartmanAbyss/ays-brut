@@ -714,8 +714,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-24 Oct 2026, after the lossless size pass and the core simplifications below, and a fresh
-packer search on the result.
+24 Oct 2026, after the lossless pass, the core simplifications and the non-feature pass
+below, and a 120-round packer search on the result.
 
 | Stage | WGSL | JS |
 |---|---|---|
@@ -728,13 +728,32 @@ packer search on the result.
 | Packed | bytes |
 |---|---|
 | payload, uncompressed | 24 379 |
-| brotli q11 (searched state) | 7 962 |
-| dropper header | 371 |
-| **`intro.cmd`, the deliverable** | **8 333** |
+| brotli q11 (searched state) | 7 657 |
+| dropper header | 310 |
+| **`intro.cmd`, the deliverable** | **7 967** |
 
-**8 333 against 8 192: over by 141**, before the click-to-start screen, the music player,
-the song and any text. Those need room too; how much decides which feature cuts are needed
+**7 967 against 8 192: 225 to spare**, before the click-to-start screen, the music player,
+the song and any text. How much those need decides whether any feature cuts are needed
 (*Feature cuts, measured*, below).
+
+#### Non-feature pass: 8 333 -> 7 967
+
+| Change | bytes | picture |
+|---|---|---|
+| per-dispatch index passed as the grid HEIGHT (`num_workgroups.y - 1`): the uniform slot buffer, its bind group and dynamic offsets gone | -104 (default state) | exact |
+| page wrapper: canvas styled inline, one classic script, the shader a template string at its end | -53 | exact |
+| dropper golfed 371 -> 310 (see the comment in `build.py`) | -61 | - |
+| no `requiredLimits`: 14 storage bindings -> 6 by element type, the big passes 256-wide | -92 (default state) | exact |
+| camera angle `/57.3` | -6 | 0.007% |
+| packer search, 120 rounds (40 -> 120 found 22 more) | - | - |
+
+The release now asks for no features and no limits: it runs on any WebGPU device.
+
+Measured and not worth it: radians in the timeline (-2), exact fraction literals (0),
+`vec3f()` for zero vectors (0), one-letter type aliases (+18). Long float literals are few
+(16 of 544): rounding them to 4 digits is -16. Rounding DESIGN values hard (colours,
+angles, gains) is worth an estimated -40 to -90; blanket rounding is not usable - it hits
+grid sizes, the glass count, refractive indices and pi/2.
 
 #### Core simplifications: 8 696 -> 8 333
 
