@@ -396,8 +396,26 @@ Roughly one percent of steps per percent of changed pixels, whichever way it is 
 changes land on the rim glints and the golden ring where the liquid meets the glass — the
 glass's character. None was adopted; `bounces` remains the knob for that trade.
 
-Where the rest is: the primary ray is 46% of all march steps, and the spray lookup minus
-the trilerp is still the biggest component.
+**The primary ray, and the march that ran on under the table.** The primary ray is 45% of
+all march steps, 18.3 per pixel: 42% of primary rays end on the table (17 steps each), 24%
+in the environment (13), 34% at an object (23); 59% of them take 8–16 steps and almost none
+reach the 160-step cap. By where along the ray the steps fall: 80% inside the domain box,
+12% outside it, and **8% past the table plane**. The table is intersected analytically
+after the march, so a march headed for it never knew to stop. It sphere-traced on beneath
+the table to the 14 m far clip, and whatever it found there was discarded.
+
+`marchS` now takes the plane distance and stops once the last proven-empty sphere reaches
+it. That is exact (every ray exit identical, no pixel off by more than 1/255) and it
+applies to every bounce, the reflection trace and the photon pass. It cut march steps 13%,
+render ~22.5 → **19.6**, and photons 2.75 → **1.84** (steps under the table were dear:
+right below the plane, every one paid the puddle test). Bounding the march by the scene's
+convex bounds as well (domain box, puddle slab, bottle sphere) removed 6.5% more steps and
+**no** time — out in empty sky every SDF early-outs, so those steps were cheap — and was
+dropped.
+
+Heavy tier2 now: **render 19.5, total 23.5** (was 24.8 / 29.9 when this profile started).
+Still ~4.5 ms over the 19 ms target. The steps left are inside the domain box, and the
+spray lookup minus the trilerp is still the biggest component.
 
 ### WebGPU limits that must be requested
 

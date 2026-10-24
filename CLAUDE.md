@@ -165,6 +165,14 @@ change actually removes. Judge a look-changing cut with `__grab`/`__diff` on a f
 frame, steps from `__profile` (exact), and time only from interleaved repeats — the GPU's
 baseline drifted by 3 ms within one session here.
 
+**An analytic shortcut must also bound the march.** The table was made a ray/plane test so
+grazing rays would stop burning steps on it - but the march still ran first, to FAR, and
+the plane only replaced its answer. Rays bound for the table marched on beneath it through
+the puddle test: 13% of all steps, ~3 ms render and ~0.9 ms of photons. Anything resolved
+analytically has to hand its distance to the march as a `tmax`. Stop on the last proven-
+empty sphere reaching it (`tPrev + rPrev >= tmax`), never on `t` passing it, or an
+over-relaxed step jumps a surface just in front.
+
 **A particle smaller than a voxel vanishes.** The fine cell is 1.94 mm, so a drop only
 registers if it lands near a cell centre. Keep `dropRad` above the cell half-diagonal
 (~1.68 mm) or raise `FINE`. Symptom: a dense stream renders as four scattered drops.
@@ -365,13 +373,14 @@ with physical cores, not threads. Do not score with a lower quality to go faster
 - Performance budget is **16.6 ms** at **1920×1080** (confirmed) on the compo PC, an **RTX
   5070**. Dev is on a 4070, ~15–20% slower, so the number to hit here is **~19 ms**. It is
   camera-dependent and only the worst shots fail. The worst measured is the heavy natural
-  tier2 frame (step 3120): **26.9 total, 21.8 render** after the packed far field (was 29.9).
-  Non-render passes are ~5 ms there. Step count, reflections and photon count are **not**
+  tier2 frame (step 3120): **23.5 total, 19.5 render** after the packed far field and the
+  plane-bounded march (was 29.9). Non-render passes are ~4 ms there. Step count, reflections and photon count are **not**
   levers, and neither was skipping empty particle blocks (0.9 ms, not the 8 that `parts=0`
   suggested), nor wasted trilerps (exact block reach cut them 36% for 0.4 ms), nor the rays
   that exhaust the bounce budget (every cap trades ~1% of steps for ~1% of changed pixels,
-  on the rim glints). What is left, from the profile in the README: the primary ray (46% of
-  march steps) and the rest of the spray lookup.
+  on the rim glints), nor bounding the march by the scene's bounds (steps in empty sky are
+  cheap). What is left, from the profile in the README: steps inside the domain box, and
+  the rest of the spray lookup.
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
   stale. The dropper is ~324 bytes, leaving ~7870 for the payload. The harness as it stands

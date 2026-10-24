@@ -117,7 +117,10 @@ override PROF : bool = false;
 // 1 tower, 2 liquidDist, 4 bulk liquid, 8 bottle, 16 spray trilerp, 32 spray far field.
 override XC : u32 = 0u;
 //#D}
-var<private> pc : array<u32, 64>;
+var<private> pc : array<u32, 96>;
+// primary-ray step accounting (profiler only): set by fs around the bounce-0 march
+var<private> profPrim : bool = false;
+var<private> profTpl : f32 = 0.0;
 @group(1) @binding(0) var<uniform> j : J;
 
 // ── glass geometry (metres) ───────────────────────────────
@@ -710,12 +713,12 @@ fn photons(@builtin(global_invocation_id) g: vec3u) {
   for (var b = 0; b < 4; b++) {
     var s = 1.0;
     if (med != 0) { s = -1.0; }
-    let hh = marchS(p, d, s);
+    let tpl = planeT(p, d);
+    let hh = marchS(p, d, s, tpl);
 
     var ht = 1e9;
     var tab = false;
     if (hh.hit > 0.5) { ht = hh.t; }
-    let tpl = planeT(p, d);
     if (tpl < ht) { ht = tpl; tab = true; }
     if (ht > FAR) { return; }
 
@@ -1101,7 +1104,8 @@ const HIT_EPS  = 0.00012;
 // overlaps the previous one. If they don't, a surface could lie in the gap: step back to the
 // last safe point and march conservatively for the rest of the ray. Long approaches through
 // open air get cheaper; near thin shells the fallback trips and it behaves as before.
-fn marchS(ro: vec3f, rd: vec3f, s: f32) -> Hit {
+// tmax: where the caller's analytic table plane would win anyway (see below)
+fn marchS(ro: vec3f, rd: vec3f, s: f32, tmax: f32) -> Hit {
   var t = 0.0;
   var i = 0.0;
   var w = 1.4;
@@ -1109,7 +1113,13 @@ fn marchS(ro: vec3f, rd: vec3f, s: f32) -> Hit {
   var rPrev = 0.0;
   var stepL = 0.0;
   loop {
-    if (i >= u.maxSteps) { break; }
+    if (i >= u.maxSteps) { if (PROF && profPrim) { pc[79] += 1u; } break; }   // 79: primary hit the step cap
+    if (PROF && profPrim) {
+      // 64 past the table plane, 65 outside the spray/tower domain box, 66 inside it
+      if (t > profTpl) { pc[64] += 1u; }
+      else if (sdBoxDom(ro + rd * t) > 0.0) { pc[65] += 1u; }
+      else { pc[66] += 1u; }
+    }
     let d = map(ro + rd * t) * s;
     if (w > 1.0 && (d < 0.0 || d + rPrev < stepL)) {
       if (PROF) { pc[11] += 1u; }
@@ -1125,6 +1135,14 @@ fn marchS(ro: vec3f, rd: vec3f, s: f32) -> Hit {
     }
     if (d < HIT_EPS) { return Hit(t, i, 1.0); }
     tPrev = t; rPrev = d;
+    // Past the table plane nothing can win - every caller replaces a farther hit with the
+    // analytic table. Stop once the last PROVEN-empty sphere reaches it, not merely when t
+    // passes it: an over-relaxed step can jump a surface sitting just in front of the table.
+    // Rays bound for the table used to march on beneath it to FAR, through the puddle test:
+    // 13% of the steps on heavy tier2 and ~2.5-4 ms, for an identical picture. (Bounding
+    // the march by where it leaves the scene's bounds as well cut 6.5% more steps and no
+    // time: steps out in empty sky are cheap.)
+    if (tPrev + rPrev >= tmax) { break; }
     stepL = max(d * w, 0.00006);
     t = t + stepL;
     if (t > FAR) { break; }
@@ -1132,7 +1150,7 @@ fn marchS(ro: vec3f, rd: vec3f, s: f32) -> Hit {
   }
   return Hit(t, i, 0.0);
 }
-fn march(ro: vec3f, rd: vec3f) -> Hit { return marchS(ro, rd, 1.0); }
+fn march(ro: vec3f, rd: vec3f) -> Hit { return marchS(ro, rd, 1.0, 1e9); }
 
 // 0 air · 1 glass · 2 champagne · 3 table (opaque).
 // Priority order resolves coincident glass/liquid surfaces — no double refraction.
@@ -1270,12 +1288,12 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
   for (var b = 0; b < 3; b++) {
     var s = 1.0;
     if (med != 0) { s = -1.0; }
-    let h = marchS(p, d, s);
+    let tpl = planeT(p, d);
+    let h = marchS(p, d, s, tpl);
     if (PROF) { pc[13] += u32(h.steps); }
     var ht = FAR;
     var tab = false;
     if (h.hit > 0.5) { ht = h.t; }
-    let tpl = planeT(p, d);
     if (tpl < ht) { ht = tpl; tab = true; }
     if (med == 2) { acc += tp * vec3f(0.95, 0.60, 0.20) * (1.0 - exp(-ht * 7.0)) * 0.30; }
     tp *= exp(-sigmaOf(med) * ht);
@@ -1318,15 +1336,25 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
   for (var b = 0; b < i32(u.bounces); b++) {
     var s = 1.0;
     if (med != 0) { s = -1.0; }
-    let h = marchS(p, d, s);
+    let tpl = planeT(p, d);
+    if (PROF) { profPrim = b == 0; profTpl = tpl; }
+    let h = marchS(p, d, s, tpl);
+    if (PROF) { profPrim = false; }
     steps += h.steps;
     if (PROF) { pc[9] += 1u; pc[10] += u32(h.steps); pc[31u + min(u32(b), 10u)] += u32(h.steps); }
 
     var ht = FAR;
     var tab = false;
     if (h.hit > 0.5) { ht = h.t; }
-    let tpl = planeT(p, d);
     if (tpl < ht) { ht = tpl; tab = true; }
+    if (PROF && b == 0) {
+      // 67/68/69 primary rays ending on the table / in the environment / at an object, and
+      // 70/71/72 their march steps; 73..78 steps per primary ray <8 <16 <32 <64 <128 >=128
+      var k = 69u;
+      if (tab) { k = 67u; } else if (h.hit < 0.5) { k = 68u; }
+      pc[k] += 1u; pc[k + 3u] += u32(h.steps);
+      pc[73u + min(u32(log2(max(h.steps, 1.0) / 4.0)), 5u)] += 1u;
+    }
 
     // cheap single-scatter: champagne glows gold rather than going black in depth
     if (med == 2) { acc += tp * vec3f(0.95, 0.60, 0.20) * (1.0 - exp(-ht * 7.0)) * 0.30; }
@@ -1543,8 +1571,8 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
   col = pow(max(col, vec3f(0.0)), vec3f(0.4545));
   if (PROF) {
     pc[0] = 1u;
-    let bank = ((u32(fc.x) * 7u + u32(fc.y) * 13u) & 63u) * 64u;
-    for (var k = 0u; k < 64u; k++) { if (pc[k] != 0u) { atomicAdd(&prof[bank + k], pc[k]); } }
+    let bank = ((u32(fc.x) * 7u + u32(fc.y) * 13u) & 63u) * 128u;
+    for (var k = 0u; k < 96u; k++) { if (pc[k] != 0u) { atomicAdd(&prof[bank + k], pc[k]); } }
   }
   return vec4f(col, 1.0);
 }
@@ -1698,8 +1726,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   device.queue.writeBuffer(pud,  0, new Float32Array(PN * PN));
   device.queue.writeBuffer(pudA, 0, new Uint32Array(PN * PN));
   const pudC    = device.createBuffer({ size: PCN * PCN * 16, usage: S });
-  const profB   = device.createBuffer({ size: 64 * 64 * 4, usage: S });
-  const profRd  = device.createBuffer({ size: 64 * 64 * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const profB   = device.createBuffer({ size: 64 * 128 * 4, usage: S });
+  const profRd  = device.createBuffer({ size: 64 * 128 * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const occB    = device.createBuffer({ size: COARSE_N * 4 * 4, usage: S });   // blocks, seed keys, two flood regions
   device.queue.writeBuffer(pudC, 0, new Float32Array(PCN * PCN * 4));
   const glassRd = device.createBuffer({ size: NG * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
@@ -1843,8 +1871,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   function flushProfile(r) {
     profRd.mapAsync(GPUMapMode.READ).then(() => {
       const a = new Uint32Array(profRd.getMappedRange().slice(0)); profRd.unmap();
-      const t = new Array(64).fill(0);
-      for (let b = 0; b < 64; b++) for (let k = 0; k < 64; k++) t[k] += a[b * 64 + k];
+      const t = new Array(96).fill(0);
+      for (let b = 0; b < 64; b++) for (let k = 0; k < 96; k++) t[k] += a[b * 128 + k];
       r(t);
     });
   }
@@ -2175,7 +2203,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     if (gbusy === false && glassRd.mapState === 'unmapped') enc.copyBufferToBuffer(glassB, 0, glassRd, 0, NG * 16);
     if (pbusy === false && partRd.mapState === 'unmapped') enc.copyBufferToBuffer(partBuf, 0, partRd, 0, PSAMP * 32);
     if (dbusy === false && pudRd.mapState === 'unmapped') enc.copyBufferToBuffer(pudC, 0, pudRd, 0, PCN * PCN * 16);
-    if (doProf) { enc.copyBufferToBuffer(profB, 0, profRd, 0, 64 * 64 * 4); }
+    if (doProf) { enc.copyBufferToBuffer(profB, 0, profRd, 0, 64 * 128 * 4); }
     device.queue.submit([enc.finish()]);
     if (doProf) { const r = profReq; profReq = null; flushProfile(r); }
     readTimestamps();
