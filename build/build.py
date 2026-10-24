@@ -7,7 +7,7 @@ HTML that inflates itself with DecompressionStream.
 Run:  python build/build.py
 Out:  build/intro.html   (runnable)   and a size report on stdout.
 """
-import io, os, re, subprocess, sys, zlib
+import io, math, os, re, struct, subprocess, sys, zlib
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.join(ROOT, '..', 'dev', 'champagne.html')
@@ -126,6 +126,153 @@ storageBarrier dpdx dpdy fwidth read write read_write uniform storage function p
 workgroup compute vertex fragment builtin location group binding workgroup_size
 global_invocation_id local_invocation_id workgroup_id num_workgroups position
 vertex_index instance_index front_facing frag_depth sample_index sample_mask""".split())
+
+
+def f32_literal(v):
+    """Shortest WGSL literal that rounds to the same f32 the JS would have written."""
+    t = struct.unpack('f', struct.pack('f', v))[0]
+    for prec in range(1, 10):
+        lit = '%.*g' % (prec, t)
+        if struct.unpack('f', struct.pack('f', float(lit)))[0] == t:
+            break
+    if not any(c in lit for c in '.e'):
+        lit += '.'                     # keep it a float: `91.` not the abstract int `91`
+    # no `.5`: valid WGSL, but wgslender's parser rejects a leading dot and the build
+    # silently loses its tree-shaking pass
+    return '(%s)' % lit if lit.startswith('-') else lit
+
+
+def release_uniforms(ui):
+    """Uniform slots the release never varies, with the values writeUniforms would put
+    there. Mirrors the JS expressions one for one; anything per-frame (camera, time, frame,
+    emitter, shutter) is deliberately absent and stays a real uniform."""
+    f = lambda k: float(ui[k])
+    on = lambda k: 1.0 if ui[k] == 'true' else 0.0
+    rad = math.pi / 180
+    npart = float(CFG['npart'])
+    return {
+        'view': 0.0, 'fov': 1.6, 'maxSteps': float(CFG['steps']), 'dt': 1 / 60,
+        'spawnMod': float(max(1, round((npart / 6) / f('pourRate')))),
+        'nPart': npart, 'pvol': f('dropVol') * 1e-9, 'nPhoton': float(CFG['nphoton']),
+        'cgain': f('cgain'), 'single': 0.0, 'noliq': 0.0, 'bub': on('bubbles'),
+        'expo': f('expo'), 'wav': on('waves'), 'pfield': on('drops'), 'bounces': f('bounces'),
+        'refl': on('reflect'), 'fillOv': -1.0 if ui['autofill'] == 'true' else f('fill') / 100,
+        'envg': on('gridEnv'), 'rtrace': on('rtrace'),
+        'ltAz': f('lightAz') * rad, 'ltEl': f('lightEl') * rad,
+        'prad': f('dropRad') * 0.001, 'foamG': f('foam'),
+        'botTilt': f('botTilt') * rad, 'botAz': f('botAz') * rad,
+        'botOn': on('bottle'), 'pudOn': on('puddle'),
+    }
+
+
+def fold_uniforms(w, ui):
+    """Replace u.<constant> with its literal so the branches behind debug toggles become
+    `if (0. > .5)` and dead. Tree-shaking cannot remove those on its own: behind a uniform
+    they are live code as far as any analysis of the shader can tell."""
+    vals = release_uniforms(ui)
+    n = [0]
+
+    def rep(m):
+        if m.group(1) in vals:
+            n[0] += 1
+            return f32_literal(vals[m.group(1)])
+        return m.group(0)
+    w = re.sub(r'(?<![.\w])u\.(\w+)\b', rep, w)
+    return w, n[0]
+
+
+_NUM = r'(?:\(-?\d[\d.]*(?:e[+-]?\d+)?\)|-?\d[\d.]*(?:e[+-]?\d+)?)'
+_CMP = re.compile(r'(?<=[(&|])(\s*)(' + _NUM + r')\s*(<=|>=|==|!=|<|>)\s*(' + _NUM +
+                  r')(?=\s*(?:\)|&&|\|\|))')
+_OPS = {'<': lambda a, b: a < b, '>': lambda a, b: a > b, '<=': lambda a, b: a <= b,
+        '>=': lambda a, b: a >= b, '==': lambda a, b: a == b, '!=': lambda a, b: a != b}
+
+
+def _match(w, i, open_, close):
+    """Index just past the bracket that closes the one at w[i]."""
+    depth = 0
+    while True:
+        if w[i] == open_:
+            depth += 1
+        elif w[i] == close:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+
+
+def _cond(c):
+    """(True|False|None, simplified text) for an if-condition. Only top-level && chains
+    are simplified; anything with || is left alone rather than reasoned about."""
+    t = c.strip()
+    if t in ('true', 'false'):
+        return t == 'true', t
+    if '||' in t:
+        return None, c
+    parts = [x.strip() for x in t.split('&&')]
+    if any(x == 'false' for x in parts):
+        return False, 'false'
+    parts = [x for x in parts if x != 'true']
+    if not parts:
+        return True, 'true'
+    return None, ' && '.join(parts)
+
+
+def fold_branches(w):
+    """Delete code behind conditions the folded uniforms have made constant.
+
+    After fold_uniforms the debug toggles read `if (0. > 0.5) { ... }`. wgslender does not
+    evaluate those - it only removes declarations nothing references - so this does: it
+    evaluates literal comparisons, simplifies && chains, drops dead if-bodies (keeping the
+    else arm), and unwraps always-true ones. Helpers that were only reachable through a
+    dead branch then become unreferenced, which tree-shaking CAN remove.
+    """
+    w = _CMP.sub(lambda m: m.group(1) + ('true' if _OPS[m.group(3)](
+        float(m.group(2).strip('()')), float(m.group(4).strip('()'))) else 'false'), w)
+    ifre = re.compile(r'\bif\s*\(')
+    n = 0
+    # One fold per pass, then rescan from the top, so ifs nested inside other ifs (or
+    # exposed by an earlier fold) are reached. There are only ~a dozen; cost is nothing.
+    while True:
+        changed = False
+        for m in ifre.finditer(w):
+            if re.search(r'\belse\s*$', w[:m.start()]):
+                continue                       # part of an else-if chain: leave it
+            ce = _match(w, m.end() - 1, '(', ')')
+            cond = w[m.end():ce - 1]
+            val, text = _cond(cond)
+            if val is None and text == cond:
+                continue
+            bs = w.index('{', ce)
+            be = _match(w, bs, '{', '}')
+            if val is None:                    # condition simplified, branch stays
+                w = w[:m.start()] + 'if (' + text + ') ' + w[bs:]
+                changed = True
+                break
+            end, else_arm = be, ''
+            k = re.match(r'\s*else\b', w[be:])
+            if k:
+                j = be + k.end()
+                if re.match(r'\s*if\b', w[j:]):
+                    c2 = w.index('(', j)
+                    e2 = _match(w, w.index('{', _match(w, c2, '(', ')')), '{', '}')
+                    while True:
+                        k2 = re.match(r'\s*else\b', w[e2:])
+                        if not k2:
+                            break
+                        e2 = _match(w, w.index('{', e2 + k2.end()), '{', '}')
+                    else_arm, end = w[j:e2].strip(), e2
+                else:
+                    b2 = w.index('{', j)
+                    end = _match(w, b2, '{', '}')
+                    else_arm = w[b2:end]
+            keep = w[bs:be] if val else else_arm
+            w = w[:m.start()] + keep + w[end:]
+            n += 1
+            changed = True
+            break
+        if not changed:
+            return w, n
 
 
 def tree_shake(w):
@@ -287,6 +434,10 @@ def main():
     print('dev code removed wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
 
     io.open(os.path.join(ROOT, 'strip.js'), 'wb').write(js.encode())
+    wgsl, folded = fold_uniforms(wgsl, ui)
+    print('uniforms folded  %d references to release constants' % folded)
+    wgsl, branches = fold_branches(wgsl)
+    print('branches folded  %d if-statements resolved at build time' % branches)
     wgsl, shaken = tree_shake(wgsl)
     if shaken:
         print('tree-shaken      wgsl %7d   (wgslender: dead code + syntax)' % len(wgsl.encode()))

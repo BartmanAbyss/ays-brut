@@ -464,6 +464,25 @@ compute pass is added.
 [washi](https://github.com/datatrash/washi) was the other candidate and is not usable here:
 no prebuilt releases, cargo required, and its own README recommends wgslender instead.
 
+### Folding what the release never varies
+
+29 of the 47 uniform slots are constants in the release: the debug toggles, `view`,
+bounce and step counts, light angles, bottle pose. The build inlines them (39 references)
+as the shortest literal that rounds to the same f32 the JS would have written, then
+evaluates the comparisons that leaves behind — `if (0. > 0.5)` and friends — and deletes
+the dead branches. 8 if-statements resolve at build time. Helpers reachable only through a
+dead branch (the UV grid environment, for one) are then unreferenced, which is what
+wgslender's tree-shaker can actually remove.
+
+That order matters: **wgslender does not evaluate constant conditions.** It removes
+declarations nothing references, and behind a uniform the debug paths are referenced.
+Fed the folded shader without the branch folder it shrank 66 bytes and the brotli got 13
+bytes *worse*. With the folder: **9 698**, 186 better.
+
+One parser incompatibility cost a confusing round: `.5` is a valid WGSL literal, but
+wgslender rejects a leading dot, fails, and the build falls back silently to an unshaken
+shader. Literals keep their leading zero.
+
 ### Where it lands today (no music, first draft timeline)
 
 | Stage | WGSL | JS |

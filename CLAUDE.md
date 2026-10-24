@@ -248,6 +248,13 @@ pattern that a one-line file defeats. Its validator also rejects our `atomicAdd`
 that compiles and runs. Re-check all 17 entry points survive tree-shaking after adding a
 compute pass.
 
+**wgslender tree-shakes; it does not constant-fold.** Inlining the release uniforms alone
+made the brotli 13 bytes worse. The build's own `fold_branches` evaluates the literal
+comparisons and deletes dead ifs; only then does tree-shaking find unreferenced helpers.
+And keep the leading zero on literals: wgslender rejects `.5`, and its failure makes the
+build fall back to the unshaken shader without stopping - watch for the `tree-shaken`
+line in the build output.
+
 **Never rename a member access.** The substitution uses a `(?<![.\w])` guard so a rename of
 `pos` cannot touch `p.pos`.
 
