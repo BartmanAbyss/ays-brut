@@ -218,17 +218,30 @@ class Program:
         return ''.join(out)
 
 
-def assemble(wgsl, js, parts):
-    p = {
-        'style': '<style>html,body{margin:0;height:100%;overflow:hidden;background:#000}'
-                 'canvas{display:block;width:100%;height:100%}</style>',
-        'canvas': '<canvas id=c></canvas>',
-        'wgsl': '<script type="text/wgsl" id="wgsl-main">' + wgsl + '</script>',
-        # a module script is deferred, so it may sit anywhere: the canvas and the shader
-        # exist by the time it runs
-        'js': '<script type="module">' + js + '</script>',
-    }
-    return ''.join(p[k] for k in parts).encode()
+SHADER_LOOKUP = 'document.getElementById("wgsl-main").textContent'
+_shader_var = {}
+
+
+def assemble(wgsl, js, parts=None):
+    """The served page: a canvas styled inline, then ONE classic script. The shader rides in
+    that script as a template string at its END - the code reads it only after its first
+    `await`, by which time the whole script has run. That drops the shader's own
+    <script type="text/wgsl"> tag, the getElementById lookup, `type="module"` and the
+    <style> block: -36 bytes measured. (In the middle of the code it was +31: the search
+    tunes order for the shader following the JS.) `parts` is kept for old saved states and
+    ignored. No background colour: the click-to-start screen comes first and owns the look
+    of the page until the first frame."""
+    assert js.count(SHADER_LOOKUP) == 1, 'release JS no longer reads the shader by id'
+    assert '`' not in wgsl and '${' not in wgsl and '</script' not in wgsl
+    if js not in _shader_var:                 # a one-letter JS name the code does not use
+        used = set(re.findall(r'[A-Za-z_$][\w$]*', js.replace(SHADER_LOOKUP, '')))
+        _shader_var.clear()
+        _shader_var[js] = next(n for n in 'WQKVXZJYHUabcdefghijklmnopqrstuvwxyz'
+                               if n not in used)
+    v = _shader_var[js]
+    return ('<canvas id=c style=position:fixed;inset:0;width:100%;height:100%>'
+            '<script>' + js.replace(SHADER_LOOKUP, v) + ';var ' + v + '=`' + wgsl + '`'
+            '</script>').encode()
 
 
 def score(prog, st, js):
