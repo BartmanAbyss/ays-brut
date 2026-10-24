@@ -65,7 +65,7 @@ def cut_dev(text):
 # just drop them. Order matters: these run first.
 REWRITES = [
     ("    requiredFeatures: hasTS ? ['timestamp-query'] : [],", ''),
-    ('    if (hasTS) desc.timestampWrites = ts(3);', ''),
+    ('      timestampWrites: ts(3),\n', ''),
     ('    frameNo++; simStep += simSteps; probe.frames = frameNo; probe.ok = true;',
      '    simStep += simSteps;'),
     ('    if (cfg.paused || redrawOnly) { updateHud(); return; }', ''),
@@ -80,8 +80,6 @@ REWRITES = [
     ("  device.addEventListener('uncapturederror', e => fail('gpu', e.error.message));", ''),
     ("  device.lost.then(i => { if (i.reason !== 'destroyed') fail('device-lost', i.message); });", ''),
     ("  device.pushErrorScope('validation');", ''),
-    ("""  probe.features = [...adapter.features].filter(f =>
-    ['timestamp-query', 'shader-f16', 'subgroups', 'float32-filterable'].includes(f));""", ''),
     ("})().catch(e => fail('main', e));", '})();'),
 ]
 
@@ -103,8 +101,7 @@ def strip_js(js, ui):
     js = re.sub(r'\n *for \(const m of \(await module\.getCompilationInfo\(\)\)\.messages\) \{.*?\n *\}',
                 '', js, flags=re.S)
     js = '\n'.join(l for l in js.split('\n') if not DEV_RE.search(l))
-    js = js.replace('beginComputePass({ timestampWrites: ts(0) })', 'beginComputePass()')
-    js = re.sub(r'beginComputePass\(\{ timestampWrites: ts\(\d\) \}\)', 'beginComputePass()', js)
+    js = re.sub(r'beginComputePass\(\{ timestampWrites: ts\(\w+\) \}\)', 'beginComputePass()', js)
     # inline the control values, then the objects that held them are dead
     js = re.sub(r'\bcfg\.(\w+)\b', lambda m: CFG.get(m.group(1), 'cfg.' + m.group(1)), js)
     js = re.sub(r'\bui\.(\w+)\b', lambda m: ui.get(m.group(1), 'ui.' + m.group(1)), js)

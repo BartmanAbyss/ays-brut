@@ -1648,6 +1648,7 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
 
 <!-- ───────────────────────── JS ───────────────────────── -->
 <script type="module">
+//#D{
 const Q  = new URLSearchParams(location.search);
 const qf = (k, d) => { const v = parseFloat(Q.get(k)); return Number.isFinite(v) ? v : d; };
 
@@ -1685,6 +1686,7 @@ const cfg = {
   show:     Q.get('show') === '1',     // run the timeline instead of the manual camera
   showt:    qf('showt', 0),            // seek here on load (how a backward scrub works)
 };
+//#D}
 
 const FINE = 320, COARSE = 32, NG = 14, WN = 32, CN = 768, PN = 384, PCN = 48;
 const FINE_N = FINE ** 3, COARSE_N = COARSE ** 3;
@@ -1713,32 +1715,33 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 (async function main() {
   const canvas = document.getElementById('c');
   if (!navigator.gpu) { fail('init', 'navigator.gpu missing — WebGPU unavailable'); return; }
-  const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
+  const adapter = await navigator.gpu.requestAdapter();
   if (!adapter) { fail('init', 'requestAdapter returned null'); return; }
 
+//#D{
   const info = adapter.info ?? {};
   probe.adapter = { vendor: info.vendor, architecture: info.architecture };
   const hasTS = adapter.features.has('timestamp-query');
   probe.features = [...adapter.features].filter(f =>
     ['timestamp-query', 'shader-f16', 'subgroups', 'float32-filterable'].includes(f));
+//#D}
 
-  // default fragment-stage storage-buffer limit is 8; we bind 9
-  // 320^3 / 512 = 64000 workgroups, just inside the per-dimension cap; 256-wide would be
-  // workgroups instead - which itself needs raising from the default 256.
+  // The defaults bite: 8 storage buffers per stage (we bind 15), and 320^3 / 256-wide
+  // workgroups would be one over the per-dimension cap, so the big passes are 512-wide.
+  // A limit the browser does not know is dropped rather than failing the device.
   const want = { maxStorageBuffersPerShaderStage: 16, maxStorageBuffersInFragmentStage: 16,
                  maxComputeWorkgroupSizeX: 512, maxComputeInvocationsPerWorkgroup: 512 };
-  const lim = {};
-  for (const k in want) if (adapter.limits[k] !== undefined) lim[k] = Math.min(want[k], adapter.limits[k]);
+  for (const k in want) if (!(k in adapter.limits)) delete want[k];
   const device = await adapter.requestDevice({
     requiredFeatures: hasTS ? ['timestamp-query'] : [],
-    requiredLimits: lim,
+    requiredLimits: want,
   });
   device.addEventListener('uncapturederror', e => fail('gpu', e.error.message));
   device.lost.then(i => { if (i.reason !== 'destroyed') fail('device-lost', i.message); });
 
   const ctx = canvas.getContext('webgpu');
   const format = navigator.gpu.getPreferredCanvasFormat();
-  ctx.configure({ device, format, alphaMode: 'opaque' });
+  ctx.configure({ device, format });
 
   // ── shader ──
   const code = document.getElementById('wgsl-main').textContent;
@@ -1748,134 +1751,73 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     if (m.type === 'error') fail('wgsl', 'line ' + m.lineNum + ':' + m.linePos + ' ' + m.message);
   }
 
-  // ── layouts ──
-  const VIS = GPUShaderStage.COMPUTE | GPUShaderStage.FRAGMENT;
-  const bgl0 = device.createBindGroupLayout({ entries: [
-    { binding: 0, visibility: VIS, buffer: { type: 'uniform' } },
-    { binding: 1, visibility: VIS, buffer: { type: 'storage' } },
-    { binding: 2, visibility: VIS, buffer: { type: 'storage' } },
-    { binding: 3, visibility: VIS, buffer: { type: 'storage' } },
-    { binding: 4, visibility: VIS, buffer: { type: 'storage' } },
-    { binding: 5, visibility: VIS, buffer: { type: 'storage' } },
-    { binding: 6, visibility: VIS, buffer: { type: 'storage' } },
-    { binding: 7, visibility: VIS, buffer: { type: 'storage' } },
-    { binding: 8, visibility: VIS, buffer: { type: 'storage' } },
-    { binding: 9, visibility: VIS, buffer: { type: 'storage' } },
-    { binding: 10, visibility: VIS, buffer: { type: 'storage' } },
-    { binding: 11, visibility: VIS, buffer: { type: 'storage' } },
-    { binding: 12, visibility: VIS, buffer: { type: 'storage' } },
-    { binding: 13, visibility: VIS, buffer: { type: 'storage' } },
-    { binding: 14, visibility: VIS, buffer: { type: 'storage' } },
-    { binding: 15, visibility: VIS, buffer: { type: 'storage' } },   // profB (profiler)
-  ]});
-  const bgl1 = device.createBindGroupLayout({ entries: [
-    { binding: 0, visibility: VIS, buffer: { type: 'uniform', hasDynamicOffset: true, minBindingSize: 16 } },
-  ]});
-  const layout = device.createPipelineLayout({ bindGroupLayouts: [bgl0, bgl1] });
-
-  // ── buffers ──
-  const S = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
-  const ubo     = device.createBuffer({ size: 208, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-  const SUBSLOT = JFA_STRIDES.length;        // sub-step indices live after the JFA strides
-  const CJSLOT  = JFA_STRIDES.length + 16;   // coarse-flood passes: stride, source, destination
-  const jbo     = device.createBuffer({ size: 256 * (CJSLOT + JFA_STRIDES.length), usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-  const partBuf = device.createBuffer({ size: cfg.npart * 32, usage: S });
-  const fineBuf = device.createBuffer({ size: FINE_N * 4, usage: S });
-  const fineF   = device.createBuffer({ size: FINE_N * 4, usage: S });
-  const coarse  = device.createBuffer({ size: COARSE_N * 16, usage: S });
-  const glassB  = device.createBuffer({ size: NG * 16, usage: S });
-  const gvol    = device.createBuffer({ size: NG * 2 * 4, usage: S });
-  const waveB   = device.createBuffer({ size: NG * WN * WN * 16, usage: S });
-  const wimp    = device.createBuffer({ size: NG * WN * WN * 2 * 4, usage: S });
-  const caust   = device.createBuffer({ size: CN * CN * 3 * 4, usage: S });
-  const caustF  = device.createBuffer({ size: CN * CN * 3 * 4, usage: S });
-  const pud     = device.createBuffer({ size: PN * PN * 4, usage: S });
-  const pudA    = device.createBuffer({ size: PN * PN * 4, usage: S });
-  device.queue.writeBuffer(pud,  0, new Float32Array(PN * PN));
-  device.queue.writeBuffer(pudA, 0, new Uint32Array(PN * PN));
-  const pudC    = device.createBuffer({ size: PCN * PCN * 16, usage: S });
-  const profB   = device.createBuffer({ size: 64 * 128 * 4, usage: S });
+  // ── buffers: one table, binding = index ──
+  // 0 uniforms (64 = UNIFORM | 8 = COPY_DST); the rest STORAGE | COPY_DST | COPY_SRC = 140.
+  // WebGPU zero-initialises every buffer, and zero is every initial state needed here -
+  // empty glasses, a dry table, no waves, and particles with life 0, which reads as dead.
+  const bufs = [
+    208,                      //  0 uniforms
+    cfg.npart * 32,           //  1 particles
+    FINE_N * 4,               //  2 narrow band, quantised (atomic)
+    FINE_N * 4,               //  3 narrow band, resolved
+    COARSE_N * 16,            //  4 coarse far field, packed for the render
+    NG * 16,                  //  5 glass levels
+    NG * 2 * 4,               //  6 inflow / overflow volumes
+    NG * WN * WN * 16,        //  7 wave field
+    NG * WN * WN * 2 * 4,     //  8 wave and foam impulses
+    CN * CN * 3 * 4,          //  9 photon map
+    CN * CN * 3 * 4,          // 10 photon map, blurred
+    PN * PN * 4,              // 11 puddle depth
+    PN * PN * 4,              // 12 puddle inflow
+    PCN * PCN * 16,           // 13 puddle coarse blocks
+    COARSE_N * 4 * 4,         // 14 occupancy, seed keys, two flood regions
+//#D{
+    64 * 128 * 4,             // 15 profiler banks
+//#D}
+  ].map((size, i) => device.createBuffer({ size, usage: i ? 140 : 72 }));
+//#D{
+  const [, partBuf, , , , glassB, , , , , , , , pudC, , profB] = bufs;
   const profRd  = device.createBuffer({ size: 64 * 128 * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-  const occB    = device.createBuffer({ size: COARSE_N * 4 * 4, usage: S });   // blocks, seed keys, two flood regions
-  device.queue.writeBuffer(pudC, 0, new Float32Array(PCN * PCN * 4));
   const glassRd = device.createBuffer({ size: NG * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-  const pudRd = device.createBuffer({ size: PCN * PCN * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-  const PSAMP = Math.min(cfg.npart, 16384);
-  const partRd = device.createBuffer({ size: PSAMP * 32, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-  device.queue.writeBuffer(glassB, 0, new Float32Array(NG * 4));
-  device.queue.writeBuffer(gvol,   0, new Uint32Array(NG * 2));
-  device.queue.writeBuffer(waveB,  0, new Float32Array(NG * WN * WN * 4));
-  device.queue.writeBuffer(wimp,   0, new Int32Array(NG * WN * WN * 2));
+  const pudRd   = device.createBuffer({ size: PCN * PCN * 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const PSAMP   = Math.min(cfg.npart, 16384);
+  const partRd  = device.createBuffer({ size: PSAMP * 32, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+//#D}
+  // visibility 6 = COMPUTE | FRAGMENT
+  const bgl0 = device.createBindGroupLayout({ entries: bufs.map((_, binding) =>
+    ({ binding, visibility: 6, buffer: { type: binding ? 'storage' : 'uniform' } })) });
+  const bgl1 = device.createBindGroupLayout({ entries: [
+    { binding: 0, visibility: 6, buffer: { type: 'uniform', hasDynamicOffset: true } }] });
+  const layout = device.createPipelineLayout({ bindGroupLayouts: [bgl0, bgl1] });
+  const bg0 = device.createBindGroup({ layout: bgl0, entries: bufs.map((buffer, binding) =>
+    ({ binding, resource: { buffer } })) });
 
-  // particles start dead and stagger in
-  {
-    const init = new Float32Array(cfg.npart * 8);
-    for (let i = 0; i < cfg.npart; i++) init[i * 8 + 3] = -1;   // life
-    device.queue.writeBuffer(partBuf, 0, init);
-  }
-  for (let i = 0; i < JFA_STRIDES.length; i++) {
-    device.queue.writeBuffer(jbo, i * 256, new Float32Array([JFA_STRIDES[i], 0, 0, 0]));
-  }
-  for (let i = 0; i < 16; i++) {
-    device.queue.writeBuffer(jbo, (SUBSLOT + i) * 256, new Float32Array([i, 0, 0, 0]));
-  }
-  // Ping-pong: keys -> R1 -> R2 -> R1 -> R2 -> R1, so with five strides the result lands in
-  // R1, the region liquidDist reads. Regions are offsets into the occupancy buffer.
-  {
-    const KEYS = COARSE_N, R1 = 2 * COARSE_N, R2 = 3 * COARSE_N;
-    for (let i = 0; i < JFA_STRIDES.length; i++) {
-      const src = i === 0 ? KEYS : (i % 2 ? R1 : R2), dst = i % 2 ? R2 : R1;
-      device.queue.writeBuffer(jbo, (CJSLOT + i) * 256, new Float32Array([JFA_STRIDES[i], src, dst, 0]));
-    }
-    console.assert(JFA_STRIDES.length % 2 === 1, 'coarse flood must end in R1');
-  }
-
-  const bg0 = device.createBindGroup({ layout: bgl0, entries: [
-    { binding: 0, resource: { buffer: ubo } },
-    { binding: 1, resource: { buffer: partBuf } },
-    { binding: 2, resource: { buffer: fineBuf } },
-    { binding: 3, resource: { buffer: fineF } },
-    { binding: 4, resource: { buffer: coarse } },
-    { binding: 5, resource: { buffer: glassB } },
-    { binding: 6, resource: { buffer: gvol } },
-    { binding: 7, resource: { buffer: waveB } },
-    { binding: 8, resource: { buffer: wimp } },
-    { binding: 9, resource: { buffer: caust } },
-    { binding: 10, resource: { buffer: caustF } },
-    { binding: 11, resource: { buffer: pud } },
-    { binding: 12, resource: { buffer: pudA } },
-    { binding: 13, resource: { buffer: pudC } },
-    { binding: 14, resource: { buffer: occB } },
-    { binding: 15, resource: { buffer: profB } },
-  ]});
+  // Per-dispatch uniforms, one 256-byte slot each, picked by dynamic offset:
+  // 0..4 puddle flood strides, 5..20 the sim sub-step index (16, so no two sub-steps of a
+  // frame share an RNG stream), 21..25 the coarse flood as [stride, source, destination].
+  // The coarse flood ping-pongs keys -> R1 -> R2 -> R1 -> R2 -> R1, ending in R1, the region
+  // liquidDist reads - which needs an odd number of strides. Regions are offsets into occ.
+  const SUBSLOT = 5, CJSLOT = 21, KEYS = COARSE_N, R1 = 2 * COARSE_N, R2 = 3 * COARSE_N;
+  const jd = new Float32Array(64 * 26);
+  JFA_STRIDES.map((st, i) => {
+    jd[64 * i] = st;
+    jd.set([st, i ? (i % 2 ? R1 : R2) : KEYS, i % 2 ? R2 : R1], 64 * (CJSLOT + i));
+  });
+  for (let i = 0; i < 16; i++) jd[64 * (SUBSLOT + i)] = i;
+  const jbo = device.createBuffer({ size: jd.length * 4, usage: 72 });
+  device.queue.writeBuffer(jbo, 0, jd);
   const bg1 = device.createBindGroup({ layout: bgl1, entries: [
     { binding: 0, resource: { buffer: jbo, size: 16 } },
   ]});
 
-  const comp = n => device.createComputePipeline({ layout, compute: { module, entryPoint: n } });
-  const P = {
-    sim:     comp('simParticles'),
-    clearF:  comp('clearFine'),
-    clearC:  comp('clearCoarse'),
-    scatter: comp('scatterFine'),
-    seed:    comp('seedCoarse'),
-    jfa:     comp('jfaCoarse'),
-    pack:    comp('packCoarse'),
-    resolve: comp('resolveFine'),
-    glass:   comp('glassUpdate'),
-    wave:    comp('waveUpdate'),
-    decay:   comp('causticDecay'),
-    photon:  comp('photons'),
-    cblur:   comp('causticBlur'),
-    puddle:  comp('puddleUpdate'),
-    pudC:    comp('puddleCoarse'),
-    pudJ:    comp('puddleJFA'),
-  };
-  const render = device.createRenderPipeline({
-    layout,
+  const P = {};
+  for (const n of ('simParticles puddleUpdate glassUpdate waveUpdate puddleCoarse puddleJFA ' +
+                   'clearFine clearCoarse scatterFine seedCoarse jfaCoarse packCoarse resolveFine ' +
+                   'causticDecay photons causticBlur').split(' '))
+    P[n] = device.createComputePipeline({ layout, compute: { module, entryPoint: n } });
+  const render = device.createRenderPipeline({ layout,
     vertex:   { module, entryPoint: 'vs' },
     fragment: { module, entryPoint: 'fs', targets: [{ format }] },
-    primitive:{ topology: 'triangle-list' },
   });
 //#D{
   // the same render pipeline with the profiler compiled in
@@ -2056,7 +1998,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     f32[40] = ui.botTilt * Math.PI / 180; f32[41] = ui.botAz * Math.PI / 180;
     f32[42] = ui.bottle ? 1 : 0;
     f32[43] = pudBound[0]; f32[44] = pudBound[1]; f32[45] = pudBound[2]; f32[46] = ui.puddle ? 1 : 0;
-    device.queue.writeBuffer(ubo, 0, f32);
+    device.queue.writeBuffer(bufs[0], 0, f32);
   }
 
   //#D{
@@ -2211,72 +2153,50 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const doProf = !!profReq;
     if (doProf) { enc.clearBuffer(profB); }
 
-    // 1 — particles
-    let cp = enc.beginComputePass({ timestampWrites: ts(0) });
-    cp.setBindGroup(0, bg0); cp.setBindGroup(1, bg1, [0]);
-    // Fixed-step accumulator: the sim must advance at the same rate on a 60 Hz compo
-    // machine as on a 165 Hz monitor. Driving dt off the frame rate made it 2.75x fast here.
-    // Everything that ADVANCES STATE runs per sim step: particles, the table puddle, the
-    // per-glass volume ODE and the wave field. The last three used to sit in the build
-    // pass, which runs once a frame, so the bulk advanced at the FRAME rate while the
-    // particles advanced on the clock. It hid at 60 fps because frames and steps matched;
-    // a seek running 3000 steps in one frame filled exactly one glass and showed it.
-    // The SDF build below is a rendering structure, needs only the final state, and so is
-    // correctly per frame.
+    // One compute pass per group (each timed in the harness). A dispatch is
+    // [entry point, workgroups, uniform slot]; the slot defaults to 0.
+    const pass = (i, list) => {
+      const cp = enc.beginComputePass({ timestampWrites: ts(i) });
+      cp.setBindGroup(0, bg0);
+      for (const [n, w, slot = 0] of list) {
+        cp.setBindGroup(1, bg1, [slot * 256]); cp.setPipeline(P[n]); cp.dispatchWorkgroups(w);
+      }
+      cp.end();
+    };
+
+    // 1 — the simulation. Everything that ADVANCES STATE runs once per sim step, on the
+    // clock: particles, the table puddle, the per-glass volume ODE and the wave field
+    // (three wave sub-steps). The last three used to sit in the per-frame build pass, so
+    // the bulk advanced at the FRAME rate while the particles advanced on the clock; it hid
+    // at 60 fps and showed when a seek ran 3000 steps in one frame and filled one glass.
+    const sim = [];
     for (let k = 0; k < simSteps; k++) {
-      cp.setBindGroup(1, bg1, [(SUBSLOT + (k % 16)) * 256]);
-      cp.setPipeline(P.sim);    cp.dispatchWorkgroups(WG(cfg.npart, 64));
-      cp.setPipeline(P.puddle); cp.dispatchWorkgroups(WG(PN * PN, 256));
-      cp.setPipeline(P.glass);  cp.dispatchWorkgroups(1);
-      cp.setPipeline(P.wave);
-      for (let w = 0; w < 3; w++) { cp.dispatchWorkgroups(WG(NG * WN * WN, 64)); }
+      const sl = SUBSLOT + k % 16, wv = ['waveUpdate', WG(NG * WN * WN, 64), sl];
+      sim.push(['simParticles', WG(cfg.npart, 64), sl], ['puddleUpdate', WG(PN * PN, 256), sl],
+               ['glassUpdate', 1, sl], wv, wv, wv);
     }
-    cp.setBindGroup(1, bg1, [0]);
-    cp.end();
+    pass(0, sim);
 
-    // 2 — build the distance field (ordered dispatches share one pass)
-    cp = enc.beginComputePass({ timestampWrites: ts(1) });
-    cp.setBindGroup(0, bg0); cp.setBindGroup(1, bg1, [0]);
-    cp.setPipeline(P.pudC);    cp.dispatchWorkgroups(WG(PCN * PCN, 64));
-    cp.setPipeline(P.pudJ);
-    for (let k = 0; k < JFA_STRIDES.length; k++) {
-      cp.setBindGroup(1, bg1, [k * 256]);
-      cp.dispatchWorkgroups(WG(PCN * PCN, 64));
-    }
-    cp.setBindGroup(1, bg1, [0]);
-    cp.setPipeline(P.clearF);  cp.dispatchWorkgroups(WG(FINE_N, 512));
-    cp.setPipeline(P.clearC);  cp.dispatchWorkgroups(WG(COARSE_N, 64));
-    cp.setPipeline(P.scatter); cp.dispatchWorkgroups(WG(cfg.npart, 64));
-    cp.setPipeline(P.seed);    cp.dispatchWorkgroups(WG(cfg.npart, 64));
-    cp.setPipeline(P.jfa);
-    for (let i = 0; i < JFA_STRIDES.length; i++) {
-      cp.setBindGroup(1, bg1, [(CJSLOT + i) * 256]);
-      cp.dispatchWorkgroups(WG(COARSE_N, 64));
-    }
-    cp.setBindGroup(1, bg1, [0]);
-    cp.setPipeline(P.pack);    cp.dispatchWorkgroups(WG(COARSE_N, 64));
-    cp.setPipeline(P.resolve); cp.dispatchWorkgroups(WG(FINE_N, 512));
-    cp.end();
+    // 2 — structures for rendering, from the final state, once per frame
+    pass(1, [
+      ['puddleCoarse', WG(PCN * PCN, 64)],
+      ...JFA_STRIDES.map((_, k) => ['puddleJFA', WG(PCN * PCN, 64), k]),
+      ['clearFine', WG(FINE_N, 512)], ['clearCoarse', WG(COARSE_N, 64)],
+      ['scatterFine', WG(cfg.npart, 64)], ['seedCoarse', WG(cfg.npart, 64)],
+      ...JFA_STRIDES.map((_, k) => ['jfaCoarse', WG(COARSE_N, 64), CJSLOT + k]),
+      ['packCoarse', WG(COARSE_N, 64)], ['resolveFine', WG(FINE_N, 512)],
+    ]);
 
-    // 2b — caustics: fade the photon map, then shoot this frame's photons
-    cp = enc.beginComputePass({ timestampWrites: ts(2) });
-    cp.setBindGroup(0, bg0); cp.setBindGroup(1, bg1, [0]);
-    if (!redrawOnly) {           // a redraw keeps the photon map it already has
-      cp.setPipeline(P.decay);  cp.dispatchWorkgroups(WG(CN * CN * 3, 256));
-      cp.setPipeline(P.photon); cp.dispatchWorkgroups(WG(cfg.nphoton, 64));
-      cp.setPipeline(P.cblur);  cp.dispatchWorkgroups(WG(CN * CN, 256));
-    }
-    cp.end();
+    // 2b — caustics: fade the photon map, shoot this frame's photons, blur. A redraw keeps
+    // the photon map it already has.
+    pass(2, redrawOnly ? [] : [['causticDecay', WG(CN * CN * 3, 256)],
+                               ['photons', WG(cfg.nphoton, 64)], ['causticBlur', WG(CN * CN, 256)]]);
 
     // 3 — render
-    const desc = {
-      colorAttachments: [{
-        view: ctx.getCurrentTexture().createView(),
-        clearValue: { r: 0, g: 0, b: 0, a: 1 }, loadOp: 'clear', storeOp: 'store',
-      }],
-    };
-    if (hasTS) desc.timestampWrites = ts(3);
-    const rp = enc.beginRenderPass(desc);
+    const rp = enc.beginRenderPass({
+      colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store' }],
+      timestampWrites: ts(3),
+    });
     rp.setPipeline(render); rp.setBindGroup(0, bg0); rp.setBindGroup(1, bg1, [0]);
     if (doProf) { rp.setPipeline(renderX || renderProf); }   // renderX: a variant may add PROF: 1
     else if (renderX) { rp.setPipeline(renderX); }   // renderX (dev)
