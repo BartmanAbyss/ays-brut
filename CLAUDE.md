@@ -399,6 +399,19 @@ it.** Setup longhand (15 bind-group entries spelled out, zero-fill uploads WebGP
 does, a uniform write per dead field, URL parsing that survived as dead calls) was 842 + 251
 bytes. Tables and generated layouts in the harness itself fixed it with one source of truth.
 
+**GLSL-minifier syntax tricks don't pay in WGSL under brotli - measured.** On the shipped
+payload: `vec3f(0.)` -> `vec3f()` 48 chars shorter, 0 bytes compressed; one-letter
+`alias` for vec2f/3f/4f +18; splatting equal constructor arguments +18; dropping the dot
+on integer float literals -16 at best (unchecked upper bound). Most of Shader Minifier's
+other transforms have no WGSL form (braces are mandatory, no comma operator, no ternary
+statements, no overloading). Don't spend time here.
+
+**Roadroller (context mixing) beat brotli by 2.1%** on the whole payload - shader as a
+template string inside the JS, packed with `roadroller` at its default level, then served
+with brotli as now: 7 781 vs 7 950, its decoder included. -O2 untested. Costs: a third-
+party tool in the build, a decode at startup, and our packer search scores for brotli, not
+for it. Worth revisiting at the very end, when every byte counts.
+
 **Never rename a member access.** The substitution uses a `(?<![.\w])` guard so a rename of
 `pos` cannot touch `p.pos`.
 
