@@ -5,8 +5,10 @@ entirely by SDF raymarching. Target: an **8192-byte PC intro** for **ComParade 2
 (Emmering/Munich, 6–8 Nov 2026), packaged the INCENDIUM way — WebGPU + a tiny PowerShell
 dropper — not a native exe.
 
-**Current state: dev harness only.** The renderer and simulation work and look right. None
-of the size-coding exists yet: no minification, no packing, no music. See *Roadmap*.
+**Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline and the
+click-to-start screen work, and `build/intro.cmd` is **8 083 bytes, 109 under the 8 192
+budget**. Missing: the song and its player (to be composed by hand), any text, and tier2
+is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
 ---
 
@@ -29,7 +31,11 @@ serve it instead:
 python -m http.server 8787 --bind 127.0.0.1
 ```
 
-Requires a Chromium-based browser with WebGPU. Developed against an **RTX 4070**.
+Requires a browser with WebGPU: Chrome, Edge and Firefox all run both the harness and the
+release (*Browsers*, below). Developed against an **RTX 4070**.
+
+The release is `build/intro.cmd` (see *Build*). Double-click it: it serves itself on
+http://localhost:8044/ and opens the default browser; click the page to start.
 
 ---
 
@@ -94,8 +100,9 @@ case alone would end a three-minute intro more than a minute behind the music.
 
 A frame that runs long leaves a deficit, and the deficit is **kept** and worked off over the
 following frames, so a hitch costs nothing in the end. Catch-up is capped at 16 steps per
-frame because the sub-step index reaches the shader through 16 uniform slots and reusing one
-would make two substeps share an RNG stream — the bug that used to thin the pour. Past
+frame because the sub-step index wraps at 16 (it reaches the shader as the dispatch's grid
+height), and reusing one would make two substeps share an RNG stream — the bug that used
+to thin the pour. Past
 `LAG_STEPS` (0.5 s) behind, the missed steps are given up rather than chased: in a demo,
 staying with the music beats fluid continuity. Those events are counted in `probe.resyncs`
 so the cost is visible rather than silent.
@@ -115,6 +122,10 @@ Measured with everything in, at 1920×1080 on the heaviest shot:
 | sim clock vs wall | 0.9979 |
 | drift | one step, bounded |
 | resyncs | 0 |
+
+In the release (and the harness with `?gate=1`) the show clock is the **audio** clock:
+the music's `currentTime` decides how many steps have happened, so the picture follows the
+music rather than the wall. See *Start screen and music hookup*.
 
 `?det=1` (implied by `?still=1`) swaps the wall clock for a fixed one so that frame N is
 always step N. That makes a run reproducible on any machine, which is what A/B comparisons
@@ -163,22 +174,27 @@ recording it as a point makes a pour read as a string of frozen beads.
   atomically splatted into a 768² table map, blurred, with temporal decay. These carry the
   *direct* light too, so shadows come free — and `cgain = 0` leaves the table ambient-only.
 - Bubbles are carved out of the liquid SDF as real geometry, so light refracts through each.
-- Reflections trace a real short ray when Fresnel is strong, rather than sampling the
-  environment — otherwise near-grazing liquid mirrors the sky instead of its surroundings.
+- Reflections trace a real ray only off the bulk champagne surface (`rtrace` 1), where
+  near-grazing liquid would otherwise mirror the sky as an opaque disc. Glass and drops use
+  the environment lookup (*The traced reflection*).
 
 ### Pass graph
 
 ```
 sim        N steps per frame, N from the clock — everything that advances state:
-           particles → puddle → glassUpdate → waveUpdate ×3
+           simParticles → puddleUpdate (its first 14 threads: the glass volumes) → waveUpdate ×3
 build      once per frame — a rendering structure, needs only the final state:
-           puddleCoarse → puddleJFA ×5
-           clearFine → clearCoarse → scatterFine → seedCoarse → jfaCoarse ×5 → resolveFine
+           puddleCoarse (tallest film per block)
+           clearFine (+ coarse clear) → scatterFine (+ far-field seeds) → jfaCoarse ×5
+           → resolveFine (+ packs the far field for the render)
 photon     causticDecay → photons → causticBlur
-render     camera raymarch + post
+render     camera raymarch + post (one full-screen triangle)
 ```
 
-The split matters: `puddle`, `glassUpdate` and `waveUpdate` used to live in `build` and so
+Eleven compute entry points. Each dispatch passes its small index (sub-step, flood pass) as
+the height of its grid, `num_workgroups.y - 1`, so no per-dispatch uniforms exist.
+
+The split matters: the puddle, glass volumes and waves used to live in `build` and so
 advanced once per *frame* while the particles advanced on the clock. See *Timing*.
 
 ### Grids
@@ -189,7 +205,7 @@ advanced once per *frame* while the particles advanced on the clock. See *Timing
 | Coarse nearest-particle (JFA) | 32³ | 19.4 mm |
 | Caustic map | 768², ±0.55 m | 1.43 mm |
 | Table puddle | 384², ±0.55 m | 2.86 mm |
-| Puddle blocks (JFA) | 48² | 22.9 mm |
+| Puddle blocks (tallest film, for the bound) | 48² | 22.9 mm |
 | Per-glass wave + foam | 32² × 14 | — |
 
 Domain: `(-0.31, -0.015, -0.31)`, 0.62 m cube.
@@ -255,6 +271,9 @@ is at its densest, or take the `bounces` trade on that shot only (about 1.1 ms p
 visible on the rim glints).
 
 ### What each lever actually buys
+
+> Historical: measured before the profiler work, at fill 88, so the absolute numbers are
+> superseded by *Where it stands* above. What it shows about which knobs matter still holds.
 
 Measured on `tier2` at fill 88, the worst shot. Baseline render 22.61, total 26.48:
 
@@ -460,16 +479,20 @@ judges such changes only together with *where* the pixels are (`__diff` shows th
 Heavy tier2 now: **render ~18.0, total ~22.1** (was 24.8 / 29.9 when this profile started).
 Still ~3 ms over the 19 ms target.
 
-### WebGPU limits that must be requested
+### WebGPU limits: none requested
 
-Several defaults were within a few percent of biting:
+The release asks for no features and no limits, so it runs on any WebGPU device at the
+defaults. That took three changes, since several defaults were close to biting:
 
-- `maxStorageBuffersPerShaderStage: 16` and `maxStorageBuffersInFragmentStage: 16` — we bind
-  15 in dev (the profiler's counter banks are the 15th), 14 in the release.
-- `maxComputeWorkgroupSizeX: 512`, `maxComputeInvocationsPerWorkgroup: 512` — 320³/256 would
-  be 65 536 workgroups, one over the per-dimension cap, so the clear/resolve passes are
-  512-wide.
-- 320³ × 4 B = 125 MiB per buffer, just under the 128 MiB default binding size.
+- **Storage buffers:** the default is 8 per stage. The storage is merged by element type
+  into 6 bindings (`parts`, `fine`, `fineF`, `atom`, `vecs`, `flts`) at fixed offsets;
+  the dev build adds the profiler's counter bank as a 7th.
+- **Workgroup size:** the default caps it at 256. 320³/256 would be 128 000 workgroups,
+  over the 65 535 per-dimension cap, so `clearFine` and `resolveFine` handle two cells per
+  thread.
+- **Binding size:** 320³ × 4 B = 125 MiB per buffer, just under the 128 MiB default.
+
+The dev harness requests `timestamp-query` when the adapter has it, for the per-pass times.
 
 ---
 
@@ -494,7 +517,9 @@ bottle, botTilt, botAz, pourWander, wanderSpd, shutter, bounces, simSpeed, expo,
 from a URL, and `&pause=1` with them lands on an exact frame for judging a shot.
 
 Useful URL params beyond the above: `w`, `h` (explicit resolution, letterboxed), `t` (fixed
-time), `still`, `warm`, `det`, `steps`, `npart`, `nphoton`, `selftest`.
+time), `still`, `warm`, `det`, `steps`, `npart`, `nphoton`, `parts`, `selftest`, and `gate`
+(the release's start screen and audio clock) with `tick` (a click every half second, to
+check sync).
 
 `gridEnv` replaces the environment with a lat-long UV test grid (green horizon, magenta
 poles, orange dot at the key light) — it makes it obvious which direction a reflection or
@@ -523,43 +548,34 @@ component evaluated twice to rank what it costs (`__xc(0)` restores);
 variant. `const a = await __grab()` reads the frame on screen; `__diff(a, b)` reports the
 share of pixels that changed by more than 4, 16 and 48 levels and overlays |a − b| × 8 on
 the canvas (`__diff()` clears it) — on a frozen frame, two grabs of the same state differ
-by exactly 0, so this is how a look-changing optimisation gets judged. All of it is
-dev-only and absent from the release.
+by exactly 0, so this is how a look-changing optimisation gets judged.
+`await __saveRef(name)` / `await __loadRef(name)` keep a grab in IndexedDB, so a before/after
+comparison survives the reload between them. `__pause()` / `__resume()` stop and restart the
+loop - pause after every check, or it keeps the GPU busy. All of it is dev-only and absent
+from the release.
 
 ---
 
 ## Roadmap
 
-Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, puddle, bottle, lighting.
+Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, puddle, bottle,
+lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
+screen with fullscreen and the audio clock. `intro.cmd` is 8 083 bytes.
 
 Next:
-1. **Optimisation pass** — still open. The occupancy skip is in and bought 0.9 ms on the
-   worst shot, not the 8 predicted; see *What each lever actually buys* for why. `tier2` is
-   25.5 ms against ~19. Untried: raising the `tp < 0.02` throughput cutoff, and keeping the
-   timeline off the shots that fail.
-2. Bloom.
-3. Fluid inside the bottle (it is an empty shell today).
-4. Camera and timeline.
-5. Music — must be **human-composed**; the party bans prompt-based music.
-6. The 8192-byte squeeze: template long names to one letter, Brotli, then a search over
-   statement orderings scored by compressed size (INCENDIUM's packer, derived from Pakettic,
-   is MIT). A ~324-byte dropper leaves ~7870 bytes of payload.
+1. **Music** — must be **human-composed**; the party bans prompt-based music. It goes in
+   through `song(L, R, sr)`, and its player has to fit in what is left: 109 bytes today.
+   How big it is decides whether features are cut (*Feature cuts, measured*).
+2. **Text**, if any (credits, title), from the same budget.
+3. **tier2** — ~22 ms against ~19 in its heaviest state (*Where it stands*). Options: cut
+   there, don't hold on it while the spill is densest, or take `bounces` down on that shot.
+4. **Render size** — the release renders at the screen's size. At the compo's 1920×1080
+   that is the budget; on a larger monitor it is proportionally slower.
+5. Timeline polish against the finished music.
+6. Late, when every byte counts: design-constant rounding (~-40 to -90), Roadroller
+   (-217, *Minifying* in CLAUDE.md), a final packer search.
 
-   Measured baseline — today's harness with comments and indentation stripped, Brotli q11:
-
-   | | raw | brotli |
-   |---|---|---|
-   | WGSL | 34.2 KB | 8 820 |
-   | JS | 29.6 KB | 8 726 |
-   | **both** | **63.8 KB** | **17 438** |
-
-   Stripping alone is a 3.7:1 ratio and lands ~2.2x over budget. The rest has to come from
-   deleting the debug harness — most of that JS, and a good share of the WGSL, is panel,
-   probe, selftest and nine isolation views — and from minification proper, where the
-   identifiers being long and descriptive works in our favour, since renaming feeds the
-   compressor as well as shrinking the source. INCENDIUM reached ~10:1 end-to-end on a
-   comparable 38.9 KB (24 KB WGSL + 10 KB JS + 4.9 KB of note data in ~3770 bytes), and
-   NuSan's *Drifting Shore* fit ~22.6 KB in 4096, so the ~5:1 that 8 KB asks for has room.
+Not planned for now: bloom, fluid inside the bottle (it is an empty shell).
 
 Open questions for the organisers: whether a browser/WebGPU entry is allowed, and the
 submission deadline.
@@ -577,9 +593,17 @@ python build/build.py
 ```
 
 One source of truth: `dev/champagne.html`. The build strips the harness, inlines the values
-the debug panel used to supply, minifies, and packs the result into `build/intro.html`, a
-self-extracting page that inflates itself with `DecompressionStream`. It needs Python with
-`brotli`, and Node for `terser`.
+the debug panel used to supply, minifies, packs, and writes:
+
+| file | what |
+|---|---|
+| `build/intro.cmd` | **the deliverable**: the dropper header plus the brotli payload |
+| `build/intro.html` | a local test copy that inflates itself (base64 + deflate), ~50% bigger - not the entry |
+| `build/min.wgsl`, `build/min.js` | what ships, as packed |
+| `build/min.pretty.wgsl`, `build/min.pretty.js` | the same, re-indented to read |
+
+It needs Python with `brotli`, and Node for `terser` and `wgslender` (the build runs
+without wgslender, ~290 bytes heavier).
 
 Dev-only code is bracketed with `//#D{` / `//#D}` in both the WGSL and the JS. Everything
 else goes by rule, so the harness cannot quietly end up in the release:
@@ -590,7 +614,8 @@ else goes by rule, so the harness cannot quietly end up in the release:
 - `cfg.*` and `ui.*` are replaced with literals — `ui.*` read straight out of the panel's
   own `SPEC` table, so the release cannot drift from the defaults you tuned by hand. The
   build asserts that none survive.
-- WGSL identifiers are renamed, except entry points and anything quoted in the JS.
+- WGSL identifiers are renamed by the packer (below), except entry points and anything
+  quoted in the JS; compute entry points get short names (`Z0`...) in both languages.
 
 ### What minification is actually worth
 
@@ -649,7 +674,8 @@ no prebuilt releases, cargo required, and its own README recommends wgslender in
 
 ### Folding what the release never varies
 
-29 of the 47 uniform slots are constants in the release: the debug toggles, `view`,
+When this was written, 29 of the 47 uniform slots were constants in the release (the struct
+has since been cut to its 9 live fields, the rest dev-only): the debug toggles, `view`,
 bounce and step counts, light angles, bottle pose. The build inlines them (39 references)
 as the shortest literal that rounds to the same f32 the JS would have written, then
 evaluates the comparisons that leaves behind — `if (0. > 0.5)` and friends — and deletes
@@ -673,8 +699,8 @@ module-scope declarations and treats packing as a search over two kinds of move,
 semantics-preserving by construction:
 
 - **order** — module-scope declarations may appear in any order in WGSL, so items shuffle
-  freely; so do the four parts of the page (a module script is deferred, so it can sit
-  ahead of the shader and canvas it reads);
+  freely (the page around them is now fixed: a canvas, one script, the shader a template
+  string at its end);
 - **names** — which candidate name goes to which of 119 globals, 162 locals and 52 struct
   fields. Fields live in their own namespace (`p.pos` vs a local `pos` never collide), and
   a local may take the name of any global its function does not touch, which is the
@@ -703,7 +729,8 @@ new falls in where the default would put it. Re-run the search after big shader 
 python build/pack.py --rounds 40 --per-round 300
 ```
 
-It only saves when it beats the stored score.
+It only saves when it beats the stored score for the same input. The figures above are
+from its first run; the latest, 120 rounds, is in *Non-feature pass*.
 
 **What limits it.** One evaluation is 21 ms: brotli 17.1 ms (81%), rendering the candidate
 in Python 3.9 ms (19%). So it is brotli-bound, and the Python could at best buy back a
@@ -714,8 +741,12 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-24 Oct 2026, after the lossless pass, the core simplifications and the non-feature pass
-below, and a 120-round packer search on the result.
+**`intro.cmd` is 8 083 bytes (25 Oct 2026), 109 under 8 192**: the breakdown below
+(7 967), plus the start screen and music hookup (+116). The song, its player and any text
+still have to fit in those 109 bytes, or features get cut.
+
+The breakdown, 24 Oct 2026, after the lossless pass, the core simplifications and the
+non-feature pass below, and a 120-round packer search on the result:
 
 | Stage | WGSL | JS |
 |---|---|---|
@@ -732,9 +763,7 @@ below, and a 120-round packer search on the result.
 | dropper header | 310 |
 | **`intro.cmd`, the deliverable** | **7 967** |
 
-**7 967 against 8 192: 225 to spare**, before the click-to-start screen, the music player,
-the song and any text. How much those need decides whether any feature cuts are needed
-(*Feature cuts, measured*, below).
+That was 225 to spare before the click-to-start screen, which took 116 of them.
 
 #### Start screen and music hookup: 7 967 -> 8 083
 
@@ -892,25 +921,19 @@ Worth 1 050 bytes over the deflate version, for a header that came out *smaller*
 
 ### The dropper
 
-`intro.cmd` is a batch line that hands itself to PowerShell, which reads its own file,
-inflates everything past a fixed offset and opens the result. Because the dropper inflates,
-the payload sits in the file as **raw bytes** — no base64, no string escaping, no encoding
-overhead at all. The offset is written into the header and padded to a fixed width, so the
-digit count cannot move what it points at.
+`intro.cmd` is one batch line that hands itself to PowerShell (310 bytes). PowerShell
+reads its own file, starts an `HttpListener` on http://localhost:8044/, opens that URL in
+the default browser and answers the one request with everything past a fixed offset, sent
+as `text/html` with `Content-Encoding: br`. The payload sits in the file as **raw brotli
+bytes** — no base64, no escaping. The offset is written into the header; the build finds
+the value consistent with its own digit count, so the number cannot move what it points
+at. Every golfing choice is commented in `build.py`.
 
-Verified end to end: running `intro.cmd` writes a file byte-identical to the build's payload
-and the extracted page renders with no errors. It inflates rather than serves, so it is a
-deflate dropper; see above for why serving would be better. `intro.html` still comes out for quick
-browser testing, but it carries base64 and reads about 30% too big; the deliverable is the
-`.cmd`.
+Verified end to end: Chrome, Edge and Firefox decode it over plain http://localhost and
+render with a clean console (*Browsers*).
 
-The remaining levers, largest first:
-
-1. **WGSL local names.** Only globals are renamed today. Locals are most of the identifiers.
-2. **Dead branches.** `view`, `gridEnv`, `noliq` and the feature toggles are uniforms the
-   release never varies; a constant-folding pass would delete whole code paths.
-3. **The packer.** INCENDIUM's search over statement orderings, scored by compressed size.
-4. The occupancy skip, which buys 0.9 ms and costs bytes — a fair trade to reverse at the end.
+One lever left on the table: the occupancy skip buys 0.9 ms and costs bytes — a fair trade
+to reverse at the end if bytes are short.
 
 ---
 

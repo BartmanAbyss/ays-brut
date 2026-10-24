@@ -2050,9 +2050,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const ffNow = ffSteps; ffSteps = 0;
     clockT += ffNow * SIM_DT;
 
-    // 16 is the steady-state ceiling: the sub-step index reaches the shader through 16
-    // uniform slots, and reusing one would make two substeps share an RNG stream - the
-    // bug that used to thin the pour whenever a frame ran long.
+    // 16 is the steady-state ceiling: the sub-step index wraps at 16 (it reaches the shader
+    // as the dispatch's grid height), and reusing one would make two substeps share an RNG
+    // stream - the bug that used to thin the pour whenever a frame ran long.
     const burst = burstSteps; burstSteps = 0;
     const want = Math.floor(clockT / SIM_DT) - simStep;
     const simSteps = redrawOnly ? 0 : Math.max(0, Math.min(16 + ffNow + burst, want));

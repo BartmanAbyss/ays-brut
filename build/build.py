@@ -1,11 +1,13 @@
 """Build the release intro from the dev harness.
 
 One source of truth: dev/champagne.html. This strips the harness, inlines the control
-values the panel used to supply, minifies, and packs the result into a self-extracting
-HTML that inflates itself with DecompressionStream.
+values the panel used to supply, minifies, packs, and writes the dropper.
 
 Run:  python build/build.py
-Out:  build/intro.html   (runnable)   and a size report on stdout.
+Out:  build/intro.cmd    the deliverable: a dropper that serves its own brotli payload
+      build/intro.html   a local test copy (base64 + deflate, inflates itself) - not the entry
+      build/min.*        what ships, packed and prettified
+      and a size report on stdout.
 """
 import io, math, os, re, struct, subprocess, sys, zlib
 
@@ -647,13 +649,7 @@ def main():
     print('intro.html (runnable)  %8d' % len(loader.encode()))
     print()
     budget = 8192
-    drop = 324
-    print('budget %d, dropper ~%d, payload allowance %d' % (budget, drop, budget - drop))
-    if br:
-        print('brotli + dropper       %8d   %s' % (len(br) + drop,
-              'UNDER' if len(br) + drop <= budget else 'OVER by %d' % (len(br) + drop - budget)))
-    print('self-extracting html   %8d   %s' % (len(loader.encode()),
-          'UNDER' if len(loader.encode()) <= budget else 'OVER by %d' % (len(loader.encode()) - budget)))
+    print('budget %d, dropper %d, payload allowance %d' % (budget, off, budget - off))
     print('intro.cmd              %8d   %s' % (len(cmd),
           'UNDER' if len(cmd) <= budget else 'OVER by %d' % (len(cmd) - budget)))
 

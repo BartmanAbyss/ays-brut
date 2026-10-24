@@ -365,8 +365,8 @@ its analysis (`--no-mangle --no-whitespace`) and keeps our naming: 287 bytes bet
 either alone. `--no-whitespace` is required - globals are found with a line-anchored
 pattern that a one-line file defeats. Its validator also rejects our `atomicAdd` calls as
 `@must_use` where Dawn accepts them, so `wgslender validate` reports errors on a shader
-that compiles and runs. Re-check all 17 entry points survive tree-shaking after adding a
-compute pass.
+that compiles and runs. Re-check all 13 entry points (11 compute, `vs`, `fs`) survive tree-shaking after adding
+a compute pass.
 
 **wgslender tree-shakes; it does not constant-fold.** Inlining the release uniforms alone
 made the brotli 13 bytes worse. The build's own `fold_branches` evaluates the literal
@@ -439,8 +439,9 @@ search scores for brotli, not for it. Worth adopting at the very end, when every
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 310 bytes. `intro.cmd` is **7 967** (24 Oct 2026) with no
-  start screen, music player, song or text yet; to leave them room, what exists must reach
+  stale. Our dropper header is 310 bytes. `intro.cmd` is **8 083** (25 Oct 2026), 109
+  under, with the start screen in but no music player, song or text yet; to leave them
+  room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
   README (*Where it lands today*) has the size map by feature and function.
 - Music must be composed by the user. The party bans prompt-based music, requires full
