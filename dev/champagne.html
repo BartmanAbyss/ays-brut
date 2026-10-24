@@ -1900,7 +1900,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       't     ' + probe.time.toFixed(2) + ' s' + (cfg.t !== null ? ' (fixed)' : '') + (cfg.det ? '  det' : '') + '\n' +
       (ui.show ? 'show  ' + probe.showT.toFixed(2) + ' / ' + SHOW_END +
         '  shot ' + probe.shot + String.fromCharCode(10) : '') +
-      'step  ' + probe.step + '   drift ' + (probe.drift * 1000).toFixed(1) + ' ms' +
+      'step  ' + probe.step + '  x' + probe.frameSteps +
+        '   drift ' + (probe.drift * 1000).toFixed(1) + ' ms' +
         (probe.resyncs ? '   resync ' + probe.resyncs : '') + String.fromCharCode(10) +
       (probe.adapter?.vendor ?? '?') + ' / ' + (probe.adapter?.architecture ?? '?') +
       (errors.length ? '\nERRORS ' + errors.length : '');
