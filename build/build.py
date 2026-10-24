@@ -430,6 +430,51 @@ def minify_wgsl(w, js=''):
     return w.strip()
 
 
+def pretty_wgsl(w):
+    """Shipped WGSL laid out for reading: a line per statement, indented by brace depth. The
+    names stay the packer's - this shows what ships, not the source."""
+    out, ind, paren, line = [], 0, 0, ''
+    def flush():
+        nonlocal line
+        if line.strip():
+            out.append('  ' * ind + line.strip())
+        line = ''
+    for ch in w:
+        if ch == '(':
+            paren += 1
+        elif ch == ')':
+            paren -= 1
+        if ch == '{' and paren == 0:
+            line += ' {'; flush(); ind += 1
+        elif ch == '}' and paren == 0:
+            flush(); ind = max(ind - 1, 0); line = '}'; flush()
+            if ind == 0:
+                out.append('')
+        elif ch == ';' and paren == 0:
+            line += ';'; flush()
+        else:
+            line += ch
+    flush()
+    return '\n'.join(out) + '\n'
+
+
+def pretty_js(js):
+    """Shipped JS beautified by terser (no compression, no renaming), for reading only."""
+    tmp = os.path.join(ROOT, '_pretty.js')
+    try:
+        io.open(tmp, 'wb').write(js.encode())
+        r = subprocess.run('npx --yes terser "%s" --format beautify=true --module' % tmp,
+                           capture_output=True, timeout=300, shell=True)
+        if r.returncode == 0 and r.stdout:
+            return r.stdout.decode()
+    except Exception:
+        pass
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+    return js.replace(';', ';\n')
+
+
 def minify_js(js):
     tmp = os.path.join(ROOT, '_min.js')
     try:
@@ -534,6 +579,9 @@ def main():
     # keep the intermediates: a broken shader is unreadable from the packed page
     io.open(os.path.join(ROOT, 'min.wgsl'), 'wb').write(wmin.encode())
     io.open(os.path.join(ROOT, 'min.js'), 'wb').write(jmin.encode())
+    # ...and readable copies of exactly what ships, for reading only (never packed)
+    io.open(os.path.join(ROOT, 'min.pretty.wgsl'), 'wb').write(pretty_wgsl(wmin).encode())
+    io.open(os.path.join(ROOT, 'min.pretty.js'), 'wb').write(pretty_js(jmin).encode())
 
     pb = pack.assemble(wmin, jmin, parts)
     payload = pb.decode()

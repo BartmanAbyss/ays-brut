@@ -21,3 +21,4 @@ build/wl_*.wgsl
 build/combo*
 build/err.txt
 build/search.log
+build/min.pretty.*
