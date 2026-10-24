@@ -278,6 +278,11 @@ held the old document in its back-cache. Commit before structural edits.
 When patching with a script, anchor on unique strings and assert the match count. Replacing
 between two `str.index` results will happily swallow everything in between.
 
+**Write regex-bearing patches as script FILES, not heredocs or `python -c`.** Twice a
+`\b` or `\1` came through a shell layer as a literal backspace or \x01 byte: the pattern
+silently matched nothing, and in one case a replacement wrote control bytes into the
+build's own output. Afterwards, check the file for bytes below 0x20 other than newline/tab.
+
 ## Building
 
 `python build/build.py` produces `build/intro.html`. Dev-only code sits between `//#D{` and
@@ -413,7 +418,7 @@ bytes. Tables and generated layouts in the harness itself fixed it with one sour
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 371 bytes. `intro.cmd` is **8 696** (24 Oct 2026) with no
+  stale. Our dropper header is 371 bytes. `intro.cmd` is **8 333** (24 Oct 2026) with no
   start screen, music player, song or text yet; to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
   README (*Where it lands today*) has the size map by feature and function.

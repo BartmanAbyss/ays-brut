@@ -714,7 +714,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-24 Oct 2026, after the lossless size pass below and a fresh packer search on its result.
+24 Oct 2026, after the lossless size pass and the core simplifications below, and a fresh
+packer search on the result.
 
 | Stage | WGSL | JS |
 |---|---|---|
@@ -727,15 +728,50 @@ smarter evaluations, not faster ones.
 | Packed | bytes |
 |---|---|
 | payload, uncompressed | 24 379 |
-| brotli q11 (searched state) | 8 325 |
+| brotli q11 (searched state) | 7 962 |
 | dropper header | 371 |
-| **`intro.cmd`, the deliverable** | **8 696** |
+| **`intro.cmd`, the deliverable** | **8 333** |
 
-**8 696 against 8 192: over by 504**, before the click-to-start screen, the music player,
-the song and any text. Those need room too, so the target for what exists now is about
-**5.8 KB** - another ~2.6 KB of brotli output, which has to come from features (cut or
-simplified), not from packing: the search was still finding about a byte a round when it
-stopped. The size map below says where it is.
+**8 333 against 8 192: over by 141**, before the click-to-start screen, the music player,
+the song and any text. Those need room too; how much decides which feature cuts are needed
+(*Feature cuts, measured*, below).
+
+#### Core simplifications: 8 696 -> 8 333
+
+Default packer state 8 651 -> 8 343 (-308), shipped -363 after re-searching:
+
+| Change | bytes | picture |
+|---|---|---|
+| f32 literals without exponent cruft (`10.` not `1e+01`), peephole for folding leftovers | -27 | exact |
+| dev-only bookkeeping in `fs` (step / TIR counts, first-hit normal) fenced | -40 | exact |
+| one wave fetch for height and foam; IOR/absorption tables; `marchS` returns a vec3; vec4 blurred photon texels; one-loop puddle blocks; small dead stores | -49 | exact |
+| the puddle's distance flood retired: a block whose neighbourhood is dry is at least a block from wet table, which is all the bound needs | -183 | thin outline shifts at glass edges, frame indistinguishable |
+| glass levels updated by the first threads of the puddle step | -10 | exact |
+
+What is left is the core itself: the particle sim (~720), `fs` (~520), the scatter, the
+coupe, the spray lookup. The remaining exact wins are tens of bytes each - the same
+lesson as the trace loops: brotli already shares what repeats, so only work that goes away
+pays.
+
+#### Feature cuts, measured
+
+Each measured as the real edit - shader code, call sites, kernels and dispatches removed -
+against the packer's default state, before the core pass above (the puddle's share is
+~180 smaller now that its flood is gone). Bundles add up almost linearly.
+
+| Option | saves | what it does to the look |
+|---|---|---|
+| puddle | 707 | 1.3% of pixels from above, <0.5% elsewhere: a few glints by the tower base |
+| photon lighting -> analytic spot | 589 | the lit disc stays; the tower's shadow and the caustic glints go |
+| waves + foam | 447 | every champagne surface becomes a flat mirror |
+| bottle removed | 355 | the stream pours out of thin air |
+| bokeh lights | 176 | the light discs behind the tower and their reflections go |
+| bottle, plain profile | 168 | no lip, punt, neck taper or heel bevel; hard to see at pouring distance |
+| foam only | 134 | subtle: the cream texture calms |
+| bubbles | 80 | not visible at tier2 distance |
+| traced reflection | 13 | now shares the main trace code - not worth it |
+
+Bundles: puddle + bokeh + bubbles ~960; + waves/foam + plain bottle 1 573; + spot 2 158.
 
 The packer search (`python build/pack.py --rounds 40 --per-round 300`, ~8 minutes on 32
 threads) took this shader from 8 637 to 8 325: worth re-running after any big edit, and
