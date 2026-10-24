@@ -336,6 +336,12 @@ fn sdCyl(p: vec3f, r: f32, y0: f32, y1: f32) -> f32 {
   return min(max(d.x, d.y), 0.0) + length(max(d, vec2f(0.0)));
 }
 fn sdCoupe(p: vec3f) -> f32 {
+  // Bounding cylinder first. It is a lower bound on the distance to anything this coupe can
+  // be - safe for sphere tracing, a step can only get shorter - and the exact SDF is only
+  // needed within a few mm of it. sdTower evaluates three coupes per sample and a point is
+  // usually far from at least two of them: the tiers are 17 cm apart.
+  let bnd = max(length(p.xz) - (RIM_R + 0.002), max(-p.y - 0.002, p.y - (RIM_Y + 0.002)));
+  if (bnd > 0.004) { return bnd; }
   // bowl: a spherical cap shell, cut at the rim and thinned towards it
   var bowl = abs(length(p - vec3f(0.0, SPH_CY, 0.0)) - SPH_R) - GLASS_T;
   bowl = max(bowl, p.y - RIM_Y);
@@ -350,8 +356,12 @@ fn sdCoupe(p: vec3f) -> f32 {
   // up the plain stem, so the long straight part marches at full speed.
   let fr = length(p.xz);
   let ft = clamp((p.y - 0.0030) / FLARE_H, 0.0, 1.0);
-  let sr = STEM_R + (FLARE_R - STEM_R) * pow(1.0 - ft, 2.5);
-  let fk = 2.5 * (FLARE_R - STEM_R) / FLARE_H * pow(1.0 - ft, 1.5);
+  // x^2.5 and x^1.5 as products with one sqrt: pow() is exp(log()) and sdCoupe runs 3-4
+  // times per distance evaluation, millions of times a frame
+  let fx = 1.0 - ft;
+  let fq = fx * sqrt(fx);
+  let sr = STEM_R + (FLARE_R - STEM_R) * fx * fq;
+  let fk = 2.5 * (FLARE_R - STEM_R) / FLARE_H * fq;
   let stem = max(max((fr - sr) / sqrt(1.0 + fk * fk), p.y - (BOWL_BOT + 0.005)), -p.y);
   let knuc = length((p - vec3f(0.0, BOWL_BOT + 0.0045, 0.0)) * vec3f(1.0, 0.62, 1.0)) - 0.0080;
   // Foot: a thin plate, 2.2 mm at the rim rising to 4.4 mm at the centre, flat underneath
@@ -1245,11 +1255,14 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
     // full marches per pixel, at two bounces, on every surface past ~53 degrees. Measured on
     // the pour shot it was 41% of the render pass. It exists for one artefact: the
     // champagne's free surface, seen from air near grazing, mirroring the sky as an opaque
-    // disc. So by default it runs only there (rtrace 1): air meeting the BULK liquid, not a
-    // droplet - a 2 mm drop mirroring the environment is fine, and the spill curtain is
-    // thousands of them. rtrace 2 traces glass too, as it used to, kept for A/B.
-    let wantTrace = (u.rtrace > 1.5) ||
-                    (u.rtrace > 0.5 && med == 0 && medA == 2 && abs(bulkSDF(hp)) < 0.0006);
+    // disc. So by default (rtrace 1) it runs where it is visible as a reflection: air
+    // meeting the bulk liquid - including a 4 mm zone above it, where the pour lands and
+    // drops merge into the surface as a dimple - and air meeting the BOTTLE, one large
+    // glossy surface whose reflections read. Not drops in flight (a 2 mm drop mirroring the
+    // environment is fine, and the spill curtain is thousands of them) and not the coupes.
+    // rtrace 2 traces everything, as it used to, kept for A/B.
+    let wantTrace = (u.rtrace > 1.5) || (u.rtrace > 0.5 && med == 0 &&
+                    ((medA == 2 && abs(bulkSDF(hp)) < 0.004) || medA == 4));
     if (wantTrace && b < 2 && F > 0.05) { rcol = reflColour(hp + rdir * SURF_EPS, rdir, med); }
     acc += tp * F * rcol * u.refl;
 
@@ -2079,7 +2092,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     lightAz: 'Key light azimuth in degrees: swings the light around the tower. Moves the specular, the shadows and the caustics together.',
     lightEl: 'Key light elevation in degrees above the horizon. Low is raking and dramatic, high is overhead.',
     gridEnv: 'Swap the environment for a lat-long UV test grid: green horizon, magenta poles, orange dot at the key light. Shows which direction a reflection or refraction samples.',
-    rtrace: 'Traced reflections. 0 = environment lookup only (cheapest; near-grazing champagne turns into a flat bright disc). 1 = trace only where air meets the champagne surface, the case that needs it. 2 = trace glass reflections too - how it used to be, and on the pour shot about 40% of the render pass.',
+    rtrace: 'Traced reflections. 0 = environment lookup only (cheapest; near-grazing champagne turns into a flat bright disc). 1 = trace where air meets the champagne surface (and the splash zone just above it) and the bottle - where reflections read. 2 = trace glass reflections too - how it used to be, and on the pour shot about 40% of the render pass.',
     drops: 'Render the particle field: pour stream, splashes and droplets. Off leaves only the bulk liquid, but the simulation keeps running so the glasses still fill.',
     bubbles: 'Rising CO2 bubbles, carved out of the liquid as real geometry, so light refracts through every one.',
     puddle: 'The spreading pool of spilled champagne on the table. Off removes it from the scene entirely.',

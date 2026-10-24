@@ -46,6 +46,10 @@ A link beats a description when comparing before/after.
   frames and inflates them. If `frameMs` is wildly larger than `gpuMs.total`, the reading is
   an upper bound, not a measurement. `show_pane` reports whether the session is open in a
   window at all — if it isn't, the user is away and a real profile has to wait.
+- **A/B a code change on a frozen state:** load both versions with `det=1&simSpeed=0`, click
+  `ff +20s` twice. The clock never moves on its own, so both land on exactly step 2400, and
+  the page keeps rendering every frame with the GPU busy. Paused redraws are no substitute
+  for timing: the GPU downclocks between them and inflates the numbers by ~40%.
 - Perf numbers only from the real GPU **at 1920×1080**, which is what the budget is set at.
   The debug pane is ~1100×880, barely half the pixels, and the render pass scales with them,
   so a pane-sized number flatters the frame by about 2×. This already produced one wrong
