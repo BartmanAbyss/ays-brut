@@ -741,20 +741,14 @@ fn photons(@builtin(global_invocation_id) g: vec3u) {
   var w   = vec3f(smoothstep(1.0, 0.50, rr));
 
   for (var b = 0; b < 4; b++) {
-    var s = 1.0;
-    if (med != 0) { s = -1.0; }
-    let tpl = planeT(p, d);
-    let hh = marchS(p, d, s, tpl);
-
-    var ht = 1e9;
-    var tab = false;
-    if (hh.hit > 0.5) { ht = hh.t; }
-    if (tpl < ht) { ht = tpl; tab = true; }
-    if (ht > FAR) { return; }
-
-    w *= exp(-sigmaOf(med) * ht);
-    let hp = p + d * ht;
-
+    let lg = leg(p, d, med);
+    if (lg.y == 0.0) { return; }
+    w *= exp(-sigmaOf(med) * lg.x);
+    let hp = p + d * lg.x;
+    // deposit on the table - reached directly, or from inside the puddle
+    var tab = lg.y == 1.0;
+    var sf: Turn;
+    if (!tab) { sf = turn(hp, d, med); tab = sf.medA == 3; }
     if (tab) {
       let t = (hp.xz / (2.0 * CEXT) + 0.5) * f32(CN);
       if (all(t >= vec2f(0.0)) && all(t < vec2f(f32(CN)))) {
@@ -766,36 +760,8 @@ fn photons(@builtin(global_invocation_id) g: vec3u) {
       }
       return;
     }
-
-    var n = mapN(hp);
-    if (dot(n, d) > 0.0) { n = -n; }
-    let medA = mediumAt(hp + d * SURF_EPS);
-    if (medA == 3) {                      // reached the table from inside the puddle
-      let t = (hp.xz / (2.0 * CEXT) + 0.5) * f32(CN);
-      if (all(t >= vec2f(0.0)) && all(t < vec2f(f32(CN)))) {
-        let k = causIdx(vec2i(t));
-        let e = w * CSCALE * clamp(-d.y, 0.0, 1.0);
-        atomicAdd(&caust[k],      u32(max(e.x, 0.0)));
-        atomicAdd(&caust[k + 1u], u32(max(e.y, 0.0)));
-        atomicAdd(&caust[k + 2u], u32(max(e.z, 0.0)));
-      }
-      return;
-    }
-    let i1 = iorOf(med);
-    let i2 = iorOf(medA);
-    let f0 = pow((i1 - i2) / (i1 + i2), 2.0);
-    let ct = clamp(dot(-d, n), 0.0, 1.0);
-    let F  = f0 + (1.0 - f0) * pow(1.0 - ct, 5.0);
-    let rf = refract(d, n, i1 / i2);
-    if (dot(rf, rf) < 1e-6) {
-      d = reflect(d, n);
-      p = hp + d * SURF_EPS;
-    } else {
-      w *= (1.0 - F);
-      d = rf;
-      p = hp + d * SURF_EPS;
-      med = medA;
-    }
+    if (!sf.tir) { w *= (1.0 - sf.F); }
+    d = sf.d; p = sf.p; med = sf.med;
     if (max(w.x, max(w.y, w.z)) < 0.02) { return; }
   }
 }
@@ -1353,33 +1319,59 @@ fn tonemap(x: vec3f) -> vec3f {
 
 // Short refraction-only walk used to COLOUR a reflection. Sampling env() for a reflection
 // that actually hits nearby geometry is what paints flat discs on near-grazing surfaces.
+// The render, the traced reflection and the photons follow light the same way and differ
+// only in what they do with its energy, so the mechanics are shared - it was three copies.
+// leg: march from p along d through medium med, stopped by the analytic table plane.
+// x = distance travelled; y = what ended it, 0 nothing (escaped), 1 the table, 2 a surface;
+// z = march steps, for the profiler.
+fn leg(p: vec3f, d: vec3f, med: i32) -> vec3f {
+  let tpl = planeT(p, d);
+  if (PROF) { profTpl = tpl; }
+  var s = 1.0;
+  if (med != 0) { s = -1.0; }
+  let h = marchS(p, d, s, tpl);
+  var r = vec3f(FAR, 0.0, h.steps);
+  if (h.hit > 0.5) { r = vec3f(h.t, 2.0, h.steps); }
+  if (tpl < r.x) { r = vec3f(tpl, 1.0, h.steps); }
+  return r;
+}
+// turn: at the surface a leg ended on, the normal facing the ray, the medium beyond, the
+// Fresnel reflectance, and the ray that carries on - refracted into the medium beyond, or
+// reflected where refraction is impossible (total internal reflection), staying put.
+struct Turn { d: vec3f, F: f32, p: vec3f, med: i32, n: vec3f, medA: i32, tir: bool };
+fn turn(hp: vec3f, d: vec3f, med: i32) -> Turn {
+  var n = mapN(hp);
+  if (dot(n, d) > 0.0) { n = -n; }
+  let medA = mediumAt(hp + d * SURF_EPS);
+  let i1 = iorOf(med);
+  let i2 = iorOf(medA);
+  let f0 = pow((i1 - i2) / (i1 + i2), 2.0);
+  let F  = f0 + (1.0 - f0) * pow(1.0 - clamp(dot(-d, n), 0.0, 1.0), 5.0);
+  let rf = refract(d, n, i1 / i2);
+  if (dot(rf, rf) < 1e-6) {
+    let r = reflect(d, n);
+    return Turn(r, F, hp + r * SURF_EPS, med, n, medA, true);
+  }
+  return Turn(rf, F, hp + rf * SURF_EPS, medA, n, medA, false);
+}
+
 fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
   if (PROF) { pc[12] += 1u; }
   var p = p0; var d = d0; var med = med0;
   var tp = vec3f(1.0);
   var acc = vec3f(0.0);
   for (var b = 0; b < 3; b++) {
-    var s = 1.0;
-    if (med != 0) { s = -1.0; }
-    let tpl = planeT(p, d);
-    let h = marchS(p, d, s, tpl);
-    if (PROF) { pc[13] += u32(h.steps); }
-    var ht = FAR;
-    var tab = false;
-    if (h.hit > 0.5) { ht = h.t; }
-    if (tpl < ht) { ht = tpl; tab = true; }
-    if (med == 2) { acc += tp * vec3f(0.95, 0.60, 0.20) * (1.0 - exp(-ht * 7.0)) * 0.30; }
-    tp *= exp(-sigmaOf(med) * ht);
-    if (!tab && h.hit < 0.5) { return acc + tp * env(d); }
-    let hp = p + d * ht;
+    let lg = leg(p, d, med);
+    if (PROF) { pc[13] += u32(lg.z); }
+    if (med == 2) { acc += tp * vec3f(0.95, 0.60, 0.20) * (1.0 - exp(-lg.x * 7.0)) * 0.30; }
+    tp *= exp(-sigmaOf(med) * lg.x);
+    if (lg.y == 0.0) { return acc + tp * env(d); }
+    let hp = p + d * lg.x;
+    var tab = lg.y == 1.0;
+    var sf: Turn;
+    if (!tab) { sf = turn(hp, d, med); tab = sf.medA == 3; }
     if (tab) { return acc + tp * tableShade(hp); }
-    var n = mapN(hp);
-    if (dot(n, d) > 0.0) { n = -n; }
-    let medA = mediumAt(hp + d * SURF_EPS);
-    if (medA == 3) { return acc + tp * tableShade(hp); }
-    let rf = refract(d, n, iorOf(med) / iorOf(medA));
-    if (dot(rf, rf) < 1e-6) { d = reflect(d, n); p = hp + d * SURF_EPS; }
-    else { d = rf; p = hp + d * SURF_EPS; med = medA; }
+    d = sf.d; p = sf.p; med = sf.med;
   }
   return acc + tp * env(d);
 }
@@ -1407,55 +1399,48 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
 //#D}
 
   for (var b = 0; b < i32(u.bounces); b++) {
-    var s = 1.0;
-    if (med != 0) { s = -1.0; }
-    let tpl = planeT(p, d);
-    if (PROF) { profPrim = b == 0; profTpl = tpl; }
-    let h = marchS(p, d, s, tpl);
+    if (PROF) { profPrim = b == 0; }
+    let lg = leg(p, d, med);
     if (PROF) { profPrim = false; }
-    steps += h.steps;
-    if (PROF) { pc[9] += 1u; pc[10] += u32(h.steps); pc[31u + min(u32(b), 10u)] += u32(h.steps); }
-
-    var ht = FAR;
-    var tab = false;
-    if (h.hit > 0.5) { ht = h.t; }
-    if (tpl < ht) { ht = tpl; tab = true; }
+    let ht = lg.x;
+    steps += lg.z;
+    if (PROF) { pc[9] += 1u; pc[10] += u32(lg.z); pc[31u + min(u32(b), 10u)] += u32(lg.z); }
     if (PROF && b == 0) {
       // 67/68/69 primary rays ending on the table / in the environment / at an object, and
       // 70/71/72 their march steps; 73..78 steps per primary ray <8 <16 <32 <64 <128 >=128
       var k = 69u;
-      if (tab) { k = 67u; } else if (h.hit < 0.5) { k = 68u; }
-      pc[k] += 1u; pc[k + 3u] += u32(h.steps);
-      pc[73u + min(u32(log2(max(h.steps, 1.0) / 4.0)), 5u)] += 1u;
+      if (lg.y == 1.0) { k = 67u; } else if (lg.y == 0.0) { k = 68u; }
+      pc[k] += 1u; pc[k + 3u] += u32(lg.z);
+      pc[73u + min(u32(log2(max(lg.z, 1.0) / 4.0)), 5u)] += 1u;
     }
 
     // cheap single-scatter: champagne glows gold rather than going black in depth
     if (med == 2) { acc += tp * vec3f(0.95, 0.60, 0.20) * (1.0 - exp(-ht * 7.0)) * 0.30; }
     tp *= exp(-sigmaOf(med) * ht);           // absorption along the segment just travelled
 
-    if (!tab && h.hit < 0.5) {
+    if (lg.y == 0.0) {
       if (PROF) { pc[16u + min(u32(b), 10u)] += 1u; pc[27] += 1u; }
       acc += tp * env(d); fin = true; break;
     }
 
     let hp = p + d * ht;
+    // The table can also be reached from INSIDE the puddle, where the marched hit beats the
+    // analytic plane test. Without this the ray refracts straight through the table and the
+    // puddle renders as flat grey with no shadow or caustics.
+    var tab = lg.y == 1.0;
+    var sf: Turn;
+    if (!tab) {
+      sf = turn(hp, d, med);
+      if (b == 0) { firstHit = 1.0; firstN = sf.n; }
+      tab = sf.medA == 3;
+    }
     if (tab) {
       if (PROF) { pc[16u + min(u32(b), 10u)] += 1u; pc[28] += 1u; }
       acc += tp * tableShade(hp); fin = true; break;
     }
-    var n = mapN(hp);
-    if (dot(n, d) > 0.0) { n = -n; }
-    if (b == 0) { firstHit = 1.0; firstN = n; }
-
-    let medA = mediumAt(hp + d * SURF_EPS);
-
-    // The table can also be reached from INSIDE the puddle, where the marched hit beats the
-    // analytic plane test. Without this the ray refracts straight through the table and the
-    // puddle renders as flat grey with no shadow or caustics.
-    if (medA == 3) {
-      if (PROF) { pc[16u + min(u32(b), 10u)] += 1u; pc[28] += 1u; }
-      acc += tp * tableShade(hp); fin = true; break;
-    }
+    let n = sf.n;
+    let medA = sf.medA;
+    let F = sf.F;
 
     // mousse sits on the liquid's upward-facing surface: opaque, diffuse, not refractive
     if (medA == 2 && n.y > 0.5 && u.foamG > 0.0) {
@@ -1474,12 +1459,6 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
       }
     }
 
-    let i1 = iorOf(med);
-    let i2 = iorOf(medA);
-    let f0 = pow((i1 - i2) / (i1 + i2), 2.0);
-    let ct = clamp(dot(-d, n), 0.0, 1.0);
-    let F  = f0 + (1.0 - f0) * pow(1.0 - ct, 5.0);
-
     let rdir = reflect(d, n);
     var rcol = env(rdir);
     // The traced reflection is the most expensive thing in the frame - up to three more
@@ -1497,12 +1476,8 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
     if (wantTrace && b < 2 && F > 0.05) { rcol = reflColour(hp + rdir * SURF_EPS, rdir, med); }
     acc += tp * F * rcol * u.refl;
 
-    let rf = refract(d, n, i1 / i2);
-    if (dot(rf, rf) < 1e-6) {                // total internal reflection
-      tir = tir + 1.0;
-      d = reflect(d, n);
-      p = hp + d * SURF_EPS;
-    } else {
+    if (sf.tir) { tir = tir + 1.0; }          // total internal reflection
+    else {
 //#D{
       if (PROF && med == 0) {
         if (medA == 1) { pGlass += 1u; }
@@ -1510,10 +1485,8 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
       }
 //#D}
       tp *= (1.0 - F);
-      d = rf;
-      p = hp + d * SURF_EPS;
-      med = medA;
     }
+    d = sf.d; p = sf.p; med = sf.med;
     if (max(tp.x, max(tp.y, tp.z)) < 0.02) {
       if (PROF) { pc[16u + min(u32(b), 10u)] += 1u; pc[29] += 1u; }
       fin = true; break;
