@@ -736,9 +736,10 @@ below, and a 120-round packer search on the result.
 the song and any text. How much those need decides whether any feature cuts are needed
 (*Feature cuts, measured*, below).
 
-#### Start screen and music hookup: 7 967 -> 8 133
+#### Start screen and music hookup: 7 967 -> 8 078
 
-The release opens on a line of text on black that appears only once everything is loaded
+The release opens on the word "click", unstyled (black on white, top left: centred
+white-on-black cost 55 bytes), which appears only once everything is loaded
 (device, pipelines, the song rendered). A click goes fullscreen on the canvas, sizes it once
 from `screen.width/height` (no resize handling in the release), resumes the audio, schedules
 playback 0.1 s ahead and starts the render loop. From then the show clock is the AUDIO
