@@ -162,6 +162,7 @@ def release_uniforms(ui):
         'prad': f('dropRad') * 0.001, 'foamG': f('foam'),
         'botTilt': f('botTilt') * rad, 'botAz': f('botAz') * rad,
         'botOn': on('bottle'), 'pudOn': on('puddle'),
+        'flareH': f('flareH') * 0.001, 'flareR': f('flareR') * 0.001,
     }
 
 

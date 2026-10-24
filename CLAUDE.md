@@ -86,6 +86,14 @@ cap moved with it: `2.88 * u.shut` is exactly the old 24 mm at the default half-
 one step. General form of the trap: anything sized in sim steps that is CONSUMED once per
 frame is wrong as soon as the two rates diverge.
 
+**Scaling a coordinate inside `length()` does the opposite of what it looks like.**
+`length(p * vec3f(1, 0.62, 1)) - r` is an ellipsoid r/0.62 TALL, not 0.62 r tall. The
+coupe's knuckle was meant to be squat and came out 12.9 mm high, rising ~17 mm into the
+bowl as a dome in the champagne. Fixed by carving the cavity out after all the blends, which
+guards against every fillet, not just this one. The foot had a related problem: a rounded
+cylinder whose rounding pushed it to y = -1.3..7.7 mm, a 9 mm puck sunk into the table.
+Measure a primitive's real extent, don't read it off its parameters.
+
 **A particle smaller than a voxel vanishes.** The fine cell is 1.94 mm, so a drop only
 registers if it lands near a cell centre. Keep `dropRad` above the cell half-diagonal
 (~1.68 mm) or raise `FINE`. Symptom: a dense stream renders as four scattered drops.
