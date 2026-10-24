@@ -91,7 +91,6 @@ struct U {
   _w2      : f32,
 //#D}
 };
-struct J { stride : f32, _a : f32, _b : f32, _c : f32 };
 
 struct Particle { pos : vec3f, life : f32, vel : vec3f, _p : f32 };
 
@@ -133,7 +132,6 @@ var<private> profTowerB : bool = false;   // ...and so did the coupe sdTower's m
 // primary-ray step accounting (profiler only): set by fs around the bounce-0 march
 var<private> profPrim : bool = false;
 var<private> profTpl : f32 = 0.0;
-@group(1) @binding(0) var<uniform> j : J;
 
 // ── glass geometry (metres) ───────────────────────────────
 // Proportions taken from the reference coupe, as ratios of the rim diameter D:
@@ -448,9 +446,12 @@ fn sdBoxDom(p: vec3f) -> f32 {
 
 // ═══════════════ compute ═══════════════
 @compute @workgroup_size(64)
-fn simParticles(@builtin(global_invocation_id) g: vec3u) {
+// A dispatch passes a small index as the HEIGHT of its grid: rows above 0 exit at once,
+// and num_workgroups.y - 1 is the index. That replaced a uniform buffer of 256-byte slots,
+// a second bind group and dynamic offsets - all of it JS the release had to carry.
+fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups) nw: vec3u) {
   let i = g.x;
-  if (i >= u32(u.nPart)) { return; }
+  if (i >= u32(u.nPart) || g.y > 0u) { return; }
   var p = parts[i];
 
   let PV = u32(u.pvol / VUNIT);
@@ -460,9 +461,9 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u) {
   // bottle slot almost always lands on an index that is still alive.
   let POOL = max(u32(u.nPart) / 6u, 1u);
 
-  // j.stride carries the sub-step index: without it every substep in a frame shares one
+  // nw.y - 1 is the sub-step index: without it every substep in a frame shares one
   // spawn cadence, so fast-forward advances the drops without emitting new ones.
-  let fc = u32(u.frame) + u32(j.stride);
+  let fc = u32(u.frame) + nw.y - 1u;
 
   if (p.life <= 0.0) {
     let h = rnd3(i, fc, 3u);
@@ -837,16 +838,19 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
 
 // jump flooding on the coarse grid (in place) — far-field nearest-particle field
 @compute @workgroup_size(64)
-fn jfaCoarse(@builtin(global_invocation_id) g: vec3u) {
+fn jfaCoarse(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups) nw: vec3u) {
   let i = g.x;
-  if (i >= COARSE * COARSE * COARSE) { return; }
-  let src = u32(j._a);
+  if (i >= COARSE * COARSE * COARSE || g.y > 0u) { return; }
+  // pass k of 5 (nw.y - 1): stride 16 >> k, and the ping-pong keys -> R1 -> R2 -> R1 -> R2
+  // -> R1 between occ's regions, ending in R1, the one liquidDist reads
+  let k = nw.y - 1u;
+  let src = select(select(3u, 2u, k % 2u == 1u), 1u, k == 0u) * COARSE * COARSE * COARSE;
   let c  = c3(i);
   let cp = DOM_LO + (vec3f(c) + 0.5) * CCELL;
   var best = atomicLoad(&occ[src + i]);
   var bd = 1e9;
   if (best != 0xFFFFFFFFu) { bd = length(cp - parts[best & 0xFFFFu].pos); }
-  let st = i32(j.stride);
+  let st = i32(16u >> k);
   for (var dz = -1; dz <= 1; dz++) {
     for (var dy = -1; dy <= 1; dy++) {
       for (var dx = -1; dx <= 1; dx++) {
@@ -860,7 +864,7 @@ fn jfaCoarse(@builtin(global_invocation_id) g: vec3u) {
     }
   }
   if (best != 0xFFFFFFFFu) { best = best & 0xFFFFu; }
-  atomicStore(&occ[u32(j._b) + i], best);
+  atomicStore(&occ[select(2u, 3u, k % 2u == 1u) * COARSE * COARSE * COARSE + i], best);
 }
 
 @compute @workgroup_size(512)
@@ -1722,26 +1726,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // visibility 6 = COMPUTE | FRAGMENT
   const bgl0 = device.createBindGroupLayout({ entries: bufs.map((_, binding) =>
     ({ binding, visibility: 6, buffer: { type: binding ? 'storage' : 'uniform' } })) });
-  const bgl1 = device.createBindGroupLayout({ entries: [
-    { binding: 0, visibility: 6, buffer: { type: 'uniform', hasDynamicOffset: true } }] });
-  const layout = device.createPipelineLayout({ bindGroupLayouts: [bgl0, bgl1] });
+  const layout = device.createPipelineLayout({ bindGroupLayouts: [bgl0] });
   const bg0 = device.createBindGroup({ layout: bgl0, entries: bufs.map((buffer, binding) =>
     ({ binding, resource: { buffer } })) });
 
-  // Per-dispatch uniforms, one 256-byte slot each, picked by dynamic offset:
-  // 0..15 the sim sub-step index (16, so no two sub-steps of a frame share an RNG stream),
-  // 16..20 the coarse flood as [stride, source, destination].
-  // The coarse flood ping-pongs keys -> R1 -> R2 -> R1 -> R2 -> R1, ending in R1, the region
-  // liquidDist reads - which needs an odd number of strides. Regions are offsets into occ.
-  const SUBSLOT = 0, CJSLOT = 16, KEYS = COARSE_N, R1 = 2 * COARSE_N, R2 = 3 * COARSE_N;
-  const jd = new Float32Array(64 * 21);
-  JFA_STRIDES.map((st, i) => jd.set([st, i ? (i % 2 ? R1 : R2) : KEYS, i % 2 ? R2 : R1], 64 * (CJSLOT + i)));
-  for (let i = 0; i < 16; i++) jd[64 * (SUBSLOT + i)] = i;
-  const jbo = device.createBuffer({ size: jd.length * 4, usage: 72 });
-  device.queue.writeBuffer(jbo, 0, jd);
-  const bg1 = device.createBindGroup({ layout: bgl1, entries: [
-    { binding: 0, resource: { buffer: jbo, size: 16 } },
-  ]});
 
   const P = {};
   for (const n of ('simParticles puddleUpdate waveUpdate puddleCoarse ' +
@@ -2083,13 +2071,12 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     if (doProf) { enc.clearBuffer(profB); }
 
     // One compute pass per group (each timed in the harness). A dispatch is
-    // [entry point, workgroups, uniform slot]; the slot defaults to 0.
+    // [entry point, workgroups, index]; the index reaches the shader as the grid's height
+    // (see simParticles), and defaults to 0.
     const pass = (i, list) => {
       const cp = enc.beginComputePass({ timestampWrites: ts(i) });
       cp.setBindGroup(0, bg0);
-      for (const [n, w, slot = 0] of list) {
-        cp.setBindGroup(1, bg1, [slot * 256]); cp.setPipeline(P[n]); cp.dispatchWorkgroups(w);
-      }
+      for (const [n, w, k = 0] of list) { cp.setPipeline(P[n]); cp.dispatchWorkgroups(w, k + 1); }
       cp.end();
     };
 
@@ -2100,8 +2087,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // at 60 fps and showed when a seek ran 3000 steps in one frame and filled one glass.
     const sim = [];
     for (let k = 0; k < simSteps; k++) {
-      const sl = SUBSLOT + k % 16, wv = ['waveUpdate', WG(NG * WN * WN, 64), sl];
-      sim.push(['simParticles', WG(cfg.npart, 64), sl], ['puddleUpdate', WG(PN * PN, 256), sl],
+      const wv = ['waveUpdate', WG(NG * WN * WN, 64)];
+      sim.push(['simParticles', WG(cfg.npart, 64), k % 16], ['puddleUpdate', WG(PN * PN, 256)],
                wv, wv, wv);
     }
     pass(0, sim);
@@ -2110,7 +2097,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     pass(1, [
       ['puddleCoarse', WG(PCN * PCN, 64)],
       ['clearFine', WG(FINE_N, 512)], ['scatterFine', WG(cfg.npart, 64)],
-      ...JFA_STRIDES.map((_, k) => ['jfaCoarse', WG(COARSE_N, 64), CJSLOT + k]),
+      ...JFA_STRIDES.map((_, k) => ['jfaCoarse', WG(COARSE_N, 64), k]),
       ['resolveFine', WG(FINE_N, 512)],
     ]);
 
@@ -2124,7 +2111,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       colorAttachments: [{ view: ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store' }],
       timestampWrites: ts(3),
     });
-    rp.setPipeline(render); rp.setBindGroup(0, bg0); rp.setBindGroup(1, bg1, [0]);
+    rp.setPipeline(render); rp.setBindGroup(0, bg0);
     if (doProf) { rp.setPipeline(renderX || renderProf); }   // renderX: a variant may add PROF: 1
     else if (renderX) { rp.setPipeline(renderX); }   // renderX (dev)
     rp.draw(3); rp.end();
