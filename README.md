@@ -363,9 +363,19 @@ does one plain load. Every profiler counter matched exactly before and after, so
 is bit-identical. Render 24.8 → **21.8** on this frame, 21.95 → 18.6 on the step-2400 A/B
 frame; +62 bytes compressed.
 
-Where the rest is: the spray lookup itself is still the biggest item; a finer occupancy
-test would skip most of the wasted trilerps; and the 10.7% of rays that run out of bounces
-(inside spray and glass, ending in constant haze anyway) pay for ~30% of the marching.
+**The wasted trilerps were not worth much.** Blocks were marked with a whole extra block
+of dilation on every side, up to 3×3×3 blocks (58 mm) around a band ~3 cells deep. Marking
+exactly the blocks whose trilerps can reach a touched cell (one fine cell past each face)
+cut trilerps 70.9 M → 45.2 M with every other counter identical, and bought **0.4 ms**
+(render 22.1 → 21.7, same frozen frame, alternated twice). The remaining half of them are
+wasted too, but at that rate skipping all of them is worth ~0.35 ms more, not a finer grid
+and its buffer. The duplication test (+3.9 ms) overstated them: a repeated fetch of the
+same eight cells is cache-hot, the first one is not, yet it is still cheap next to
+everything else in the lookup.
+
+Where the rest is: the spray lookup minus the trilerp is still the biggest item, and the
+10.7% of rays that run out of bounces (inside spray and glass, ending in constant haze
+anyway) pay for ~30% of the marching.
 
 ### WebGPU limits that must be requested
 

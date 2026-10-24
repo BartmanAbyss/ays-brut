@@ -361,9 +361,9 @@ with physical cores, not threads. Do not score with a lower quality to go faster
   tier2 frame (step 3120): **26.9 total, 21.8 render** after the packed far field (was 29.9).
   Non-render passes are ~5 ms there. Step count, reflections and photon count are **not**
   levers, and neither was skipping empty particle blocks (0.9 ms, not the 8 that `parts=0`
-  suggested). What is left, from the profile in the README: the spray lookup, the ~68% of
-  trilerps that land outside the band, and the 10.7% of rays that exhaust the bounce budget
-  while taking ~30% of the march steps.
+  suggested), nor wasted trilerps (exact block reach cut them 36% for 0.4 ms). What is
+  left, from the profile in the README: the rest of the spray lookup, and the 10.7% of rays
+  that exhaust the bounce budget while taking ~30% of the march steps.
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
   stale. The dropper is ~324 bytes, leaving ~7870 for the payload. The harness as it stands

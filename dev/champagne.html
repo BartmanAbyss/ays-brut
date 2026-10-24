@@ -151,7 +151,7 @@ const COARSE : u32 = 32u;
 const DOM_LO = vec3f(-0.31, -0.015, -0.31);
 const DOM_SZ = 0.62;                     // the tower is 0.537 m tall
 const FCELL  = DOM_SZ / 320.0;    // 1.94 mm
-const CCELL  = DOM_SZ / 32.0;     // 12.5 mm
+const CCELL  = DOM_SZ / 32.0;     // 19.4 mm
 const KR     : i32 = 3;
 const BAND   = 0.00625;           // KR * FCELL
 // A droplet smaller than the grid's cell half-diagonal (FCELL*sqrt(3)/2 = 1.68mm at
@@ -826,13 +826,18 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
     }
   }
 
-  // Mark the coarse blocks this capsule can reach, DILATED BY ONE BLOCK, so that an
-  // unmarked block proves its whole one-block neighbourhood is untouched. liquidDist
-  // trilerps eight cells that straddle p and may fall into a neighbouring block, so the
-  // dilation is what makes skipping them exact rather than merely usually right.
+  // Mark the coarse blocks whose trilerps can read a cell this capsule touched. For p in
+  // block B, liquidDist's eight corners lie in fine cells [bs*B - 1, bs*B + bs] - one cell
+  // past each face, never more - so B must be marked exactly when [lo, hi] overlaps that
+  // range, and an unmarked block then guarantees all eight corners hold BAND: skipping the
+  // trilerp is exact. (Clamping at the domain edges only shrinks the reach.)
+  // This used to dilate by a whole block on every side, marking up to 3x3x3 blocks (58 mm)
+  // around a band ~3 cells deep; 68% of the trilerps it let through landed outside the band.
+  // Exact reach cuts trilerps 36% on heavy tier2 (identical picture) but buys only ~0.4 ms:
+  // they are cheap, so a finer grid for the remaining half would not pay for its buffer.
   let bs  = i32(FINE / COARSE);                 // 10 fine cells per block
-  let blo = clamp(lo / bs - vec3i(1), vec3i(0), vec3i(i32(COARSE) - 1));
-  let bhi = clamp(hi / bs + vec3i(1), vec3i(0), vec3i(i32(COARSE) - 1));
+  let blo = clamp((lo - vec3i(1)) / bs, vec3i(0), vec3i(i32(COARSE) - 1));
+  let bhi = clamp((hi + vec3i(1)) / bs, vec3i(0), vec3i(i32(COARSE) - 1));
   for (var z = blo.z; z <= bhi.z; z++) {
     for (var y = blo.y; y <= bhi.y; y++) {
       for (var x = blo.x; x <= bhi.x; x++) {
