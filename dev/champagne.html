@@ -1907,6 +1907,24 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const g = c2.getContext('2d'); g.drawImage(canvas, 0, 0);
     return g.getImageData(0, 0, c2.width, c2.height);
   };
+  // A reference frame that survives a reload, so a code change can be diffed against the
+  // frame before it: __saveRef(name) stores what __grab() returns, __loadRef(name) gets it
+  // back. IndexedDB, since a 1920x1080 frame is 8 MB - far past localStorage.
+  const idb = () => new Promise((res, rej) => {
+    const r = indexedDB.open('champagne-ref', 1);
+    r.onupgradeneeded = () => r.result.createObjectStore('f');
+    r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error);
+  });
+  window.__saveRef = async (name = 'ref') => {
+    const img = await window.__grab(), db = await idb();
+    await new Promise(res => { const t = db.transaction('f', 'readwrite'); t.objectStore('f').put({ w: img.width, h: img.height, d: img.data }, name); t.oncomplete = res; });
+    return name + ' saved';
+  };
+  window.__loadRef = async (name = 'ref') => {
+    const db = await idb();
+    const v = await new Promise(res => { const r = db.transaction('f').objectStore('f').get(name); r.onsuccess = () => res(r.result); });
+    return v ? new ImageData(new Uint8ClampedArray(v.d), v.w, v.h) : null;
+  };
   let diffEl = null;
   window.__diff = (a, b) => {
     if (diffEl) { diffEl.remove(); diffEl = null; }
