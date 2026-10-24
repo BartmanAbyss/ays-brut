@@ -1638,6 +1638,8 @@ const cfg = {
   det:      Q.get('det') === '1' || Q.get('still') === '1',   // frame N is always step N
   show:     Q.get('show') === '1',     // run the timeline instead of the manual camera
   showt:    qf('showt', 0),            // seek here on load (how a backward scrub works)
+  gate:     Q.get('gate') === '1',     // the release's start screen: click, fullscreen, audio clock
+  tick:     Q.get('tick') === '1',     // with gate: a click every half second, to check sync
 };
 //#D}
 
@@ -1863,8 +1865,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     canvas.style.height = (cfg.h * k) + 'px';
     canvas.style.margin = ((innerHeight - cfg.h * k) / 2) + 'px auto 0';
   }
-  resize();
-  addEventListener('resize', resize);
+  if (!cfg.gate) { resize(); addEventListener('resize', resize); }
 
   const SIM_DT = 1 / 60;
   const LAG_STEPS = 30;        // 0.5 s behind the clock before we give up the missed steps
@@ -2021,9 +2022,17 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // audio clock). The sim clock is the INTEGRAL of the timeline's speed over those
     // steps - integrating against the wall delta instead would make a timeline that
     // varies speed frame-rate dependent all over again, the bug this replaced.
-    showPend += redrawOnly ? 0 : (cfg.det ? SIM_DT : Math.min((now - last) / 1000, 0.25));
-    const nShow = Math.floor(showPend / SIM_DT);
-    showPend -= nShow * SIM_DT;
+    // Behind the gate (always, in the release) the show clock is the AUDIO clock: as many
+    // whole steps as the music has played since it started, so the picture follows the
+    // music. Otherwise wall time, banked and capped as before.
+    let nShow;
+    if (cfg.gate) {
+      nShow = Math.max(0, Math.floor((ac.currentTime - tA) / SIM_DT) - showStep);
+    } else {
+      showPend += redrawOnly ? 0 : (cfg.det ? SIM_DT : Math.min((now - last) / 1000, 0.25));
+      nShow = Math.floor(showPend / SIM_DT);
+      showPend -= nShow * SIM_DT;
+    }
     for (let i = 0; i < nShow; i++) {
       const sp = ui.show ? evalShow((showStep + i) * SIM_DT).speed : 1;
       clockT += SIM_DT * sp * ui.simSpeed;
@@ -2132,7 +2141,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     readParts();
     readPuddle();
 
-    resize();   // the pane can be shown or resized without firing a resize event
+    if (!cfg.gate) resize();   // the pane can be shown or resized without firing a resize event
     frameNo++; simStep += simSteps; probe.frames = frameNo; probe.ok = true;
     const dt = now - last; last = now;
     acc += dt; accN++;
@@ -2450,7 +2459,40 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   setPaused(cfg.paused);
   //#D}
 
-  if (!cfg.paused) requestAnimationFrame(frame);
+  // ── start screen and music ──
+  // The song is the user's to compose - the party bans generated music. song() fills the
+  // stereo buffers (L, R at sample rate sr) once, here, before the click, so a slow player
+  // costs load time and never a hitch; until it exists the show plays silence of its own
+  // length. Behind the gate the click starts everything: fullscreen, the audio, the render
+  // loop. The text appears only once all of this is ready, so it doubles as "loaded".
+  function song(L, R, sr) {
+//#D{
+    // ?tick=1: a short click every half second, to check the picture against the audio
+    if (cfg.tick) for (let i = 0; i < L.length; i++) {
+      const k = i % (sr >> 1);
+      L[i] = R[i] = k < 2000 ? Math.sin(k * 0.3) * Math.exp(-k / 300) * 0.5 : 0;
+    }
+//#D}
+  }
+  let ac, tA;                  // the audio context, and the audio time the show starts at
+  if (cfg.gate) {
+    ac = new AudioContext();
+    const b = ac.createBuffer(2, ac.sampleRate * (SHOW_END + 1), ac.sampleRate);
+    song(b.getChannelData(0), b.getChannelData(1), ac.sampleRate);
+    onclick = () => {
+      onclick = null;
+      // fullscreen is the screen: size the canvas once, here, rather than on every resize
+      canvas.width = screen.width; canvas.height = screen.height;
+      canvas.requestFullscreen();
+      ac.resume();
+      const src = ac.createBufferSource();
+      src.buffer = b; src.connect(ac.destination);
+      src.start(tA = ac.currentTime + 0.1);
+      requestAnimationFrame(frame);
+    };
+    document.body.style.cssText = 'margin:0;background:#000;color:#fff;font:5vh sans-serif;text-align:center;line-height:100vh';
+    document.body.append('click');
+  } else if (!cfg.paused) requestAnimationFrame(frame);
 
   // frame-count driven, not wall-clock: rAF pauses when the page isn't painting
   //#D{

@@ -736,6 +736,21 @@ below, and a 120-round packer search on the result.
 the song and any text. How much those need decides whether any feature cuts are needed
 (*Feature cuts, measured*, below).
 
+#### Start screen and music hookup: 7 967 -> 8 133
+
+The release opens on a line of text on black that appears only once everything is loaded
+(device, pipelines, the song rendered). A click goes fullscreen on the canvas, sizes it once
+from `screen.width/height` (no resize handling in the release), resumes the audio, schedules
+playback 0.1 s ahead and starts the render loop. From then the show clock is the AUDIO
+clock: as many whole sim steps as the music has played, so the picture follows the music.
+
+The music hookup is `song(L, R, sr)` in the harness: it fills the stereo buffers once,
+before the click, so a slow player costs load time and never a hitch. It is empty - silence
+of the show's length - until the user's player goes in; the party bans generated music.
+In the harness the same path runs with `?gate=1`; `?tick=1` adds a click every half second
+to check sync. Measured: show time advances 1.00 s per second of audio, drift one step.
+If fullscreen is refused, the 16:9 canvas is stretched to the window.
+
 #### Non-feature pass: 8 333 -> 7 967
 
 | Change | bytes | picture |

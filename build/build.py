@@ -22,6 +22,7 @@ CFG = {
     'pfield': 'true', 'bounces': '10', 'refl': '1.0', 'envg': 'false', 'fillQ': 'null',
     'nphoton': '65536', 'cgain': '0.05', 'paused': 'false', 'det': 'false',
     'show': 'true', 'showt': '0',
+    'gate': 'true', 'tick': 'false',     # the release always opens on the start screen
 }
 # ui.* comes from the panel's own SPEC defaults, so the two cannot drift. These two are
 # the release's choices rather than the panel's.
