@@ -714,22 +714,68 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
+24 Oct 2026, after the lossless size pass below.
+
 | Stage | WGSL | JS |
 |---|---|---|
-| source | 51 136 | 43 520 |
-| harness stripped | 47 351 | 24 259 |
-| dev code removed | 47 351 | 20 924 |
-| minified | 23 674 | 8 853 |
+| source | 68 147 | 48 975 |
+| harness stripped | 59 980 | 19 452 |
+| dev code removed | 59 980 | 16 520 |
+| tree-shaken | 35 444 | |
+| minified | 19 948 | 4 207 |
 
 | Packed | bytes |
 |---|---|
-| payload, uncompressed | 32 452 |
-| brotli q11 | 10 171 |
+| payload, uncompressed | 24 379 |
+| brotli q11 | 8 637 |
 | dropper header | 371 |
-| **`intro.cmd`, the deliverable** | **10 542** |
-| `intro.html` (base64, test convenience only) | 15 484 |
+| **`intro.cmd`, the deliverable** | **9 008** |
 
-**10 542 against 8192 — over by 2 350**, about 29%, before a byte of music.
+**9 008 against 8 192: over by 816**, before the click-to-start screen, the music player,
+the song and any text. Those need room too, so the target for what exists now is about
+**5.8 KB** - another ~3 KB, which has to come from features (cut or simplified), not from
+packing. The size map below says where it is.
+
+#### The lossless pass: 10 181 -> 9 008
+
+Every step verified on the same frame before and after (pinned-level step 2400, three
+cameras), measured, committed separately:
+
+| Step | bytes | picture |
+|---|---|---|
+| JS written for the release: buffer table, generated layouts and bind group, pipelines from a name list, dispatches as tables; no zero-fill uploads (WebGPU zero-initialises); URL parsing dev-only | **-842** | same |
+| uniform struct: the 9 live fields first (64 bytes); the 32 folded controls behind dev markers, neither declared nor written by the release | -251 | same |
+| compute entry points renamed `Z0`... by the build (they shipped twice, once per language) | -86 | same |
+| three trace loops -> one `leg` + `turn` | ~-35 | pixel-exact |
+| three small kernels merged into their neighbours | -27 | pixel-exact |
+
+JS went from 2 942 to 1 867 bytes compressed on its own; the shader is 6 744 of the 8 637.
+
+#### What repetition costs under brotli
+
+Less than it looks. The three trace loops were 1.8 KB of near-identical source, and
+merging them saved ~35 bytes; an exact 203-character duplicate costs 44. Brotli already
+replaces repeats with back-references, so neither deduplicating by hand nor assembling
+repeated chunks at runtime buys much - only code that genuinely goes away does. Judge such
+changes with the packer's DEFAULT state on both sides: the saved search state is tuned to
+the shader it was searched on and flatters it by ~100 bytes against any edit.
+
+#### The size map (compressed bytes, shader side)
+
+Marginal cost of removing each item, or each feature as a group (call sites left in, so
+slight underestimates):
+
+| feature | ~bytes | | function | ~bytes |
+|---|---|---|---|---|
+| puddle (sim, field, coarse grid, flood) | 620 | | `simParticles` | 750 |
+| bottle geometry | 430 | | `fs` | 430 |
+| caustics (photon pass, map) | 410+ | | `photons` | 270 |
+| spray far field (seed, flood, pack) | 330 | | `scatterFine` | 240 |
+| waves + foam | 320 | | `waveUpdate` | 220 |
+| bokeh | 180 | | `sdCoupe` | 220 |
+| reflection trace | 100 | | `liquidDist` | 180 |
+| glass overflow | 100 | | `env` | 130 |
+| bubbles | 90 | | | |
 
 ### Brotli, by serving rather than decompressing
 

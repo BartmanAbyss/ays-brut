@@ -39,6 +39,13 @@ A link beats a description when comparing before/after.
 - A seek is representative, not bit-identical: the catch-up burst wraps the 16 sub-step
   slots, so the RNG stream differs and spill azimuths land elsewhere. Glass counts and the
   overall state match; do not diff individual levels against a live run.
+- **Pixel-exact A/B across a reload:** `?det=1&simSpeed=0&fill=88`, ff twice, wait 3 s,
+  then `__saveRef(name)` before the change and `__diff(await __loadRef(name), await __grab())`
+  after. With levels pinned the frame is bit-identical between loads; with spill running it
+  is not (the overflow emitters race on a compare-and-swap). Noise floor: up to a few dozen
+  table pixels by one level (the photon map's integer decay settles on neighbouring fixed
+  points). Grab only after things settle - the puddle bound reaches the dev shader through
+  an async readback, and a grab before it lands differs by up to 19 levels on 15% of pixels.
 - Isolation views settle arguments far faster than reasoning: `liquid`, `glass`, `tir`,
   `puddle`, `bottle`, `medium`, `steps`, plus `gridEnv` for reflection/refraction direction.
 - **The pane must be on screen.** A hidden browser pane runs the page as a background page
@@ -372,6 +379,21 @@ renamed entry points; same remedy - compile it, then look at it in a fresh tab.
 with physical cores, not threads. Do not score with a lower quality to go faster: q9 is
 790 bytes off and would optimise for the wrong compressor.
 
+**Repetition is nearly free under brotli; only code that goes away saves bytes.** Merging
+three near-identical trace loops (1.8 KB of source) saved ~35 bytes; an exact 203-char
+duplicate cost 44. Estimate a dedup at a fifth of its raw size at most, and don't build
+runtime string assembly to remove repeats - brotli already does it.
+
+**Measure a shader edit with the packer's DEFAULT state on both sides.** The saved search
+state is tuned to the shader it was searched on and flatters that version by ~100 bytes
+against any edit, so `build.py` alone can show a real saving as a loss. The trace merge read
++23 shipped and -35 fair.
+
+**The release JS is the harness JS, cut - so write the harness the way the release needs
+it.** Setup longhand (15 bind-group entries spelled out, zero-fill uploads WebGPU already
+does, a uniform write per dead field, URL parsing that survived as dead calls) was 842 + 251
+bytes. Tables and generated layouts in the harness itself fixed it with one source of truth.
+
 **Never rename a member access.** The substitution uses a `(?<![.\w])` guard so a rename of
 `pos` cannot touch `p.pos`.
 
@@ -391,9 +413,10 @@ with physical cores, not threads. Do not score with a lower quality to go faster
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. The dropper is ~324 bytes, leaving ~7870 for the payload. The harness as it stands
-  Brotlis to 17 438 bytes with comments stripped; the README roadmap has the breakdown and
-  where the rest has to come from.
+  stale. Our dropper header is 371 bytes. `intro.cmd` is **9 008** (24 Oct 2026) with no
+  start screen, music player, song or text yet; to leave them room, what exists must reach
+  ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
+  README (*Where it lands today*) has the size map by feature and function.
 - Music must be composed by the user. The party bans prompt-based music, requires full
   disclosure of generative-AI use, and disqualifies entries that are mostly AI output. The
   NFO must carry the disclosure.
