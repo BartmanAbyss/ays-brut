@@ -237,6 +237,17 @@ before compression even ran.
 compressed result ~30 bytes a run, which is larger than most wins being measured. (It also
 shows a search over assignments is worth real bytes - what Pakettic-style packers do.)
 
+**A real parser beats the regex at analysis, and loses at naming.** wgslender tree-shakes
+dead declarations and rewrites syntax, which the hand-rolled minifier cannot do. Used
+for renaming as well it is 599 bytes smaller on disk and 733 bytes LARGER after brotli,
+because it optimises raw size and hands every identifier its own name. The build takes
+its analysis (`--no-mangle --no-whitespace`) and keeps our naming: 287 bytes better than
+either alone. `--no-whitespace` is required - globals are found with a line-anchored
+pattern that a one-line file defeats. Its validator also rejects our `atomicAdd` calls as
+`@must_use` where Dawn accepts them, so `wgslender validate` reports errors on a shader
+that compiles and runs. Re-check all 17 entry points survive tree-shaking after adding a
+compute pass.
+
 **Never rename a member access.** The substitution uses a `(?<![.\w])` guard so a rename of
 `pos` cannot touch `p.pos`.
 

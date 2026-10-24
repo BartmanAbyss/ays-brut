@@ -16,3 +16,7 @@ build/best.html
 build/best.wgsl
 build/_verify.cmd
 __pycache__/
+build/pre.wgsl
+build/wl_*.wgsl
+build/combo*
+build/err.txt

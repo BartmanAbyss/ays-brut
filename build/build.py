@@ -128,6 +128,38 @@ global_invocation_id local_invocation_id workgroup_id num_workgroups position
 vertex_index instance_index front_facing frag_depth sample_index sample_mask""".split())
 
 
+def tree_shake(w):
+    """Hand the shader to wgslender for dead-code elimination and syntax-level rewrites,
+    but NOT for renaming or whitespace.
+
+    Its own renaming optimises RAW size: distinct short names everywhere. Measured on this
+    payload that is 599 bytes smaller on disk and 733 bytes LARGER after brotli, because
+    distinct names destroy the repetition the compressor feeds on. So we take its analysis
+    and keep our own naming. --no-whitespace matters too: our renamer finds globals with a
+    line-anchored pattern, which a one-line file would defeat.
+
+    Optional: if wgslender is not installed the build still works, 287 bytes heavier.
+    """
+    tmp_in = os.path.join(ROOT, '_shake_in.wgsl')
+    tmp_out = os.path.join(ROOT, '_shake_out.wgsl')
+    try:
+        io.open(tmp_in, 'wb').write(w.encode())
+        r = subprocess.run('npx --yes wgslender --no-mangle --no-whitespace "%s" -o "%s"'
+                           % (tmp_in, tmp_out), capture_output=True, timeout=300, shell=True)
+        if r.returncode == 0 and os.path.exists(tmp_out):
+            out = io.open(tmp_out, encoding='utf-8').read()
+            if len(out) > 1000:
+                return out, True
+        print('  wgslender failed: %s' % r.stderr.decode()[:200])
+    except Exception as e:
+        print('  wgslender unavailable (%s)' % e)
+    finally:
+        for f in (tmp_in, tmp_out):
+            if os.path.exists(f):
+                os.remove(f)
+    return w, False
+
+
 def _pool(w):
     """Candidate names, shortest first. Everything past the single letters carries a digit
     so it cannot collide with a WGSL keyword or reserved word (`as` got generated once).
@@ -255,6 +287,9 @@ def main():
     print('dev code removed wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
 
     io.open(os.path.join(ROOT, 'strip.js'), 'wb').write(js.encode())
+    wgsl, shaken = tree_shake(wgsl)
+    if shaken:
+        print('tree-shaken      wgsl %7d   (wgslender: dead code + syntax)' % len(wgsl.encode()))
     wmin = minify_wgsl(wgsl, js)
     jmin, how = minify_js(js)
     print('minified (%-8s) wgsl %7d   js %7d' % (how, len(wmin.encode()), len(jmin.encode())))

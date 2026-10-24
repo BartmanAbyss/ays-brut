@@ -422,7 +422,10 @@ renaming heuristic precisely because nothing measured the compressed output.
 | + globals renamed | 23 690 | 10 212 |
 | + globals, frequency-ordered names | 23 690 | 10 216 |
 | + globals + locals, **fresh** names | 23 329 | 10 462 |
-| + globals + locals, **names reused** | 23 329 | **10 171** |
+| + globals + locals, **names reused** | 23 329 | 10 171 |
+| wgslender, its own renaming | 22 985 | 10 926 |
+| wgslender + `--mangle-external-bindings` | 22 730 | 10 904 |
+| **wgslender tree-shake + our naming** | **22 190** | **9 884** |
 
 The last two rows are the whole lesson. **Identical source size, 291 bytes apart after
 brotli** — the only difference is whether the same few names recur from function to
@@ -438,6 +441,28 @@ order made name assignment nondeterministic, moving the result about 30 bytes be
 INCENDIUM's Pakettic-derived packer does.
 
 Frequency-ordering as a tie-break is worth nothing here (+4 bytes, noise).
+
+### Why the build uses wgslender for analysis but not for names
+
+[wgslender](https://github.com/HugoDaniel/wgslender) is a real WGSL toolchain on a real
+parser, and it beats our regex at everything structural: it tree-shakes dead declarations
+and rewrites syntax, which our minifier cannot do at all. Used as intended it is also
+**599 bytes smaller on disk and 733 bytes larger after brotli** than ours, for the same
+reason fresh local names lost above — it optimises raw size, so it gives every identifier
+its own short name and the repetition goes away.
+
+So the build takes its analysis and keeps our naming: `--no-mangle --no-whitespace`, then
+our renamer. Worth **287 bytes** over either alone. `--no-whitespace` is not optional:
+globals are found with a line-anchored pattern, which a one-line file defeats.
+
+The pre-pass is optional — the build runs without Node, 287 bytes heavier. Two notes for
+anyone repeating this: wgslender's validator rejects our `atomicAdd` calls as `@must_use`
+where Dawn accepts them, so `validate` reports errors on a shader that compiles and runs;
+and all 17 entry points survive its tree-shaking, which is worth re-checking whenever a
+compute pass is added.
+
+[washi](https://github.com/datatrash/washi) was the other candidate and is not usable here:
+no prebuilt releases, cargo required, and its own README recommends wgslender instead.
 
 ### Where it lands today (no music, first draft timeline)
 
