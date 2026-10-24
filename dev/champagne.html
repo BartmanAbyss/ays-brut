@@ -1734,12 +1734,16 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ({ binding, resource: { buffer } })) });
 
 
+  // The ASYNC creators, awaited: they resolve only once the pipeline is compiled. Chromium's
+  // plain createXPipeline returns at once and compiles lazily, so on a cold shader cache (a
+  // fresh profile, as at the compo) the first frame after the click waited 3-7 s while the
+  // music already played. Now that wait happens before "click" appears.
   const P = {};
   for (const n of ('simParticles puddleUpdate waveUpdate puddleCoarse ' +
                    'clearFine scatterFine jfaCoarse resolveFine ' +
                    'causticDecay photons causticBlur').split(' '))
-    P[n] = device.createComputePipeline({ layout, compute: { module, entryPoint: n } });
-  const render = device.createRenderPipeline({ layout,
+    P[n] = await device.createComputePipelineAsync({ layout, compute: { module, entryPoint: n } });
+  const render = await device.createRenderPipelineAsync({ layout,
     vertex:   { module, entryPoint: 'vs' },
     fragment: { module, entryPoint: 'fs', targets: [{ format }] },
   });

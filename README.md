@@ -736,7 +736,7 @@ below, and a 120-round packer search on the result.
 the song and any text. How much those need decides whether any feature cuts are needed
 (*Feature cuts, measured*, below).
 
-#### Start screen and music hookup: 7 967 -> 8 078
+#### Start screen and music hookup: 7 967 -> 8 083
 
 The release opens on the word "click", unstyled (black on white, top left: centred
 white-on-black cost 55 bytes), which appears only once everything is loaded
@@ -765,11 +765,13 @@ often as behind.
 Two things it showed:
 - **The release renders at the SCREEN's size** (`screen.width/height`). On a 1440p monitor
   that is 1.78x the pixels the 1080p budget is set for, so it looks slow on any browser.
-- **Chromium compiles pipelines lazily.** "click" appears ~0.5 s after load, but on a cold
-  shader cache (a fresh profile, as on the compo machine) the first frame then waits 3-7 s
-  while the audio clock already runs, so the picture starts that far into the show.
-  Firefox compiles inside `createComputePipeline` and shows "click" only after (~2.9 s),
-  so it has no stall.
+- **Chromium compiles pipelines lazily** - fixed, +5 bytes. "click" appeared ~0.5 s after
+  load, but on a cold shader cache (a fresh profile, as on the compo machine) the first
+  frame then waited 3-7 s while the audio clock already ran, so the picture started that far
+  into the show. Firefox compiles inside `createComputePipeline` and had no stall. The
+  pipelines are now made with the awaited `create*PipelineAsync`, which resolve only once
+  compiled: cold, both browsers show "click" at ~3 s and the first frame follows within
+  6 ms of the click.
 
 #### Non-feature pass: 8 333 -> 7 967
 
