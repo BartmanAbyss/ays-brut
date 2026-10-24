@@ -218,6 +218,28 @@ A dropper that inflates is why the payload needs no encoding at all: base64 cost
 and the byte-string alternative still needs escaping. Let PowerShell do the inflating and
 the bytes go in raw.
 
+## Minifying
+
+**Score every change on COMPRESSED bytes.** `python build/experiment.py` builds the real
+payload under each strategy and reports brotli. Source size is not a proxy: renaming every
+local to a fresh short name makes the file 361 bytes smaller and the brotli output 250
+bytes *bigger*.
+
+**A good name is one you reuse.** Locals drawing from the same pool in every function, so
+`a`, `b`, `c` recur, beat per-function fresh names by 291 bytes at identical source size.
+That is the entire mechanism: the compressor rewards repetition, not brevity.
+
+**Order the name pool by LENGTH first.** Ranking by average character frequency put 3-char
+names above 2-char ones and renamed locals from 2 characters to 3, costing 325 characters
+before compression even ran.
+
+**Sort before assigning, or the build is nondeterministic.** Set iteration order moved the
+compressed result ~30 bytes a run, which is larger than most wins being measured. (It also
+shows a search over assignments is worth real bytes - what Pakettic-style packers do.)
+
+**Never rename a member access.** The substitution uses a `(?<![.\w])` guard so a rename of
+`pos` cannot touch `p.pos`.
+
 ## Ground rules
 
 - Performance budget is **16.6 ms** at **1920×1080** (confirmed) on the compo PC, an **RTX

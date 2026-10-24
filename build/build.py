@@ -128,37 +128,94 @@ global_invocation_id local_invocation_id workgroup_id num_workgroups position
 vertex_index instance_index front_facing frag_depth sample_index sample_mask""".split())
 
 
+def _pool(w):
+    """Candidate names, shortest first. Everything past the single letters carries a digit
+    so it cannot collide with a WGSL keyword or reserved word (`as` got generated once).
+    Length is the primary key: ranking by average character frequency alone put 3-char
+    names above 2-char ones and renamed locals from 2 characters to 3."""
+    alpha = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    pool = ([c for c in alpha]
+            + [a + d for a in alpha for d in '0123456789']
+            + [a + d + e for a in alpha for d in '0123456789' for e in '0123456789'])
+    pool = [n for n in pool if n not in WGSL_KEEP]
+    used = set(re.findall(r'\b\w+\b', w))
+    freq = {}
+    for ch in w:
+        freq[ch] = freq.get(ch, 0) + 1
+    pool = [n for n in pool if n not in used]
+    pool.sort(key=lambda n: (len(n), -sum(freq.get(c, 0) for c in n), n))
+    return pool
+
+
+def _sub(w, old, new):
+    # never rewrite a member access: a rename of `pos` must not touch `p.pos`
+    return re.sub(r'(?<![.\w])%s\b' % re.escape(old), new, w)
+
+
+def _protected(w, js):
+    """Anything the host addresses by name. Two deliberately overlapping sources: any fn
+    carrying an entry-point attribute, matched across newlines because `@vertex fn vs(`
+    sits on ONE line and a newline-requiring pattern missed it (renamed entry point ->
+    invalid pipeline -> a WebGPU *warning*, not an error, and a black screen); and every
+    quoted word in the JS, which covers entryPoint: 'x' however it is spelled."""
+    e = set(re.findall(r"@(?:compute|vertex|fragment)[\s\S]{0,160}?\bfn\s+(\w+)", w))
+    e |= set(re.findall(r"['\"]([A-Za-z_]\w*)['\"]", js))
+    return e
+
+
+def _func_spans(w):
+    """(decl start, body open brace, body close brace) for each function, braces matched."""
+    for m in re.finditer(r'\bfn\s+\w+\s*\([^)]*\)[^{]*\{', w):
+        i = m.end() - 1
+        depth, j = 0, i
+        while j < len(w):
+            if w[j] == '{':
+                depth += 1
+            elif w[j] == '}':
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        yield m.start(), i, j
+
+
 def minify_wgsl(w, js=''):
     w = re.sub(r'/\*.*?\*/', '', w, flags=re.S)
     w = re.sub(r'//[^\n]*', '', w)
-    # rename globals: function, top-level const and struct names
-    names = set(re.findall(r'\bfn\s+(\w+)', w)) | set(re.findall(r'(?m)^const\s+(\w+)', w)) \
-        | set(re.findall(r'\bstruct\s+(\w+)', w))
-    names = {n for n in names if n not in WGSL_KEEP and len(n) > 1}
-    # Anything the host addresses BY NAME keeps its name. Two deliberately overlapping
-    # sources: any fn carrying an entry-point attribute, matched across newlines because
-    # `@vertex fn vs(` sits on ONE line and a newline-requiring pattern missed it - which
-    # renamed the entry point, made the pipeline invalid, and showed up only as a WebGPU
-    # *warning* and a black screen; and every quoted word in the JS, which covers
-    # entryPoint: 'x' however it is spelled. Over-protecting costs bytes, under-protecting
-    # costs a silent black screen.
-    entries = set(re.findall(r"@(?:compute|vertex|fragment)[\s\S]{0,160}?\bfn\s+(\w+)", w))
-    entries |= set(re.findall(r"['\"]([A-Za-z_]\w*)['\"]", js))
-    names -= entries
-    # Every generated name after the single letters carries a digit, so it cannot collide
-    # with a WGSL keyword or reserved word - `as` got generated once and broke the build.
-    alphabet = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
-    pool = ([c for c in alphabet]
-            + [a + d for a in alphabet for d in '0123456789']
-            + [a + d + e for a in alphabet for d in '0123456789' for e in '0123456789'])
-    pool = [p for p in pool if p not in WGSL_KEEP]
-    used = set(re.findall(r'\b\w+\b', w))
-    pool = [p for p in pool if p not in used]
-    for n, short in zip(sorted(names, key=lambda x: -len(x)), pool):
-        w = re.sub(r'\b%s\b' % re.escape(n), short, w)
+
+    # globals
+    names = (set(re.findall(r'\bfn\s+(\w+)', w))
+             | set(re.findall(r'(?m)^const\s+(\w+)', w))
+             | set(re.findall(r'\bstruct\s+(\w+)', w)))
+    names = {n for n in names if n not in WGSL_KEEP and len(n) > 1} - _protected(w, js)
+    for n, short in zip(sorted(names, key=lambda x: (-len(x), x)), _pool(w)):
+        w = _sub(w, n, short)
+
+    # Locals, drawing from the SAME pool in every function so the same few names recur.
+    # Measured on this payload: reusing names and giving every function fresh ones produce
+    # an IDENTICAL source size and differ by 291 bytes after brotli. Brevity is not the
+    # lever; repetition is. Fresh names are even worse than not renaming locals at all.
+    pool = _pool(w)
+    out, last = [], 0
+    for a, bi, b in _func_spans(w):
+        head, body = w[a:bi], w[bi:b + 1]
+        decls = set(re.findall(r'\b(?:let|var)\s+(\w+)', body)) | set(re.findall(r'(\w+)\s*:', head))
+        decls = {d for d in decls if d not in WGSL_KEEP and len(d) > 1}
+        # an identifier the function mentions but does not declare is off limits: taking
+        # its name for a local would shadow the global and silently change meaning
+        referenced = set(re.findall(r'(?<![.\w])([A-Za-z_]\w*)', head + body))
+        avail = [n for n in pool if n not in (referenced - decls) | WGSL_KEEP]
+        seg = head + body
+        for d, short in zip(sorted(decls, key=lambda x: (-len(x), x)), avail):
+            seg = _sub(seg, d, short)
+        out.append(w[last:a])
+        out.append(seg)
+        last = b + 1
+    out.append(w[last:])
+    w = ''.join(out)
+
     w = re.sub(r'\s+', ' ', w)
     w = re.sub(r'\s*([{}()\[\],;:+\-*/<>=&|!?%])\s*', r'\1', w)
-    w = w.replace('->', '->').replace('  ', ' ')
     return w.strip()
 
 
@@ -231,30 +288,33 @@ def main():
     io.open(OUT, 'wb').write(loader.encode())
 
     # ── the real deliverable: a self-extracting .cmd ────────────────────────────
-    # Stock Windows PowerShell is 5.1 on .NET Framework, which has DeflateStream but
-    # NOT BrotliStream, and pwsh 7 is not a safe assumption on a compo machine. So the
-    # dropper inflates deflate; brotli is only reachable from a native exe. Because the
-    # dropper inflates, the payload sits in the file as RAW BYTES - no base64, no string
-    # escaping, no encoding overhead at all.
+    # It does NOT decompress. Stock Windows PowerShell is 5.1 on .NET Framework, which
+    # has no BrotliStream, and the browser's DecompressionStream has no brotli either -
+    # so inflating here would force deflate and cost ~1 kB. Instead the dropper SERVES
+    # its own bytes over the Windows built-in HTTP server with Content-Encoding: br, and
+    # the browser decodes brotli natively. This is INCENDIUM's trick. HttpListener binds
+    # localhost without elevation (checked).
+    PORT = 8044
     head = ('@set "f=%~f0"&powershell -nop -ep bypass -c '
-            '"$b=[IO.File]::ReadAllBytes($env:f);'
-            '$m=New-Object IO.MemoryStream(,$b[@@@@@..($b.Length-1)]);'
-            # New-Object cannot tell CompressionMode 0 from CompressionLevel 0, so the
-            # enum is named explicitly - 33 bytes to stop an ambiguous-overload throw
-            '$d=New-Object IO.Compression.DeflateStream($m,[IO.Compression.CompressionMode]0);'
-            '$o=New-Object IO.MemoryStream;$d.CopyTo($o);'
-            "$h=$env:TEMP+'\\i.html';"
-            '[IO.File]::WriteAllBytes($h,$o.ToArray());start $h"&exit/b\r\n')
+            '"$b=[IO.File]::ReadAllBytes($env:f);$l=New-Object Net.HttpListener;'
+            "$l.Prefixes.Add('http://localhost:%d/');$l.Start();"
+            'start http://localhost:%d;'
+            "$c=$l.GetContext();$r=$c.Response;$r.ContentType='text/html';"
+            "$r.Headers.Add('Content-Encoding','br');"
+            '$r.OutputStream.Write($b,@@@@@,$b.Length-@@@@@);$r.Close();$l.Stop()"&exit/b\r\n')
+    head = head.replace('%d', str(PORT))   # not %-formatting: the header contains %~f0
     # the offset is written into the header itself, so it is padded to a fixed width to
     # stop the digit count from moving what it points at
     off = len(head.encode('ascii'))
     head = head.replace('@@@@@', str(off).rjust(5, '0'))
     assert len(head.encode('ascii')) == off, 'header length moved'
-    cmd = head.encode('ascii') + raw_deflate
+    assert br, 'brotli module required for the dropper'
+    cmd = head.encode('ascii') + br
     io.open(os.path.join(ROOT, 'intro.cmd'), 'wb').write(cmd)
 
     print()
     print('dropper header         %8d' % off)
+    print('   (serves brotli over HTTP; no inflate on the host)')
     print('intro.cmd (DELIVERABLE)%8d' % len(cmd))
     print('payload (uncompressed) %8d' % len(pb))
     print('deflate-raw            %8d' % len(raw_deflate))
@@ -274,4 +334,5 @@ def main():
           'UNDER' if len(cmd) <= budget else 'OVER by %d' % (len(cmd) - budget)))
 
 
-main()
+if __name__ == '__main__':
+    main()

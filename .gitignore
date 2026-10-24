@@ -11,3 +11,8 @@ build/strip.js
 build/_min.js
 build/intro.cmd
 build/extracted.html
+build/served.html
+build/best.html
+build/best.wgsl
+build/_verify.cmd
+__pycache__/

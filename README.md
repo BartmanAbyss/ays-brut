@@ -409,6 +409,36 @@ else goes by rule, so the harness cannot quietly end up in the release:
   build asserts that none survive.
 - WGSL identifiers are renamed, except entry points and anything quoted in the JS.
 
+### What minification is actually worth
+
+Measured with `python build/experiment.py`, which scores each strategy on brotli bytes of
+the real payload. This is not optional rigour: shrinking the source does not guarantee a
+smaller compressed result, and Shader Minifier once shipped a size regression from a
+renaming heuristic precisely because nothing measured the compressed output.
+
+| WGSL strategy | raw | brotli |
+|---|---|---|
+| comments + whitespace only | 25 368 | 10 581 |
+| + globals renamed | 23 690 | 10 212 |
+| + globals, frequency-ordered names | 23 690 | 10 216 |
+| + globals + locals, **fresh** names | 23 329 | 10 462 |
+| + globals + locals, **names reused** | 23 329 | **10 171** |
+
+The last two rows are the whole lesson. **Identical source size, 291 bytes apart after
+brotli** — the only difference is whether the same few names recur from function to
+function. Brevity is not the lever; repetition is. Giving every function fresh names is
+worse than not renaming locals at all (10 462 against 10 212) while being 361 bytes smaller
+on disk: a smaller file that compresses worse.
+
+Two of my own bugs showed up in the same measurement and are worth remembering. Ranking
+candidate names by average character frequency put three-character names above
+two-character ones, so locals were renamed *from* 2 characters *to* 3. And set iteration
+order made name assignment nondeterministic, moving the result about 30 bytes between runs
+— which incidentally says a search over assignments has real bytes in it, exactly what
+INCENDIUM's Pakettic-derived packer does.
+
+Frequency-ordering as a tie-break is worth nothing here (+4 bytes, noise).
+
 ### Where it lands today (no music, first draft timeline)
 
 | Stage | WGSL | JS |
@@ -420,33 +450,29 @@ else goes by rule, so the harness cannot quietly end up in the release:
 
 | Packed | bytes |
 |---|---|
-| payload, uncompressed | 32 751 |
-| deflate-raw | 11 267 |
-| brotli q11 | 10 216 |
-| dropper header | 345 |
-| **`intro.cmd`, the deliverable** | **11 612** |
-| `intro.html` (base64, test convenience only) | 15 296 |
+| payload, uncompressed | 32 452 |
+| brotli q11 | 10 171 |
+| dropper header | 371 |
+| **`intro.cmd`, the deliverable** | **10 542** |
+| `intro.html` (base64, test convenience only) | 15 484 |
 
-**11 612 against 8192 — over by 3 420**, about 42%, before a byte of music.
+**10 542 against 8192 — over by 2 350**, about 29%, before a byte of music.
 
-### Brotli is not reachable from a dropper
+### Brotli, by serving rather than decompressing
 
-This was measured, not assumed. Stock Windows PowerShell is 5.1 on .NET Framework, which
-has `DeflateStream` but **no `BrotliStream`**; `pwsh` 7 is not a safe assumption on a compo
-machine. The browser cannot help either: `DecompressionStream` supports gzip, deflate and
-deflate-raw, and **no brotli**. So every route that is not a native exe pays deflate, and
-the 10 216 brotli figure is a fantasy number for this packaging — the real one is 11 267
-plus the dropper.
+Nothing on a stock Windows box can inflate brotli for us: PowerShell 5.1 runs on .NET
+Framework, which has `DeflateStream` but **no `BrotliStream`**, `pwsh` 7 is not a safe
+assumption, and the browser's `DecompressionStream` does gzip, deflate and deflate-raw but
+**never brotli**. All measured.
 
-But brotli is still reachable, and INCENDIUM shows how: **don't decompress — serve.** Its
-324-byte bootstrapper hands its own bytes to the Windows built-in HTTP server at an offset
-into itself, and the browser decodes `Content-Encoding: br` natively. Their README is
-explicit that brotli content can only be served over HTTP, never opened as a local file.
-That is the next change to the dropper here, and it is worth about 1 050 bytes
-(11 267 deflate against 10 216 brotli) for a bootstrapper no larger than the one we have.
+None of it matters, because the dropper does not decompress — it **serves**. This is
+INCENDIUM's trick: the bootstrapper hands its own bytes to the Windows built-in HTTP server
+at an offset into itself, and the browser decodes `Content-Encoding: br` natively. Their
+README says outright that brotli content can only be served over HTTP, never opened as a
+local file. `HttpListener` binds `localhost` without elevation, which was checked before
+building on it.
 
-After that the gap is roughly 2 350, and the levers are the WGSL locals, the dead uniform
-branches, and the packer.
+Worth 1 050 bytes over the deflate version, for a header that came out *smaller*.
 
 ### The dropper
 
