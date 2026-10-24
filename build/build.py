@@ -561,18 +561,27 @@ def main():
     # the browser decodes brotli natively. This is INCENDIUM's trick. HttpListener binds
     # localhost without elevation (checked).
     PORT = 8044
-    head = ('@set "f=%~f0"&powershell -nop -ep bypass -c '
-            '"$b=[IO.File]::ReadAllBytes($env:f);$l=New-Object Net.HttpListener;'
-            "$l.Prefixes.Add('http://localhost:%d/');$l.Start();"
-            'start http://localhost:%d;'
-            "$c=$l.GetContext();$r=$c.Response;$r.ContentType='text/html';"
-            "$r.Headers.Add('Content-Encoding','br');"
-            '$r.OutputStream.Write($b,@@@@@,$b.Length-@@@@@);$r.Close();$l.Stop()"&exit/b\r\n')
-    head = head.replace('%d', str(PORT))   # not %-formatting: the header contains %~f0
-    # the offset is written into the header itself, so it is padded to a fixed width to
-    # stop the digit count from moving what it points at
-    off = len(head.encode('ascii'))
-    head = head.replace('@@@@@', str(off).rjust(5, '0'))
+    # Golfed (371 -> 310 bytes, uncompressed, so every one counts):
+    # - cmd expands %~f0 into the command line itself: no `set` and no $env:f. The path sits
+    #   in single quotes, so a folder name containing an apostrophe would break it.
+    # - no `-ep bypass`: execution policy governs script files, not a -c command string
+    # - the URL once, in $u; [Net.HttpListener]::new() (PowerShell 5+, what Windows ships)
+    # - GetContext().Response in one go; AddHeader; no $l.Stop() - the process exits anyway
+    # Kept: -nop (a user profile could print or slow the start) and ContentType (without it
+    # the browser sniffs, and its HTML sniffer does not recognise a page opening `<canvas`).
+    head = ("@powershell -nop -c \"$b=[IO.File]::ReadAllBytes('%~f0');$l=[Net.HttpListener]::new();"
+            "$u='http://localhost:@PORT@/';$l.Prefixes.Add($u);$l.Start();start $u;"
+            "$r=$l.GetContext().Response;$r.ContentType='text/html';"
+            "$r.AddHeader('Content-Encoding','br');"
+            "$r.OutputStream.Write($b,@@,$b.Length-@@);$r.Close()\"&exit/b\r\n")
+    head = head.replace('@PORT@', str(PORT))   # not %-formatting: the header contains %~f0
+    # The offset is written into the header itself; find the length that is consistent
+    # with its own digit count (3 digits for any plausible header).
+    for digits in range(1, 6):
+        off = len(head.replace('@@', '0' * digits).encode('ascii'))
+        if len(str(off)) == digits:
+            break
+    head = head.replace('@@', str(off))
     assert len(head.encode('ascii')) == off, 'header length moved'
     assert br, 'brotli module required for the dropper'
     cmd = head.encode('ascii') + br
