@@ -222,26 +222,37 @@ The compo runs at **1920×1080**, confirmed with the organisers.
 
 ### Where it stands
 
-RTX 4070, 1920×1080, every camera preset at fill 88, everything on. Median of ~20 samples
-after warm-up, window on screen:
+RTX 4070, 1920×1080, everything on, at the **heavy natural state**: `det=1`, run to step
+3120 (t = 52 s, tower overflowing), `simSpeed` 0, then each camera preset in turn. Median
+of 18 samples, measured 24 Oct 2026 after the profiler work (packed far field, exact block
+reach, plane-bounded march, local puddle bound). Frozen, so `sim` is 0. Running, the sim
+adds **0.52 ms per step**: one per frame at 60 fps, two when a frame runs long.
 
-| Shot | sim | build | photon | render | **total** | fps |
+| Shot | build | photon | render | **total frozen** | **+ sim** | vs 19 ms |
 |---|---|---|---|---|---|---|
-| tower | 0.13 | 1.84 | 1.84 | 9.76 | **13.57** | 74 |
-| bottl | 0.20 | 1.84 | 1.84 | 12.45 | **16.25** | 62 |
-| macro | 0.13 | 1.84 | 1.84 | 13.43 | **17.24** | 58 |
-| top | 0.13 | 1.84 | 1.84 | 15.66 | **19.46** | 52 |
-| pour | 0.20 | 1.84 | 1.84 | 17.04 | **20.84** | 50 |
-| **tier2** | 0.20 | 1.84 | 1.84 | **22.61** | **26.48** | 38 |
+| tower | 2.10 | 1.64 | 7.60 | **11.3** | 11.9 | passes, 7 ms spare |
+| bottl | 2.16 | 1.64 | 8.45 | **12.2** | 12.7 | passes |
+| top | 2.10 | 1.64 | 11.01 | **14.8** | 15.3 | passes |
+| macro | 2.10 | 1.64 | 11.93 | **15.7** | 16.2 | passes |
+| pour | 2.10 | 1.64 | 14.75 | **18.6** | 19.1 | on the line |
+| **tier2** | 2.16 | 1.64 | **18.28** | **22.0** | **22.5** | **~3.5 over** |
 
-`tier2` is 25.5 after the occupancy skip described below; the rest are unchanged.
+Everything but `render` is a flat ~4.3 ms (build 2.1, photons 1.6, sim 0.5). It was 3.8;
+build grew with the deterministic far field, and photons shrank when they stopped at the
+table. `render` swings 7.6–18.3 with how much glass, liquid and spray the camera looks
+through.
 
-Everything but `render` is flat at **~3.8 ms** regardless of shot or resolution. `render`
-swings 9.8–22.6 depending on how much glass and liquid the camera is looking through.
+Five of six shots are at or under 19 ms. `tier2` is the one left, and it is
+state-dependent: 160 steps later, with more spray in view, the same camera read 20.3 ms
+render. The earlier table (fill 88, a much lighter state, before this work) had tier2 at
+26.5, pour 20.8, top 19.5. Those numbers are not comparable to these, and the gain on
+tier2 in the heavy state is 29.9 → 22.0.
 
-Against the 19 ms target: four of six shots pass, `pour` is 10% over and `tier2` is **40%
-over**. It is a camera-dependent problem, not a uniform one, which matters for the timeline —
-the cheapest shots are also the widest, and tier2 is the expensive one to linger on.
+On the compo machine's RTX 5070 (~15–20% faster) the 16.6 ms budget corresponds to the
+19 ms here, so the same standings hold. The timeline can stay on every shot except tier2
+in heavy spray. To make tier2 fit: cut ~3.5 ms there, avoid holding on it while the spill
+is at its densest, or take the `bounces` trade on that shot only (about 1.1 ms per bounce,
+visible on the rim glints).
 
 ### What each lever actually buys
 
