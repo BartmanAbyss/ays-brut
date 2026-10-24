@@ -1365,6 +1365,8 @@ const cfg = {
   cgain:    qf('cgain', 0.05),
   paused:   Q.get('pause') === '1',
   det:      Q.get('det') === '1' || Q.get('still') === '1',   // frame N is always step N
+  show:     Q.get('show') === '1',     // run the timeline instead of the manual camera
+  showt:    qf('showt', 0),            // seek here on load (how a backward scrub works)
 };
 
 const FINE = 320, COARSE = 32, NG = 14, WN = 32, CN = 768, PN = 384, PCN = 48;
@@ -1385,7 +1387,7 @@ function fail(where, e) {
 const probe = {
   ok: false, adapter: null, features: [], errors,
   frameMs: 0, fps: 0, gpuMs: {}, frames: 0, time: 0, live: 0, selftest: null,
-  drift: 0, resyncs: 0, step: 0,
+  drift: 0, resyncs: 0, step: 0, showT: 0, shot: 0,
 };
 window.__probe = () => JSON.parse(JSON.stringify(probe));
 
@@ -1580,17 +1582,28 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   const SIM_DT = 1 / 60;
   const LAG_STEPS = 30;        // 0.5 s behind the clock before we give up the missed steps
   let clockT = 0;              // master clock, seconds; the sim step index derives from it
+  let showStep = 0;            // show time in whole SIM_DT steps - the clock the music owns
+  let showPend = 0, showT = 0, burstSteps = 0;
   const f32 = new Float32Array(48);
   const t0 = performance.now();
   let last = t0, acc = 0, accN = 0, frameNo = 0, simStep = 0, ffSteps = 0;
   const pudBound = [0, 0, 0.02];   // wet-region bounding circle, from the coarse readback
 
   function writeUniforms(time) {
-    let ang;
-    if (ui.spin) { ang = time * 0.25; setUI('angle', (ang * 180 / Math.PI) % 360); }
-    else         { ang = ui.angle * Math.PI / 180; }
-    const cam = [Math.sin(ang) * ui.dist, ui.camY, Math.cos(ang) * ui.dist];
-    const tgt = [0, ui.tgtY, 0];
+    let ang, dist = ui.dist, camY = ui.camY, tgtY = ui.tgtY;
+    if (ui.show) {
+      const sh = evalShow(showT);
+      ang = sh.angle * Math.PI / 180; dist = sh.dist; camY = sh.camY; tgtY = sh.tgtY;
+      // Sliders follow for readout only. Driving the camera THROUGH them would quantise it
+      // to the slider step - dist steps by 0.01, visible stepping on a push-in that only
+      // covers 0.01 in eight seconds.
+      setUI('angle', sh.angle.toFixed(1)); setUI('dist', sh.dist.toFixed(2));
+      setUI('camY', sh.camY.toFixed(3));   setUI('tgtY', sh.tgtY.toFixed(3));
+    }
+    else if (ui.spin) { ang = time * 0.25; setUI('angle', (ang * 180 / Math.PI) % 360); }
+    else              { ang = ui.angle * Math.PI / 180; }
+    const cam = [Math.sin(ang) * dist, camY, Math.cos(ang) * dist];
+    const tgt = [0, tgtY, 0];
     f32[0] = canvas.width; f32[1] = canvas.height; f32[2] = time; f32[3] = ui.view;
     f32[4] = cam[0]; f32[5] = cam[1]; f32[6] = cam[2];
     f32[7] = 1.6;
@@ -1713,8 +1726,19 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // at 74 fps, 37% slow at 38 - and against music that error accumulates over the
     // whole run. A deficit is now KEPT and worked off over the following frames rather
     // than discarded, which is the part that makes a hitch cost nothing in the end.
-    if (cfg.det) { clockT += SIM_DT * ui.simSpeed; }          // frame N is always step N
-    else         { clockT += Math.min((now - last) / 1000, 0.25) * ui.simSpeed; }
+    // The show clock advances in whole SIM_DT steps locked to wall time (later, to the
+    // audio clock). The sim clock is the INTEGRAL of the timeline's speed over those
+    // steps - integrating against the wall delta instead would make a timeline that
+    // varies speed frame-rate dependent all over again, the bug this replaced.
+    showPend += cfg.det ? SIM_DT : Math.min((now - last) / 1000, 0.25);
+    const nShow = Math.floor(showPend / SIM_DT);
+    showPend -= nShow * SIM_DT;
+    for (let i = 0; i < nShow; i++) {
+      const sp = ui.show ? evalShow((showStep + i) * SIM_DT).speed : 1;
+      clockT += SIM_DT * sp * ui.simSpeed;
+    }
+    showStep += nShow; showT = showStep * SIM_DT;
+    if (ui.show && nShow) { setUI('showT', Math.min(showT, SHOW_END).toFixed(2)); }
     // Fast-forward is a deliberate burst, not a hitch: it has to actually simulate its
     // steps or the glasses never fill, so it raises the ceiling for this frame only. The
     // substep slots wrap every 16, so a burst reuses RNG streams - fine when skipping
@@ -1725,8 +1749,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // 16 is the steady-state ceiling: the sub-step index reaches the shader through 16
     // uniform slots, and reusing one would make two substeps share an RNG stream - the
     // bug that used to thin the pour whenever a frame ran long.
+    const burst = burstSteps; burstSteps = 0;
     const want = Math.floor(clockT / SIM_DT) - simStep;
-    const simSteps = Math.max(0, Math.min(16 + ffNow, want));
+    const simSteps = Math.max(0, Math.min(16 + ffNow + burst, want));
     if (want - simSteps > LAG_STEPS) {
       // Persistently too slow to hold the clock. In a demo sync beats continuity: drop
       // the steps we cannot afford so the picture stays with the music, and count it so
@@ -1739,6 +1764,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     probe.time  = time;
     probe.step  = simStep + simSteps;
     probe.drift = clockT - probe.step * SIM_DT;
+    probe.showT = showT; probe.shot = ui.show ? evalShow(showT).shot : -1;
     writeUniforms(time);
 
     const enc = device.createCommandEncoder();
@@ -1748,10 +1774,20 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     cp.setBindGroup(0, bg0); cp.setBindGroup(1, bg1, [0]);
     // Fixed-step accumulator: the sim must advance at the same rate on a 60 Hz compo
     // machine as on a 165 Hz monitor. Driving dt off the frame rate made it 2.75x fast here.
-    cp.setPipeline(P.sim);
+    // Everything that ADVANCES STATE runs per sim step: particles, the table puddle, the
+    // per-glass volume ODE and the wave field. The last three used to sit in the build
+    // pass, which runs once a frame, so the bulk advanced at the FRAME rate while the
+    // particles advanced on the clock. It hid at 60 fps because frames and steps matched;
+    // a seek running 3000 steps in one frame filled exactly one glass and showed it.
+    // The SDF build below is a rendering structure, needs only the final state, and so is
+    // correctly per frame.
     for (let k = 0; k < simSteps; k++) {
       cp.setBindGroup(1, bg1, [(SUBSLOT + (k % 16)) * 256]);
-      cp.dispatchWorkgroups(WG(cfg.npart, 64));
+      cp.setPipeline(P.sim);    cp.dispatchWorkgroups(WG(cfg.npart, 64));
+      cp.setPipeline(P.puddle); cp.dispatchWorkgroups(WG(PN * PN, 256));
+      cp.setPipeline(P.glass);  cp.dispatchWorkgroups(1);
+      cp.setPipeline(P.wave);
+      for (let w = 0; w < 3; w++) { cp.dispatchWorkgroups(WG(NG * WN * WN, 64)); }
     }
     cp.setBindGroup(1, bg1, [0]);
     cp.end();
@@ -1759,7 +1795,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // 2 — build the distance field (ordered dispatches share one pass)
     cp = enc.beginComputePass({ timestampWrites: ts(1) });
     cp.setBindGroup(0, bg0); cp.setBindGroup(1, bg1, [0]);
-    cp.setPipeline(P.puddle);  cp.dispatchWorkgroups(WG(PN * PN, 256));
     cp.setPipeline(P.pudC);    cp.dispatchWorkgroups(WG(PCN * PCN, 64));
     cp.setPipeline(P.pudJ);
     for (let k = 0; k < JFA_STRIDES.length; k++) {
@@ -1767,9 +1802,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       cp.dispatchWorkgroups(WG(PCN * PCN, 64));
     }
     cp.setBindGroup(1, bg1, [0]);
-    cp.setPipeline(P.glass);   cp.dispatchWorkgroups(1);
-    cp.setPipeline(P.wave);
-    for (let k = 0; k < 3; k++) cp.dispatchWorkgroups(WG(NG * WN * WN, 64));
     cp.setPipeline(P.clearF);  cp.dispatchWorkgroups(WG(FINE_N, 512));
     cp.setPipeline(P.clearC);  cp.dispatchWorkgroups(WG(COARSE_N, 64));
     cp.setPipeline(P.scatter); cp.dispatchWorkgroups(WG(cfg.npart, 64));
@@ -1840,14 +1872,76 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       'rend  ' + f('render') + ' ms\n' +
       'gpu   ' + f('total') + ' ms\n' +
       't     ' + probe.time.toFixed(2) + ' s' + (cfg.t !== null ? ' (fixed)' : '') + (cfg.det ? '  det' : '') + '\n' +
+      (ui.show ? 'show  ' + probe.showT.toFixed(2) + ' / ' + SHOW_END +
+        '  shot ' + probe.shot + String.fromCharCode(10) : '') +
       'step  ' + probe.step + '   drift ' + (probe.drift * 1000).toFixed(1) + ' ms' +
         (probe.resyncs ? '   resync ' + probe.resyncs : '') + String.fromCharCode(10) +
       (probe.adapter?.vendor ?? '?') + ' / ' + (probe.adapter?.architecture ?? '?') +
       (errors.length ? '\nERRORS ' + errors.length : '');
   }
 
+  // ── timeline ──
+  // Keys are [t, angle deg, dist, camY, tgtY, simSpeed, ease]. Two keys sharing a t are
+  // a CUT: the later one wins at that instant, so the change is immediate rather than a
+  // one-frame blend. `ease` applies to the segment STARTING at that key - 1 for
+  // smootherstep in and out, 0 for linear, so a long drift can run through several keys
+  // without stalling at each one. simSpeed is keyed too: the fill takes ~30 s of sim time
+  // and the camera does not want to wait for it, so the wide shots run the fluid faster.
+  const SHOW = [
+    [  0, 200, 1.000, 0.620, 0.280, 1.0, 1],   // high and wide, tower still empty
+    [  9, 216, 0.820, 0.470, 0.270, 1.0, 1],
+    [  9,  39, 0.180, 0.520, 0.480, 1.0, 1],   // cut: macro, stream into the top glass
+    [ 18,  62, 0.170, 0.550, 0.492, 1.0, 1],
+    [ 18,  39, 0.260, 0.400, 0.320, 1.0, 1],   // cut: tier 2 taking the overflow
+    [ 27,  10, 0.300, 0.360, 0.300, 1.0, 1],
+    [ 27, 124, 0.330, 0.170, 0.220, 1.0, 1],   // cut: low, looking up through the stems
+    [ 36, 152, 0.360, 0.300, 0.240, 1.0, 1],
+    [ 36,  32, 0.420, 0.460, 0.010, 1.0, 1],   // cut: down onto the table, caustics
+    [ 45,  92, 0.460, 0.500, 0.010, 1.0, 1],
+    [ 45, 250, 0.560, 0.400, 0.260, 1.0, 1],   // cut: pull back out
+    [ 56, 300, 0.950, 0.500, 0.270, 1.0, 0],
+    [ 60, 322, 1.000, 0.520, 0.270, 1.0, 0],
+  ];
+  const SHOW_END = SHOW[SHOW.length - 1][0];
+  function evalShow(t) {
+    t = Math.max(0, Math.min(t, SHOW_END));
+    let i = 0;
+    while (i < SHOW.length - 1 && SHOW[i + 1][0] <= t) { i++; }
+    const a = SHOW[i], b = SHOW[Math.min(i + 1, SHOW.length - 1)];
+    const span = b[0] - a[0];
+    let u = span > 1e-6 ? (t - a[0]) / span : 0;
+    if (a[6]) { u = u * u * u * (u * (u * 6 - 15) + 10); }   // smootherstep, as for shapes
+    const m = k => a[k] + (b[k] - a[k]) * u;
+    return { shot: i, angle: m(1), dist: m(2), camY: m(3), tgtY: m(4), speed: m(5) };
+  }
+  // Sim seconds elapsed by show time t. A seek needs the same integral the frame loop
+  // builds step by step, or scrubbing would land somewhere playback never visits.
+  function showIntegral(t) {
+    let c = 0;
+    const n = Math.round(t / SIM_DT);
+    for (let i = 0; i < n; i++) { c += evalShow(i * SIM_DT).speed * SIM_DT * ui.simSpeed; }
+    return c;
+  }
+  function seekShow(t) {
+    const want = showIntegral(t);
+    if (want < clockT - 1e-6) {
+      // The fluid has no inverse - you cannot un-pour it - so going back means building
+      // the state again from zero. Reload carrying the target; load-time seek does the rest.
+      const q = new URLSearchParams(location.search);
+      q.set('show', '1'); q.set('showt', t.toFixed(2));
+      location.search = q.toString();
+      return;
+    }
+    showStep = Math.round(t / SIM_DT); showT = showStep * SIM_DT; showPend = 0;
+    clockT = want;
+    burstSteps = Math.max(0, Math.ceil(want / SIM_DT) - simStep);   // may pass the cap
+    if (cfg.paused) { requestAnimationFrame(frameOnce); }
+  }
+
   // ── debug panel ──
   const SPEC = [
+    ['show',     'check', false],
+    ['showT',    'range', 0,    0,    SHOW_END, 0.05, 2],
     ['spin',     'check', true],
     ['angle',    'range', 0,    0,    360,  0.5,  1],
     ['dist',     'range', 0.80, 0.10, 1.80, 0.01, 2],
@@ -1890,6 +1984,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   const TIPS = {
     view: 'Which pass to visualise. tir = red where the ray hit total internal reflection. beauty = final image. steps = raymarch cost heatmap, blue cheap and red expensive. normals = surface normals of the first hit. medium = what the first hit is, blue glass / gold champagne / grey table. liquid = the liquid field alone with the glass hidden. glass = the glass alone with the liquid hidden.',
     cams: 'Camera presets. tower = the whole tower. macro = close-up of the top glass. tier2 = the middle tier. top = looking down at the table for the caustics.',
+    show: 'Run the timeline: camera and simulation speed come from the SHOW keyframe table instead of these sliders, driven by the show clock. The sliders still read out what the timeline is doing.',
+    showT: 'Scrub the show clock. Dragging moves the camera at once; on release the fluid catches up. Going backwards rebuilds the fluid from zero, so it reloads the page with ?showt= - the sim has no inverse.',
     spin: 'Auto-rotate the camera. Uncheck to drive the angle slider by hand.',
     angle: 'Camera orbit angle around the tower, in degrees. Only used when spin is off.',
     dist: 'Camera distance from the tower axis, in metres. Smaller is closer.',
@@ -1947,6 +2043,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       b.textContent = name;
       b.onclick = () => {
         ui.spin = false; uiEl.spin.inp.checked = false;
+        ui.show = false; uiEl.show.inp.checked = false;
         for (const k in PRESET[name]) setUI(k, PRESET[name][k]);
         if (cfg.paused) requestAnimationFrame(frameOnce);
       };
@@ -1986,6 +2083,21 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   if (cfg.camQ.length) { ui.spin = false; uiEl.spin.inp.checked = false;
     for (const [k, v] of cfg.camQ) setUI(k, v); }
   if (cfg.fillQ !== null) { ui.autofill = false; uiEl.autofill.inp.checked = false; setUI('fill', cfg.fillQ); }
+
+  // Scrubbing. oninput moves the camera at once, which is what blocking shots needs;
+  // the fluid only follows on release, because catching it up is a burst of sim steps
+  // and doing that per mouse-move would stall the drag.
+  uiEl.showT.inp.oninput = () => {
+    ui.showT = parseFloat(uiEl.showT.inp.value);
+    showStep = Math.round(ui.showT / SIM_DT); showT = showStep * SIM_DT; showPend = 0;
+    if (cfg.paused) { requestAnimationFrame(frameOnce); }
+  };
+  uiEl.showT.inp.onchange = () => seekShow(parseFloat(uiEl.showT.inp.value));
+  if (cfg.show) {
+    ui.show = true;  uiEl.show.inp.checked = true;
+    ui.spin = false; uiEl.spin.inp.checked = false;
+  }
+  if (cfg.showt > 0) { seekShow(cfg.showt); }
   // seed the toggles from the URL params
   for (const [k, v] of [['drops', cfg.pfield], ['bubbles', cfg.bub], ['gridEnv', cfg.envg],
                         ['waves', cfg.wav], ['reflect', cfg.refl > 0.5],

@@ -34,6 +34,11 @@ A link beats a description when comparing before/after.
 - `?selftest=1` — assertions, logs PASS/FAIL.
 - `?det=1` (implied by `?still=1`) makes frame N always step N, so a run is reproducible
   on any machine. Use it for any A/B: without it the two sides see different sim states.
+- `?show=1&showt=<s>&pause=1` lands on an exact show frame for judging a shot. Without
+  `pause=1` playback keeps running while you wait and you grade the wrong moment.
+- A seek is representative, not bit-identical: the catch-up burst wraps the 16 sub-step
+  slots, so the RNG stream differs and spill azimuths land elsewhere. Glass counts and the
+  overall state match; do not diff individual levels against a live run.
 - Isolation views settle arguments far faster than reasoning: `liquid`, `glass`, `tir`,
   `puddle`, `bottle`, `medium`, `steps`, plus `gridEnv` for reflection/refraction direction.
 - **The pane must be on screen.** A hidden browser pane runs the page as a background page
@@ -110,6 +115,14 @@ the resize listener whenever `w`/`h` were given, so a page opened while the pane
 (viewport 0×0) scaled the canvas to `0px` and left it there: overlays visible, picture gone,
 GPU still rendering 1920×1080 at full cost. If the HUD is there and the render isn't, this
 is why.
+
+**Check that ALL of the sim steps on the clock, not just the part you fixed.** The particles
+were moved onto a clock; `puddle`, `glassUpdate` and `waveUpdate` stayed in the per-frame
+build pass and went on advancing at the frame rate. It was invisible at 60 fps because frames
+and steps matched one for one, and it only showed when a seek ran 3000 steps in one frame and
+filled exactly one glass. The rule the dispatch order now follows: a pass that **advances
+state** belongs in the per-step loop, a pass that **builds a structure for rendering** (the
+narrow band, the JFA, the puddle's coarse bound) belongs per frame.
 
 **One sim step per rendered frame makes the sim run at the refresh rate.** It reads as
 correct because the step size is fixed, but the step *rate* is then the frame rate:

@@ -71,7 +71,7 @@ coplanar with the glass's cut plane and the coincidence renders as an opaque dis
 Spill leaves the rim **where the wave crest is highest** (best of 4 sampled azimuths), so a
 glass overflows in a few wandering rivulets rather than an even curtain.
 
-### Timing {D} one clock
+### Timing — one clock
 
 Everything is a function of a single master clock: the sim advances in whole 1/60 s steps
 whose index is derived from it, and the camera reads it directly. Nothing is a function of
@@ -79,7 +79,7 @@ the frame.
 
 This matters because the intro has to hold sync with music for its whole length. Stepping
 once per rendered frame ties the simulation's rate to whatever the renderer happens to
-manage {D} measured on the previous build, **1.160{X} at 66 fps and 0.624{X} at 39 fps**. The slow
+manage — measured on the previous build, **1.160× at 66 fps and 0.624× at 39 fps**. The slow
 case alone would end a three-minute intro more than a minute behind the music.
 
 | | sim seconds per wall second |
@@ -92,14 +92,58 @@ case alone would end a three-minute intro more than a minute behind the music.
 A frame that runs long leaves a deficit, and the deficit is **kept** and worked off over the
 following frames, so a hitch costs nothing in the end. Catch-up is capped at 16 steps per
 frame because the sub-step index reaches the shader through 16 uniform slots and reusing one
-would make two substeps share an RNG stream {D} the bug that used to thin the pour. Past
+would make two substeps share an RNG stream — the bug that used to thin the pour. Past
 `LAG_STEPS` (0.5 s) behind, the missed steps are given up rather than chased: in a demo,
 staying with the music beats fluid continuity. Those events are counted in `probe.resyncs`
 so the cost is visible rather than silent.
 
+**All** of the simulation steps on this clock, not just the particles. The per-glass volume
+ODE, the wave field and the table puddle sat in the per-frame build pass until the timeline
+exposed it: a seek running 3000 steps in one frame filled exactly one glass, because the
+bulk had advanced one frame's worth. At 60 fps it hid perfectly, since frames and steps
+matched one for one.
+
+Measured with everything in, at 1920×1080 on the heaviest shot:
+
+| | |
+|---|---|
+| frame rate | 50.2 fps |
+| show clock vs wall | 0.9979 |
+| sim clock vs wall | 0.9979 |
+| drift | one step, bounded |
+| resyncs | 0 |
+
 `?det=1` (implied by `?still=1`) swaps the wall clock for a fixed one so that frame N is
 always step N. That makes a run reproducible on any machine, which is what A/B comparisons
-need {D} `?still=1&warm=300` lands on `t = 5.0000` exactly.
+need — `?still=1&warm=300` lands on `t = 5.0000` exactly.
+
+### The timeline
+
+`?show=1` hands the camera and the simulation speed to a keyframe table, `SHOW`, driven by
+the show clock. Keys are `[t, angle, dist, camY, tgtY, simSpeed, ease]`:
+
+- **Two keys sharing a `t` are a cut.** The later one wins at that instant, so the change is
+  immediate instead of a one-frame blend.
+- **`ease`** applies to the segment starting at that key: 1 for smootherstep in and out, 0
+  for linear, so a long drift can run through several keys without stalling at each one.
+- **`simSpeed` is keyed too**, and the sim clock is the integral of it over show steps, so a
+  timeline that varies speed stays machine-independent.
+
+The camera is driven from the table directly and only *mirrored* into the sliders for
+readout. Routing it through them would quantise it to the slider step, and `dist` steps by
+0.01 — visible stepping on a push-in that covers 0.01 in eight seconds.
+
+Scrubbing with `showT` moves the camera immediately, which is what blocking shots needs, and
+the fluid catches up on release. **Backwards means rebuilding the fluid from zero**, because
+the simulation has no inverse — you cannot un-pour it — so it reloads with `?showt=`. A seek
+is representative, not bit-identical: a catch-up burst wraps the 16 sub-step slots, so spill
+azimuths differ. Seek and live playback to t=12 both gave 9 glasses filled and an identical
+top glass, with per-glass levels differing by the RNG.
+
+The current shot list is a **first draft timed against the simulation's real pace**, which is
+the part that needed measuring rather than guessing: the top glass fills in ~20 s and the
+full tower in ~48 s. The macro shot therefore runs 9—18 s while the top glass is filling, and
+the cut to tier 2 lands on the first overflow. Duration is 60 s.
 
 ### Rendering
 
@@ -122,12 +166,17 @@ recording it as a point makes a pour read as a string of frozen beads.
 ### Pass graph
 
 ```
-sim        particles (one fixed 1/60 s step per frame)
-build      puddle → puddleCoarse → puddleJFA → glassUpdate → waveUpdate ×3
+sim        N steps per frame, N from the clock — everything that advances state:
+           particles → puddle → glassUpdate → waveUpdate ×3
+build      once per frame — a rendering structure, needs only the final state:
+           puddleCoarse → puddleJFA ×5
            clearFine → clearCoarse → scatterFine → seedCoarse → jfaCoarse ×5 → resolveFine
 photon     causticDecay → photons → causticBlur
 render     camera raymarch + post
 ```
+
+The split matters: `puddle`, `glassUpdate` and `waveUpdate` used to live in `build` and so
+advanced once per *frame* while the particles advanced on the clock. See *Timing*.
 
 ### Grids
 
@@ -270,6 +319,9 @@ drops, bubbles, waves, puddle, reflect, autofill, fill, pourRate, dropVol, dropR
 bottle, botTilt, botAz, pourWander, wanderSpd, shutter, bounces, simSpeed, expo, cgain`.
 
 **Buttons** — `ff +20s` (jump the sim forward), `restart`, `pause` (also spacebar).
+
+**Timeline** — `show` runs it, `showT` scrubs it. `?show=1` and `?showt=<seconds>` do the same
+from a URL, and `&pause=1` with them lands on an exact frame for judging a shot.
 
 Useful URL params beyond the above: `w`, `h` (explicit resolution, letterboxed), `t` (fixed
 time), `still`, `warm`, `det`, `steps`, `npart`, `nphoton`, `selftest`.
