@@ -43,17 +43,24 @@
 
 <!-- ───────────────────────── WGSL ───────────────────────── -->
 <script type="text/wgsl" id="wgsl-main">
+// The first 64 bytes are what the release keeps: everything it varies per frame. The
+// rest are harness controls; the build folds them to literals and cuts their fields, so
+// the release neither declares nor writes them (it used to write all 48 every frame).
 struct U {
   res      : vec2f,
   time     : f32,
-  view     : f32,
-  camPos   : vec3f,
-  fov      : f32,
-  camTgt   : vec3f,
-  maxSteps : f32,
-  emitPos  : vec3f,
-  dt       : f32,
   frame    : f32,
+  camPos   : vec3f,
+  shut     : f32,
+  camTgt   : vec3f,
+  evx      : f32,
+  emitPos  : vec3f,
+  evz      : f32,
+//#D{
+  view     : f32,
+  fov      : f32,
+  maxSteps : f32,
+  dt       : f32,
   spawnMod : f32,
   nPart    : f32,
   pvol     : f32,
@@ -74,9 +81,6 @@ struct U {
   ltEl     : f32,
   prad     : f32,
   foamG    : f32,
-  evx      : f32,
-  evz      : f32,
-  shut     : f32,
   botTilt  : f32,
   botAz    : f32,
   botOn    : f32,
@@ -85,6 +89,7 @@ struct U {
   pudR     : f32,
   pudOn    : f32,
   _w2      : f32,
+//#D}
 };
 struct J { stride : f32, _a : f32, _b : f32, _c : f32 };
 
@@ -1973,31 +1978,27 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     }
     else if (ui.spin) { ang = time * 0.25; setUI('angle', (ang * 180 / Math.PI) % 360); }
     else              { ang = ui.angle * Math.PI / 180; }
-    const cam = [Math.sin(ang) * dist, camY, Math.cos(ang) * dist];
-    const tgt = [0, tgtY, 0];
-    f32[0] = canvas.width; f32[1] = canvas.height; f32[2] = time; f32[3] = ui.view;
-    f32[4] = cam[0]; f32[5] = cam[1]; f32[6] = cam[2];
-    f32[7] = 1.6;
-    f32[8] = tgt[0]; f32[9] = tgt[1]; f32[10] = tgt[2]; f32[11] = cfg.steps;
     // a real pour is not perfectly aimed: let the bottle wander on a slow Lissajous
     const K = ui.wanderSpd;
     const wob = tt => [Math.sin(tt * 0.37 * K) * 0.62 + Math.sin(tt * 0.91 * K + 1.3) * 0.38,
                        Math.cos(tt * 0.29 * K + 2.1) * 0.62 + Math.sin(tt * 0.73 * K + 0.7) * 0.38];
     const W = ui.pourWander * 0.001;
     const w0 = wob(time), w1 = wob(time + 0.02);
-    f32[12] = w0[0] * W; f32[13] = 0.555; f32[14] = w0[1] * W;
-    f32[37] = (w1[0] - w0[0]) * W / 0.02;      // bottle drift velocity
-    f32[38] = (w1[1] - w0[1]) * W / 0.02;
-    f32[15] = SIM_DT;                           // fixed step    // emitPos (inside domain), dt
-    f32[16] = simStep; f32[17] = Math.max(1, Math.round((cfg.npart / 6) / ui.pourRate)); f32[18] = cfg.npart; f32[19] = ui.dropVol * 1e-9;
-    f32[20] = cfg.nphoton; f32[21] = ui.cgain;
-    f32[22] = cfg.single ? 1 : 0; f32[23] = cfg.noliq ? 1 : 0;
-    f32[24] = ui.bubbles ? 1 : 0; f32[25] = ui.expo; f32[26] = ui.waves ? 1 : 0; f32[27] = ui.drops ? 1 : 0; f32[28] = ui.bounces; f32[29] = ui.reflect ? 1 : 0; f32[30] = ui.autofill ? -1 : ui.fill / 100; f32[31] = ui.gridEnv ? 1 : 0; f32[32] = ui.rtrace;
-    f32[33] = ui.lightAz * Math.PI / 180; f32[34] = ui.lightEl * Math.PI / 180;
-    f32[35] = ui.dropRad * 0.001; f32[36] = ui.foam; f32[39] = ui.shutter * SIM_DT * frameSteps;
-    f32[40] = ui.botTilt * Math.PI / 180; f32[41] = ui.botAz * Math.PI / 180;
-    f32[42] = ui.bottle ? 1 : 0;
-    f32[43] = pudBound[0]; f32[44] = pudBound[1]; f32[45] = pudBound[2]; f32[46] = ui.puddle ? 1 : 0;
+    // in struct U order: what the release keeps first...
+    f32.set([canvas.width, canvas.height, time, simStep,
+             Math.sin(ang) * dist, camY, Math.cos(ang) * dist, ui.shutter * SIM_DT * frameSteps,
+             0, tgtY, 0, (w1[0] - w0[0]) * W / 0.02,            // target; bottle drift velocity x
+             w0[0] * W, 0.555, w0[1] * W, (w1[1] - w0[1]) * W / 0.02]);   // emitter; drift z
+//#D{
+    // ...then the harness controls, which the release folds into the shader
+    f32.set([ui.view, 1.6, cfg.steps, SIM_DT, Math.max(1, Math.round((cfg.npart / 6) / ui.pourRate)),
+             cfg.npart, ui.dropVol * 1e-9, cfg.nphoton, ui.cgain, cfg.single ? 1 : 0, cfg.noliq ? 1 : 0,
+             ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
+             ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
+             ui.lightAz * Math.PI / 180, ui.lightEl * Math.PI / 180, ui.dropRad * 0.001, ui.foam,
+             ui.botTilt * Math.PI / 180, ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0,
+             pudBound[0], pudBound[1], pudBound[2], ui.puddle ? 1 : 0], 16);
+//#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
 
