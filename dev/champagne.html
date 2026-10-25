@@ -9,12 +9,16 @@
   canvas { display:block; width:100vw; height:100vh; }
   #hud { position:fixed; top:8px; left:8px; padding:8px 10px; background:#000a;
          border:1px solid #333; border-radius:4px; white-space:pre; pointer-events:none; }
-  #ui { position:fixed; top:40px; right:8px; width:200px; padding:8px 10px; background:#000b;
-        border:1px solid #333; border-radius:4px; }
-  #ui .row { display:flex; align-items:center; gap:6px; margin:3px 0; }
-  #ui .row label { width:52px; color:#9ab; }
-  #ui .row input[type=range] { flex:1; min-width:0; }
-  #ui .row span { width:40px; text-align:right; color:#ffcf6b; }
+  #ui, #uia { position:fixed; top:40px; right:8px; width:200px; padding:8px 10px; background:#000b;
+        border:1px solid #333; border-radius:4px; max-height:calc(100vh - 58px); overflow-y:auto; }
+  /* the audio controls: a second column, left of the first */
+  #uia { right:240px; width:220px; }
+  #uia .head { color:#ffcf6b; margin:0 0 4px; }
+  #ui .row, #uia .row { display:flex; align-items:center; gap:6px; margin:3px 0; }
+  #ui .row label, #uia .row label { width:52px; color:#9ab; }
+  #uia .row label { width:74px; }
+  #ui .row input[type=range], #uia .row input[type=range] { flex:1; min-width:0; }
+  #ui .row span, #uia .row span { width:40px; text-align:right; color:#ffcf6b; }
   #ui .cams { display:flex; gap:4px; margin:5px 0 7px; }
   #ui .cams button { flex:1; padding:3px 0; background:#1b1b20; color:#ddd; border:1px solid #444;
         border-radius:3px; font:11px ui-monospace,Consolas,monospace; cursor:pointer; }
@@ -2405,6 +2409,13 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   const DIG = k => SPEC.find(x => x[0] === k)[6] ?? 2;
   const ui = {}, uiEl = {};
   const uiRoot = document.getElementById('ui');
+  // every audio control - from padGain on in SPEC, the track boxes, "hear audio" - goes in a
+  // second column of its own, so the panel fits a screen
+  const uiAudio = document.createElement('div');
+  uiAudio.id = 'uia';
+  uiAudio.innerHTML = '<div class=head>audio</div>';
+  document.body.append(uiAudio);
+  const AUDIO = new Set(SPEC.slice(SPEC.findIndex(x => x[0] === 'padGain')).map(x => x[0]));
   {
     const row = document.createElement('div'); row.className = 'row';
     const lab = document.createElement('label'); lab.textContent = 'view';
@@ -2478,7 +2489,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       if (cfg.paused) requestAnimationFrame(frameOnce);   // keep the view live while paused
     };
     row.title = TIPS[k] || '';
-    row.append(lab, inp, out); uiRoot.append(row);
+    row.append(lab, inp, out); (AUDIO.has(k) ? uiAudio : uiRoot).append(row);
     uiEl[k] = { inp, out };
   }
   {
@@ -2501,7 +2512,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       q.set('gate', '1'); q.set('show', '1');
       location.search = q.toString();
     };
-    uiRoot.append(b);
+    uiAudio.firstChild.after(b);   // at the top of the audio column
   }
   function setUI(k, v) {
     ui[k] = v; uiEl[k].inp.value = v;
