@@ -2293,11 +2293,18 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['simSpeed', 'range', 1,    0,    16,   0.5,  1],
     ['expo',     'range', 1.45, 0.20, 4.00, 0.05, 2],
     ['cgain',    'range', 0.05, 0.00, 0.30, 0.005,3],
-    ['padGain',  'range', 0.04, 0.00, 0.20, 0.005,3],
+    ['padGain',  'range', 0.022,0.00, 0.20, 0.001,3],
     ['padCut',   'range', 1400, 200,  6000, 10,   0],
     ['padDetune','range', 9,    0,    40,   0.5,  1],
     ['padAtk',   'range', 2.5,  0.05, 8,    0.05, 2],
     ['padRel',   'range', 4,    0.1,  10,   0.1,  1],
+    ['padRand',  'range', 6,    0,    30,   0.5,  1],
+    ['padDrift', 'range', 4,    0,    20,   0.5,  1],
+    ['padStagger','range',0.15, 0,    1,    0.01, 2],
+    ['padEns',   'range', 0.7,  0,    2,    0.05, 2],
+    ['pad2Gain', 'range', 0.01, 0,    0.2,  0.001,3],
+    ['padBw',    'range', 30,   0,    200,  1,    0],
+    ['padBwScale','range',1,    0,    2,    0.05, 2],
     ['verbLen',  'range', 4,    0.5,  10,   0.1,  1],
     ['verbMix',  'range', 0.5,  0.00, 2,    0.05, 2],
     ['fxVerbLen','range', 0.6,  0.1,  6,    0.05, 2],
@@ -2326,10 +2333,13 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['popF',     'range', 450,  80,   1500, 5,    0],
     ['popGlide', 'range', 0.6,  0.2,  2.5,  0.05, 2],
     ['popDecay', 'range', 0.02, 0.003,0.15, 0.001,3],
-    ['popThump', 'range', 0.5,  0,    2,    0.05, 2],
+    ['popThump', 'range', 1.2,  0,    3,    0.05, 2],
+    ['popThumpF','range', 60,   30,   200,  1,    0],
+    ['popThumpLen','range',0.07,0.01, 0.3,  0.005,3],
     ['hissGain', 'range', 0.25, 0,    1,    0.01, 2],
     ['hissLen',  'range', 0.35, 0.05, 2,    0.05, 2],
     ['trkPad',   'check', true],
+    ['trkPad2',  'check', false],
     ['trkStream','check', false],
     ['trkDrips', 'check', false],
     ['trkSplash','check', false],
@@ -2388,7 +2398,15 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     padCut: 'Audio: the pad\'s lowpass cutoff in Hz - lower is darker and softer, higher brighter and more stringy. A slow LFO swings it by 40% so the pad breathes.',
     padDetune: 'Audio: cents between the five sawtooth voices of each note. 0 is one thin saw; 5-15 is the classic ensemble shimmer; past 25 it goes out of tune.',
     padAtk: 'Audio: seconds a chord takes to swell in.',
-    padRel: 'Audio: seconds a chord takes to fade after it ends. Longer lets chords overlap into each other.',
+    padRel: 'Audio: seconds a chord takes to fade after it ends. Longer lets chords overlap into each other. Both pads.',
+    padRand: 'Pad: a random detune per voice, in cents, on top of the even padDetune spread - so no two notes beat the same way. 0 is off.',
+    padDrift: 'Pad: every voice drifts on a slow sine of its own rate (0.05-0.25 Hz), this many cents deep. Inaudible on one voice; mixed, the voices phase against each other like analog voice cards. 0 is off.',
+    padStagger: 'Both pads: the notes of a chord start up to this many seconds apart, as players do. 0 starts them together.',
+    padEns: 'Pad: the Solina-style ensemble - three short delays swept at ~0.6 and ~6 Hz, panned left, centre, right. Wet level; 0 is off.',
+    pad2Gain: 'PADsynth pad (pad2): level.',
+    padBw: 'PADsynth pad: how wide each harmonic is smeared, in cents at the fundamental. 0 is a plain saw-like tone; 20-50 an ensemble; 100+ a choir or a wash.',
+    padBwScale: 'PADsynth pad: how the smear grows up the harmonics. 1 is as wide in pitch at every harmonic; above 1 the highs get airier; below 1 cleaner.',
+    trkPad2: 'Audio track on/off, live: the PADsynth pad (pad2), to A/B against the saw pad (trkPad).',
     verbLen: 'Audio: the pad\'s hall, tail in seconds (to -60 dB).',
     verbMix: 'Audio: how much of the pad goes into its hall. Slow-motion footage usually sits in a big wet space.',
     fxVerbLen: 'Audio: the liquid\'s room, tail in seconds (to -60 dB). Short keeps the drips and splashes close and dry; the pad\'s 4 s hall made them sound like a cave.',
@@ -2427,7 +2445,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     popF: 'Cork pop: the pitch the open neck rings at, in Hz - a Helmholtz resonator, a few hundred Hz for a bottle neck. Lower is a bigger, hollower plop.',
     popGlide: 'Cork pop: where the ringing starts, as a fraction of popF, gliding there in ~25 ms. Below 1 rises (the neck opening as the cork clears it: the "plopp"), above 1 falls.',
     popDecay: 'Cork pop: how long the neck rings, in seconds. Longer is more hollow and bottle-like, shorter a dry pop.',
-    popThump: 'Cork pop: the low thump of the gas expanding (90 Hz, 30 ms), against the ringing.',
+    popThump: 'Cork pop: level of the low thump of the gas expanding - the bass of the pop.',
+    popThumpF: 'Cork pop: pitch of the thump in Hz. It starts at twice this and falls here within ~20 ms, like a kick drum. Lower is deeper.',
+    popThumpLen: 'Cork pop: how long the thump booms, in seconds.',
     hissGain: 'Cork pop: the gas rush after it - "pssh" - level.',
     hissLen: 'Cork pop: how long the gas rush takes to fade, in seconds.',
   };
@@ -2527,14 +2547,16 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     b.title = 'Reload with sound: the audio sliders and track boxes come along. When "rendering audio..." turns into "click here to start", click that box. From then the trk* boxes switch tracks on and off live, and an audio slider is heard a moment after you let go of it. Add &testpad=1 to the URL for a held test chord while the score is empty; &fs=1 for fullscreen as in the release.';
     b.onclick = () => {
       const q = new URLSearchParams(location.search);
-      for (const k of ['padGain', 'padCut', 'padDetune', 'padAtk', 'padRel', 'verbLen',
+      for (const k of ['padGain', 'padCut', 'padDetune', 'padAtk', 'padRel', 'padRand',
+                       'padDrift', 'padStagger', 'padEns', 'pad2Gain', 'padBw', 'padBwScale', 'verbLen',
                        'verbMix', 'fxVerbLen', 'fxVerbMix', 'sfxGain', 'streamGain', 'drips',
                        'bRmin', 'bRmax', 'bGamma',
                        'bXi', 'bRiseCut', 'bBeta', 'bAlpha', 'drip2Gain', 'splash2Gain',
                        'splashN', 'splashLen', 'pour2Gain', 'pourBub', 'fizzGain', 'fizzRate',
                        'fizzXi', 'popT', 'popGain', 'popF', 'popGlide', 'popDecay', 'popThump',
+                       'popThumpF', 'popThumpLen',
                        'hissGain', 'hissLen']) q.set(k, ui[k]);
-      for (const k of ['trkPad', 'trkStream', 'trkDrips', 'trkSplash', 'trkDrip2', 'trkSplash2',
+      for (const k of ['trkPad', 'trkPad2', 'trkStream', 'trkDrips', 'trkSplash', 'trkDrip2', 'trkSplash2',
                        'trkPour2', 'trkFizz', 'trkPop', 'trkVerb']) q.set(k, ui[k] ? 1 : 0);
       q.set('gate', '1'); q.set('show', '1');
       location.search = q.toString();
@@ -2650,25 +2672,91 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // connected to nothing - which the renderer never pulls, so they cost nothing either.
     const only = solo;   // read once, before the first await: renders may overlap
     const tap = k => { if (only) bus = k === only ? gain(1, o.destination) : o.createGain(); };
-    const keep = (only === 'pad' || only === 'stream') && { ...ui };
+    const keep = (only === 'pad' || only === 'pad2' || only === 'stream') && { ...ui };
     if (keep) Object.assign(ui, { drips: 0, pourBub: 0, fizzRate: 0 });
     tap('pad');
 //#D}
 
+    // The pad's own random sequence: editing the score must not reshuffle the drips.
+    let s3 = 5;
+    const r3 = () => (s3 = s3 * 16807 % 2147483647) / 2147483647;
+
+    // PADsynth-lite, for pad2. Nasca Octavian Paul's PADsynth (ZynAddSubFX) treats every
+    // harmonic as a BAND of frequencies with random phases - the pitch scatter of an
+    // ensemble - and renders one long table that loops seamlessly. Lite: no FFT; each band
+    // is a dozen sines, each a whole number of cycles per loop so the table still loops,
+    // summed with a rotating phasor. The band is padBw cents wide at the fundamental and
+    // scales as h^(padBwScale - 1) in cents (1: as wide in pitch at every harmonic). Built
+    // before the notes, so the score cannot change it.
+    const PL = 1 << 17, PF = 220,    // loop length (2.7 s at 48 kHz), the pitch it is built at
+          pt = o.createBuffer(1, PL, sr), pd = pt.getChannelData(0);
+    for (let h = 1; h < 25; h++) for (let j = 0; j < 12; j++) {
+      const g = r3() + r3() + r3() - 1.5,   // roughly gaussian
+            w = 6.2832 * Math.round(PF * h * 2 ** (g * ui.padBw * h ** (ui.padBwScale - 1) / 1200) * PL / sr) / PL,
+            c = Math.cos(w), sn = Math.sin(w), ph = 6.2832 * r3();
+      let x = Math.cos(ph) / h, y = Math.sin(ph) / h;
+      for (let i = 0; i < PL; i++) { pd[i] += y; const x1 = x * c - y * sn; y = x * sn + y * c; x = x1; }
+    }
+
     // the pad: five sawtooth voices per note, detuned and spread across the stereo field,
     // into one lowpass whose cutoff a slow LFO swings so the pad breathes
     const lp = o.createBiquadFilter(), lfo = o.createOscillator();
-    lp.frequency.value = ui.padCut; lp.connect(bus);
+    // k-rate: the cutoff and the voices' drift move far slower than one 128-sample block, and
+    // modulating them per sample made one chord take seconds to render
+    lp.frequency.value = ui.padCut; lp.frequency.automationRate = 'k-rate'; lp.connect(bus);
     lfo.frequency.value = 0.07; lfo.connect(gain(ui.padCut * 0.4, lp.frequency)); lfo.start();
-    for (const [t, len, ...notes] of SCORE) for (const m of notes) for (let k = -2; k < 3; k++) {
-      const v = o.createOscillator(), pan = o.createStereoPanner(), e = gain(0, pan);
-      v.type = 'sawtooth';
-      v.frequency.value = 440 * 2 ** ((m - 69) / 12);
-      v.detune.value = k * ui.padDetune;
-      pan.pan.value = k * 0.4; pan.connect(lp);
-      e.gain.setTargetAtTime(ui.padGain, t, ui.padAtk / 3);
-      e.gain.setTargetAtTime(0, t + len, ui.padRel / 3);
-      v.connect(e); v.start(t); v.stop(t + len + ui.padRel * 2);
+    // The ensemble, as in the Solina string machine: three short delays, each swept by a
+    // slow (~0.6 Hz) and a fast (~6 Hz) LFO at slightly different rates, panned left,
+    // centre and right - how one oscillator per note became a string section. padEns is the
+    // wet level; 0 is off.
+    for (let j = 0; j < 3; j++) {
+      const d = o.createDelay(), pan = o.createStereoPanner();
+      d.delayTime.value = 0.008 + j * 0.003;
+      for (const [f, dep] of [[0.6, 0.002], [6, 0.0002]]) {
+        const l = o.createOscillator();
+        l.frequency.value = f * (1 + j * 0.13); l.connect(gain(dep, d.delayTime)); l.start();
+      }
+      pan.pan.value = j - 1; lp.connect(d); d.connect(gain(ui.padEns, pan)); pan.connect(bus);
+    }
+    for (const [t, len, ...notes] of SCORE) for (const m of notes) {
+      // notes of a chord start up to padStagger apart, as players do
+      const t0 = t + r3() * ui.padStagger;
+      for (let k = -2; k < 3; k++) {
+        const v = o.createOscillator(), pan = o.createStereoPanner(), e = gain(0, pan),
+              l = o.createOscillator();
+        v.type = 'sawtooth';
+        v.frequency.value = 440 * 2 ** ((m - 69) / 12);
+        // each voice detuned by a random amount as well as the even spread, and drifting on
+        // a slow sine of its own rate: inaudible alone, it makes the voices phase against
+        // each other the way analog voice cards do
+        v.detune.value = k * ui.padDetune + (r3() - 0.5) * ui.padRand;
+        v.detune.automationRate = 'k-rate';
+        l.frequency.value = 0.05 + r3() * 0.2; l.connect(gain(ui.padDrift, v.detune));
+        l.start(t0); l.stop(t0 + len + ui.padRel * 2);
+        pan.pan.value = k * 0.4; pan.connect(lp);
+        e.gain.setTargetAtTime(ui.padGain, t0, ui.padAtk / 3);
+        e.gain.setTargetAtTime(0, t0 + len, ui.padRel / 3);
+        v.connect(e); v.start(t0); v.stop(t0 + len + ui.padRel * 2);
+      }
+    }
+
+    // pad2: the same score on the PADsynth table - two copies per note from different
+    // points of the loop, panned apart - through a lowpass of its own
+//#D{
+    tap('pad2');
+//#D}
+    const lp2 = o.createBiquadFilter();
+    lp2.frequency.value = ui.padCut; lp2.connect(bus);
+    for (const [t, len, ...notes] of SCORE) for (const m of notes) {
+      const t0 = t + r3() * ui.padStagger;
+      for (const pn of [-0.6, 0.6]) {
+        const v = o.createBufferSource(), pan = o.createStereoPanner(), e = gain(0, pan);
+        v.buffer = pt; v.loop = true; v.playbackRate.value = 440 * 2 ** ((m - 69) / 12) / PF;
+        pan.pan.value = pn; pan.connect(lp2);
+        e.gain.setTargetAtTime(ui.pad2Gain, t0, ui.padAtk / 3);
+        e.gain.setTargetAtTime(0, t0 + len, ui.padRel / 3);
+        v.connect(e); v.start(t0, r3() * PL / sr); v.stop(t0 + len + ui.padRel * 2);
+      }
     }
 
     const lb = bus = gain(1, o.destination);
@@ -2790,12 +2878,13 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // neck ringing as a Helmholtz resonator, gliding to popF as the cork clears it, over a
     // low thump of the gas expanding; and the rush - high-passed noise fading as the rest of
     // the gas leaves.
-    for (let i = 0, ph = 0, lo = 0, i0 = ui.popT * sr | 0; i < sr * ui.hissLen * 4; i++) {
+    for (let i = 0, ph = 0, tp = 0, lo = 0, i0 = ui.popT * sr | 0; i < sr * ui.hissLen * 4; i++) {
       const s = i / sr, x = r2() * 2 - 1,
             f = ui.popF * (1 - (1 - ui.popGlide) * Math.exp(-s / 0.008));
-      ph += f / sr; lo += (x - lo) * 0.3;
+      // the thump falls like a kick drum: from twice popThumpF down to it within ~20 ms
+      ph += f / sr; tp += ui.popThumpF * (1 + Math.exp(-s / 0.01)) / sr; lo += (x - lo) * 0.3;
       const v = ui.popGain * (Math.sin(6.283 * ph) * Math.exp(-s / ui.popDecay)
-        + ui.popThump * Math.sin(565 * s) * Math.exp(-s / 0.03)
+        + ui.popThump * Math.sin(6.283 * tp) * Math.exp(-s / ui.popThumpLen)
         + x * Math.exp(-s / 0.0007)
         + ui.hissGain * (x - lo) * Math.min(1, s / 0.01) * Math.exp(-s / ui.hissLen));
       BX[4][0][i0 + i] += v; BX[4][1][i0 + i] += v;
@@ -2850,6 +2939,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   }
 //#D{
   window.__song = song;   // await __song(48000) -> the AudioBuffer, for checking levels
+  window.__stem = k => stem(k);   // await __stem('pad') -> one track alone, dry
 
   // ── live stems (harness only) ──
   // With ?gate=1 the harness plays the soundtrack as four stems through a live hall, so
@@ -2857,19 +2947,22 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // an audio slider re-renders just the stems it touches and swaps them in where playback
   // is. With everything on it is the release mix: the same stems, a hall built the same
   // way, and the gain the release normalises by (re-measured after every change).
-  const STEMS = { pad: 'trkPad', stream: 'trkStream', drips: 'trkDrips', splashes: 'trkSplash',
+  const STEMS = { pad: 'trkPad', pad2: 'trkPad2', stream: 'trkStream', drips: 'trkDrips', splashes: 'trkSplash',
                   drip2: 'trkDrip2', splash2: 'trkSplash2', pour2: 'trkPour2', fizz: 'trkFizz',
                   pop: 'trkPop' };
   const BUB = ['drip2', 'splash2', 'pour2', 'fizz'];
-  const AFFECTS = { padGain: ['pad'], padCut: ['pad'], padDetune: ['pad'], padAtk: ['pad'],
-                    padRel: ['pad'], streamGain: ['stream'], sfxGain: ['drips', 'splashes'],
+  const AFFECTS = { padGain: ['pad'], padCut: ['pad', 'pad2'], padDetune: ['pad'],
+                    padAtk: ['pad', 'pad2'], padRel: ['pad', 'pad2'], padRand: ['pad'],
+                    padDrift: ['pad'], padStagger: ['pad', 'pad2'], padEns: ['pad'],
+                    pad2Gain: ['pad2'], padBw: ['pad2'], padBwScale: ['pad2'], streamGain: ['stream'], sfxGain: ['drips', 'splashes'],
                     drips: ['drips', 'splashes', 'drip2', 'splash2'],
                     bRmin: BUB, bRmax: BUB, bGamma: BUB, bXi: BUB, bRiseCut: BUB, bBeta: BUB,
                     bAlpha: BUB, drip2Gain: ['drip2'], splash2Gain: ['splash2'],
                     splashN: ['splash2'], splashLen: ['splash2'], pour2Gain: ['pour2'],
                     pourBub: ['pour2'], fizzGain: ['fizz'], fizzRate: ['fizz'], fizzXi: ['fizz'],
                     popT: ['pop'], popGain: ['pop'], popF: ['pop'], popGlide: ['pop'],
-                    popDecay: ['pop'], popThump: ['pop'], hissGain: ['pop'], hissLen: ['pop'] };
+                    popDecay: ['pop'], popThump: ['pop'], popThumpF: ['pop'], popThumpLen: ['pop'],
+                    hissGain: ['pop'], hissLen: ['pop'] };
   const live = window.__live = { buf: {}, src: {}, g: {} };
   let liveJob = Promise.resolve();
   function stem(k) {
@@ -2905,7 +2998,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     live.sendP = g(0, live.cvP); live.mixP.connect(live.sendP);
     live.sendL = g(0, live.cvL); live.mixL.connect(live.sendL);
     for (const k in STEMS) {
-      live.g[k] = g(0, k === 'pad' ? live.mixP : live.mixL);
+      live.g[k] = g(0, k === 'pad' || k === 'pad2' ? live.mixP : live.mixL);
       live.buf[k] = await stem(k);
     }
     liveApply();

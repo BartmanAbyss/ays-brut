@@ -7,8 +7,8 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (string pad, reverb, liquid sounds) work.
-`build/intro.cmd` is **9 347 bytes, 1 155 OVER the 8 192 budget** while the old and the
-bubble-model liquid tracks both ship for the A/B (~290 less with the bubble model alone), so
+`build/intro.cmd` is **9 754 bytes, 1 562 OVER the 8 192 budget** while two liquids and two
+pads both ship for the A/B (about 290 + 250 less once each is decided), so
 features have to be
 cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
@@ -254,12 +254,47 @@ to say what it is. Track `pop`, at `popT` (0.5 s), in three parts:
   imaging of uncorking);
 - **the plop**: the open neck ringing as a Helmholtz resonator (`popF`, a few hundred Hz),
   gliding there from `popGlide` x popF in ~25 ms as the cork clears it - below 1 rises,
-  the "plopp" - for `popDecay`, over a 90 Hz thump of the gas expanding (`popThump`);
+  the "plopp" - for `popDecay`, over a thump of the gas expanding that falls like a kick
+  drum from twice `popThumpF` (60 Hz) to it, for `popThumpLen` (`popThump`, 1.2: "the pop
+  needs more bass");
 - **the rush**: high-passed noise fading over `hissLen` as the rest of the gas leaves
   (`hissGain`).
 
 No study quantifies the pop's own sound, so these are physics-shaped starting points to
-tune by ear. Peak 0.74, under the normalising limit. +90 bytes.
+tune by ear. Peak 0.985 with the deeper thump: the pop is now the loudest moment, so it sets
+the normalising - more pop bass turns everything else down a little. +90 bytes, +18 for
+the kick-like thump.
+
+#### The pad: upgraded, and a PADsynth alternative (A/B)
+
+The five-saw pad sounded synthetic for the usual reasons: the same even detune on every
+note, so every note beats alike; every voice starting at once; nothing moving but one
+filter LFO. Two answers, as tracks to compare (`trkPad`, `trkPad2`):
+
+- **The saw pad, upgraded** - each with its own slider, 0 = off:
+  - `padRand`: a random detune per voice on top of the even spread, so no two notes beat
+    the same way (string machines tuned every oscillator differently, after the human
+    players they imitated);
+  - `padDrift`: every voice drifts on a slow sine of its own rate (0.05-0.25 Hz), a few
+    cents - inaudible alone, mixed it makes the voices phase like analog voice cards
+    (practitioners' advice: tiny depth, very slow, different per voice);
+  - `padStagger` (both pads): the notes of a chord start up to 0.15 s apart;
+  - `padEns`: the Solina String Ensemble's chorus - three short delays swept by a slow
+    (~0.6 Hz) and a fast (~6 Hz) LFO, panned left, centre, right.
+- **`pad2`, PADsynth-lite.** Nasca Octavian Paul's PADsynth (ZynAddSubFX) treats each
+  harmonic as a band of frequencies with random phases and renders one long table that
+  loops - "the phases are random, and this is the key". Lite: no FFT; 24 harmonics, each
+  a band of 12 sines `padBw` cents wide (scaling up the harmonics by `padBwScale`), every
+  sine a whole number of cycles per 2.7 s loop, summed with a rotating phasor. Each note
+  plays the table twice, from different points of the loop, panned apart.
+
+Defaults level both with the old pad (RMS 0.068 and 0.069 against 0.063). Bytes, measured
+by building each variant: the upgrade +136; PADsynth *instead of* the saw pad +111; both
+in, as now, +389. Render time: a full render is ~6 s with a chord and both pads (the
+pad's stem 2.2 s, mostly the modulated delays; pad2 0.8 s); one pad ships, so the release
+loses one of them. The pad's slow modulations run at block rate (`k-rate`): the drift and
+the breathing filter need no per-sample updates. The pad has its own random sequence, so
+editing the score never reshuffles the drips.
 
 The harness also has **rewind** (top bar): back to t = 0 without reloading. The simulation
 lives in buffers that start zeroed plus a few clocks, so clearing both is exactly a fresh
@@ -667,12 +702,11 @@ from the release.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, puddle, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
 screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 9 347 bytes with both liquid models in (~290 less with the bubble model
-alone).
+`intro.cmd` is 9 754 bytes with both liquids and both pads in for the A/B.
 
 Next:
-1. **Size** — ~860 bytes over once the A/B is decided for the bubble model, before the
-   score and any text.
+1. **Size** — about 1 000 bytes over once both A/Bs are decided, before the score and any
+   text.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
 2. **The score** — must be **human-composed**; the party bans prompt-based music. Chords
@@ -894,12 +928,13 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 347 bytes (25 Oct 2026), 1 155 OVER 8 192**: the breakdown below
+**`intro.cmd` is 9 754 bytes (25 Oct 2026), 1 562 OVER 8 192**: the breakdown below
 (7 967), plus the start screen and music hookup (+116), plus the sound engine (+773: pad,
 reverb, liquid, normalising - with the score still empty), plus the bubble-model tracks
 for the A/B (+364), the liquid's own room (+21) and the cork pop (+106 with the loudness
-fixes). With the bubble model replacing the old liquid, about 290 less: the bubble model
-costs +76 over the old liquid, fizz included.
+fixes), the deeper pop (+18), the pad upgrade (+136) and the PADsynth pad (+253 next to
+it). With the bubble model replacing the old liquid, about 290 less (it costs +76 over the
+old liquid, fizz included); with one pad, 136 or 253 less.
 
 The breakdown, 24 Oct 2026, after the lossless pass, the core simplifications and the
 non-feature pass below, and a 120-round packer search on the result:
