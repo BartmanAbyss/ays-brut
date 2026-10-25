@@ -1640,6 +1640,7 @@ const cfg = {
   showt:    qf('showt', 0),            // seek here on load (how a backward scrub works)
   gate:     Q.get('gate') === '1',     // the release's start screen: click, fullscreen, audio clock
   tick:     Q.get('tick') === '1',     // with gate: a click every half second, to check sync
+  testPad:  Q.get('testpad') === '1',  // one plain held chord, to judge the pad's timbre by
 };
 //#D}
 
@@ -2284,6 +2285,16 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['simSpeed', 'range', 1,    0,    16,   0.5,  1],
     ['expo',     'range', 1.45, 0.20, 4.00, 0.05, 2],
     ['cgain',    'range', 0.05, 0.00, 0.30, 0.005,3],
+    ['padGain',  'range', 0.04, 0.00, 0.20, 0.005,3],
+    ['padCut',   'range', 1400, 200,  6000, 10,   0],
+    ['padDetune','range', 9,    0,    40,   0.5,  1],
+    ['padAtk',   'range', 2.5,  0.05, 8,    0.05, 2],
+    ['padRel',   'range', 4,    0.1,  10,   0.1,  1],
+    ['verbLen',  'range', 4,    0.5,  10,   0.1,  1],
+    ['verbMix',  'range', 0.5,  0.00, 2,    0.05, 2],
+    ['sfxGain',  'range', 0.25, 0.00, 1,    0.01, 2],
+    ['streamGain','range',0.04, 0.00, 0.30, 0.005,3],
+    ['drips',    'range', 14,   0,    60,   1,    0],
   ];
   const PRESET = {
     tower: { dist: 0.800, camY: 0.440, tgtY: 0.260, angle: 39 },
@@ -2329,6 +2340,16 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     simSpeed: 'Simulation speed multiplier. The fluid runs on a fixed 1/60 s step whose index comes from the master clock, so refresh rate does not change its speed and a slow frame is caught up over the next ones (16 steps per frame maximum). Watch drift in the HUD: it should stay under one step. 0 freezes it while the camera keeps moving.',
     expo: 'Exposure applied before tonemapping.',
     cgain: 'Brightness of the photon caustic map on the table. It carries the direct light too, so 0 leaves the table lit by ambient only.',
+    padGain: 'Audio, heard after "hear audio": level of each of the string pad\'s sawtooth voices (five per note). The whole mix is normalised at the end, so this sets the pad against the liquid sounds, not the overall volume.',
+    padCut: 'Audio: the pad\'s lowpass cutoff in Hz - lower is darker and softer, higher brighter and more stringy. A slow LFO swings it by 40% so the pad breathes.',
+    padDetune: 'Audio: cents between the five sawtooth voices of each note. 0 is one thin saw; 5-15 is the classic ensemble shimmer; past 25 it goes out of tune.',
+    padAtk: 'Audio: seconds a chord takes to swell in.',
+    padRel: 'Audio: seconds a chord takes to fade after it ends. Longer lets chords overlap into each other.',
+    verbLen: 'Audio: reverb tail in seconds (to -60 dB).',
+    verbMix: 'Audio: how much of everything goes into the reverb. Slow-motion footage usually sits in a big wet space.',
+    sfxGain: 'Audio: level of the drips and splashes, before the camera distance scales them.',
+    streamGain: 'Audio: level of the steady pour-stream hiss under the drips.',
+    drips: 'Audio: drips and splashes per second while only the top glass overflows; it doubles as the second tier reaches its spill level (19-26 s, measured).',
   };
   const DIG = k => SPEC.find(x => x[0] === k)[6] ?? 2;
   const ui = {}, uiEl = {};
@@ -2388,7 +2409,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     }
     uiRoot.prepend(bar);
   }
-  for (const [k, kind, def, lo, hi, st] of SPEC) {
+  for (const [k, kind, d0, lo, hi, st] of SPEC) {
+    // any range slider takes its value from the URL: ?padCut=900 (the audio needs this - it
+    // is rendered once at load, so "hear audio" carries the sliders over a reload)
+    const def = kind === 'range' && Q.has(k) ? +Q.get(k) : d0;
     ui[k] = def;
     const row = document.createElement('div'); row.className = 'row';
     const lab = document.createElement('label'); lab.textContent = k;
@@ -2405,6 +2429,22 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     row.title = TIPS[k] || '';
     row.append(lab, inp, out); uiRoot.append(row);
     uiEl[k] = { inp, out };
+  }
+  {
+    // The audio is rendered once at load (song(), below), so moving an audio slider does
+    // nothing until a reload. This carries every audio slider into the URL and reloads with
+    // the start screen on: click it to hear the show with the new sound.
+    const b = document.createElement('button');
+    b.textContent = 'hear audio';
+    b.title = 'Reload with the start screen and the current audio sliders; click the page to hear the show. Add &testpad=1 to the URL for a held test chord while the score is empty.';
+    b.onclick = () => {
+      const q = new URLSearchParams(location.search);
+      for (const k of ['padGain', 'padCut', 'padDetune', 'padAtk', 'padRel', 'verbLen',
+                       'verbMix', 'sfxGain', 'streamGain', 'drips']) q.set(k, ui[k]);
+      q.set('gate', '1'); q.set('show', '1');
+      location.search = q.toString();
+    };
+    uiRoot.append(b);
   }
   function setUI(k, v) {
     ui[k] = v; uiEl[k].inp.value = v;
@@ -2463,26 +2503,129 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   setPaused(cfg.paused);
   //#D}
 
-  // ── start screen and music ──
-  // The song is the user's to compose - the party bans generated music. song() fills the
-  // stereo buffers (L, R at sample rate sr) once, here, before the click, so a slow player
-  // costs load time and never a hitch; until it exists the show plays silence of its own
-  // length. Behind the gate the click starts everything: fullscreen, the audio, the render
-  // loop. The text appears only once all of this is ready, so it doubles as "loaded".
-  function song(L, R, sr) {
+  // ── music and sound ──
+  // SCORE is the music: chords as [start s, length s, MIDI notes...], written by hand. The
+  // party bans generated music and disqualifies entries that are mostly AI output, so
+  // nothing below composes. song() is the instrument - a string pad of detuned saws through
+  // a breathing lowpass into a convolution reverb - plus the liquid's sound, which follows
+  // what the simulation does. With SCORE empty the show plays the liquid alone.
+  const SCORE = [
 //#D{
-    // ?tick=1: a short click every half second, to check the picture against the audio
-    if (cfg.tick) for (let i = 0; i < L.length; i++) {
-      const k = i % (sr >> 1);
-      L[i] = R[i] = k < 2000 ? Math.sin(k * 0.3) * Math.exp(-k / 300) * 0.5 : 0;
+    // ?testpad=1: one plain held chord to judge the pad's timbre by. A test signal, never
+    // shipped: these lines are dev-only.
+    ...(cfg.testPad ? [[1, SHOW_END - 6, 45, 52, 57, 60, 64]] : []),
+//#D}
+  ];
+
+  // The whole soundtrack, rendered offline before the click: a slow render costs load time,
+  // never a hitch, and the browser's own oscillators are band-limited and its convolver
+  // makes a hall from a buffer of noise. Seeded, so every run sounds the same.
+  async function song(sr) {
+    const o = new OfflineAudioContext(2, sr * (SHOW_END + 1), sr);
+    let seed = 7;
+    const rnd = () => (seed = seed * 16807 % 2147483647) / 2147483647;
+    const gain = (v, to) => { const g = o.createGain(); g.gain.value = v; g.connect(to); return g; };
+    const bus = gain(1, o.destination), cv = o.createConvolver();
+    cv.connect(o.destination);
+    bus.connect(gain(ui.verbMix, cv));
+
+    // the pad: five sawtooth voices per note, detuned and spread across the stereo field,
+    // into one lowpass whose cutoff a slow LFO swings so the pad breathes
+    const lp = o.createBiquadFilter(), lfo = o.createOscillator();
+    lp.frequency.value = ui.padCut; lp.connect(bus);
+    lfo.frequency.value = 0.07; lfo.connect(gain(ui.padCut * 0.4, lp.frequency)); lfo.start();
+    for (const [t, len, ...notes] of SCORE) for (const m of notes) for (let k = -2; k < 3; k++) {
+      const v = o.createOscillator(), pan = o.createStereoPanner(), e = gain(0, pan);
+      v.type = 'sawtooth';
+      v.frequency.value = 440 * 2 ** ((m - 69) / 12);
+      v.detune.value = k * ui.padDetune;
+      pan.pan.value = k * 0.4; pan.connect(lp);
+      e.gain.setTargetAtTime(ui.padGain, t, ui.padAtk / 3);
+      e.gain.setTargetAtTime(0, t + len, ui.padRel / 3);
+      v.connect(e); v.start(t); v.stop(t + len + ui.padRel * 2);
+    }
+
+    // The liquid. Measured over a det run of the show: the pour runs throughout, the top
+    // glass is already overflowing at t = 0 (the show starts from a warmed-up state), and
+    // the second tier reaches its spill level between 19 and 26 s, which doubles the spray.
+    // Loudness follows the camera too: 1 at the macro shot's distance, quieter when wide.
+    const near = t => Math.min(1, 0.2 / evalShow(t).dist);
+    const nz = o.createBuffer(1, sr * 2, sr), nd = nz.getChannelData(0);
+    for (let i = 0; i < nd.length; i++) nd[i] = rnd() * 2 - 1;
+    // the stream: a steady band of hiss
+    const st = o.createBufferSource(), bp = o.createBiquadFilter(), sg = gain(0, bus);
+    st.buffer = nz; st.loop = true; bp.type = 'bandpass'; bp.frequency.value = 1500;
+    st.connect(bp); bp.connect(sg); st.start();
+    for (let t = 0; t < SHOW_END; t += 0.25) sg.gain.setTargetAtTime(ui.streamGain * near(t), t, 0.05);
+    // Drips and splashes, as a Poisson process whose rate follows the spill. Written sample
+    // by sample into one buffer: ~1300 events as audio nodes took 9.5 s to render, as plain
+    // loops they take milliseconds.
+    const sx = o.createBuffer(2, sr * (SHOW_END + 1), sr), X = [sx.getChannelData(0), sx.getChannelData(1)];
+    for (let t = 0; t < SHOW_END;) {
+      const u = Math.min(1, Math.max(0, (t - 19) / 7));
+      t -= Math.log(1 - rnd()) / (ui.drips * (1 + u * u * (3 - 2 * u)) + 1e-6);
+      const a = ui.sfxGain * near(t) * (0.3 + rnd()), pan = rnd() * 0.8 + 0.1,
+            dec = 0.015 + rnd() * 0.05, drip = rnd() < 0.7, f = 500 + rnd() * 1500,
+            up = Math.log(2 + rnd() * 2) / 0.05, c = 0.12 + rnd() * 0.28, i0 = t * sr | 0;
+      let ph = 0, lo = 0;
+      for (let i = 0; i < sr * 0.3; i++) {
+        const s = i / sr, env = a * Math.min(1, s / 0.003) * Math.exp(-s / dec);
+        let v;
+        if (drip) {
+          // a drip: a sine chirping upward over 50 ms - the bubble a drop traps, ringing
+          // higher as it closes
+          ph += f * Math.exp(Math.min(s, 0.05) * up) / sr; v = Math.sin(6.283 * ph);
+        } else {
+          // a splash: noise through a one-pole highpass (1-4 kHz)
+          const x = rnd() * 2 - 1; lo += (x - lo) * c; v = x - lo;
+        }
+        X[0][i0 + i] += v * env * Math.sqrt(1 - pan);
+        X[1][i0 + i] += v * env * Math.sqrt(pan);
+      }
+    }
+    const sxs = o.createBufferSource();
+    sxs.buffer = sx; sxs.connect(bus); sxs.start();
+
+    // the hall: two channels of noise decaying to -60 dB over verbLen (filled last, so its
+    // length does not move the random sequence the drips are drawn from)
+    const ir = o.createBuffer(2, sr * ui.verbLen, sr);
+    for (let c = 0; c < 2; c++) {
+      const d = ir.getChannelData(c);
+      for (let i = 0; i < d.length; i++) d[i] = (rnd() * 2 - 1) * Math.exp(-7 * i / d.length);
+    }
+    cv.buffer = ir;
+
+    const b = await o.startRendering();
+    // normalise the mix to a 0.9 peak: the sliders set balance, this sets level
+    let pk = 1e-9;
+    for (let c = 0; c < 2; c++) for (const x of b.getChannelData(c)) pk = Math.max(pk, Math.abs(x));
+    for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] *= 0.9 / pk; }
+//#D{
+    song.peak = pk;   // the level before normalising, so balances can be compared
+    // ?tick=1: a short click every half second over the top, to check the picture against
+    // the audio
+    if (cfg.tick) for (let c = 0; c < 2; c++) {
+      const d = b.getChannelData(c);
+      for (let i = 0; i < d.length; i++) {
+        const k = i % (sr >> 1);
+        if (k < 2000) d[i] += Math.sin(k * 0.3) * Math.exp(-k / 300) * 0.5;
+      }
     }
 //#D}
+    return b;
   }
+//#D{
+  window.__song = song;   // await __song(48000) -> the AudioBuffer, for checking levels
+//#D}
+
+  // ── start screen ──
+  // Behind the gate the click starts everything: fullscreen, the audio, the render loop.
+  // The text appears only once all of it is ready - pipelines compiled, soundtrack
+  // rendered - so it doubles as "loaded".
   let ac, tA;                  // the audio context, and the audio time the show starts at
   if (cfg.gate) {
     ac = new AudioContext();
-    const b = ac.createBuffer(2, ac.sampleRate * (SHOW_END + 1), ac.sampleRate);
-    song(b.getChannelData(0), b.getChannelData(1), ac.sampleRate);
+    const b = await song(ac.sampleRate);
     onclick = () => {
       onclick = null;
       // fullscreen is the screen: size the canvas once, here, rather than on every resize

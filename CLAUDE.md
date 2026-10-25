@@ -444,9 +444,9 @@ search scores for brotli, not for it. Worth adopting at the very end, when every
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 310 bytes. `intro.cmd` is **8 083** (25 Oct 2026), 109
-  under, with the start screen in but no music player, song or text yet; to leave them
-  room, what exists must reach
+  stale. Our dropper header is 310 bytes. `intro.cmd` is **8 838** (25 Oct 2026), 646
+  OVER, with the start screen and the sound engine in but the score empty and no text;
+  to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
   README (*Where it lands today*) has the size map by feature and function.
 - Music must be composed by the user. The party bans prompt-based music, requires full

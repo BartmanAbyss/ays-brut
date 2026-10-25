@@ -5,10 +5,11 @@ entirely by SDF raymarching. Target: an **8192-byte PC intro** for **ComParade 2
 (Emmering/Munich, 6–8 Nov 2026), packaged the INCENDIUM way — WebGPU + a tiny PowerShell
 dropper — not a native exe.
 
-**Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline and the
-click-to-start screen work, and `build/intro.cmd` is **8 083 bytes, 109 under the 8 192
-budget**. Missing: the song and its player (to be composed by hand), any text, and tier2
-is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
+**Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
+click-to-start screen and the sound engine (string pad, reverb, liquid sounds) work.
+`build/intro.cmd` is **8 838 bytes, 646 OVER the 8 192 budget**, so features have to be
+cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
+tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
 ---
 
@@ -158,6 +159,38 @@ The current shot list is a **first draft timed against the simulation's real pac
 the part that needed measuring rather than guessing: the top glass fills in ~20 s and the
 full tower in ~48 s. The macro shot therefore runs 9—18 s while the top glass is filling, and
 the cut to tier 2 lands on the first overflow. Duration is 60 s.
+
+### Sound
+
+`song()` renders the whole soundtrack once, before "click" appears, with an
+`OfflineAudioContext`; the show clock is then the audio clock (*Timing*). Seeded, so it
+sounds the same every run. Three parts:
+
+- **The pad** plays `SCORE`: chords as `[start s, length s, MIDI notes...]`. **The score is
+  written by hand** - the party bans generated music - and is empty in the repository;
+  `?testpad=1` adds one plain held chord in the harness (dev-only lines, never shipped) to
+  judge the timbre by. Each note is five sawtooth voices detuned by `padDetune` cents and
+  spread across the stereo field, into one lowpass (`padCut`) that a 0.07 Hz LFO swings by
+  40%, with `padAtk`/`padRel` swells.
+- **The liquid**: a steady band of hiss for the stream, and drips (sines chirping upward
+  over 50 ms) and splashes (high-passed noise bursts) as a Poisson process. Its rate
+  follows what the simulation does, measured over a det run of the show: the pour runs
+  throughout, the top glass is already overflowing at t = 0 (the show starts from a
+  warmed-up state), and the second tier reaches its spill level between 19 and 26 s,
+  which doubles the spray - so `drips` per second doubles there. Loudness follows the
+  camera's distance from the timeline: 1 on the macro shot, quieter on the wide ones.
+  The drips are written sample by sample: as audio nodes, ~1300 of them took 9.5 s to
+  render; as plain loops, milliseconds.
+- **The hall**: a convolution reverb whose impulse is two channels of noise decaying to
+  -60 dB over `verbLen`, fed by `verbMix`.
+
+The mix is normalised to a 0.9 peak, so the sliders set balance, not level. Render time:
+~2 s (most of it the pad and the reverb). Default balance, RMS: the pad 0.064 against the
+liquid 0.011 on the wide opening and 0.056 on the macro shot.
+
+**To hear it**, set the audio sliders in the harness and press *hear audio*: it reloads with
+`?gate=1&show=1` and the sliders in the URL; click the page. The audio is rendered at load,
+so a slider change is only heard after that reload.
 
 ### Rendering
 
@@ -560,19 +593,22 @@ from the release.
 
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, puddle, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
-screen with fullscreen and the audio clock. `intro.cmd` is 8 083 bytes.
+screen with fullscreen and the audio clock, the sound engine. `intro.cmd` is 8 838
+bytes, 646 over.
 
 Next:
-1. **Music** — must be **human-composed**; the party bans prompt-based music. It goes in
-   through `song(L, R, sr)`, and its player has to fit in what is left: 109 bytes today.
-   How big it is decides whether features are cut (*Feature cuts, measured*).
-2. **Text**, if any (credits, title), from the same budget.
-3. **tier2** — ~22 ms against ~19 in its heaviest state (*Where it stands*). Options: cut
+1. **Size** — 646 bytes over with the sound in (+755), before the score and any text.
+   Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
+   smaller.
+2. **The score** — must be **human-composed**; the party bans prompt-based music. Chords
+   go into `SCORE` (*Sound*); each chord costs a few bytes.
+3. **Text**, if any (credits, title), from the same budget.
+4. **tier2** — ~22 ms against ~19 in its heaviest state (*Where it stands*). Options: cut
    there, don't hold on it while the spill is densest, or take `bounces` down on that shot.
-4. **Render size** — the release renders at the screen's size. At the compo's 1920×1080
+5. **Render size** — the release renders at the screen's size. At the compo's 1920×1080
    that is the budget; on a larger monitor it is proportionally slower.
-5. Timeline polish against the finished music.
-6. Late, when every byte counts: design-constant rounding (~-40 to -90), Roadroller
+6. Timeline polish against the finished music.
+7. Late, when every byte counts: design-constant rounding (~-40 to -90), Roadroller
    (-217, *Minifying* in CLAUDE.md), a final packer search.
 
 Not planned for now: bloom, fluid inside the bottle (it is an empty shell).
@@ -783,9 +819,9 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 083 bytes (25 Oct 2026), 109 under 8 192**: the breakdown below
-(7 967), plus the start screen and music hookup (+116). The song, its player and any text
-still have to fit in those 109 bytes, or features get cut.
+**`intro.cmd` is 8 838 bytes (25 Oct 2026), 646 OVER 8 192**: the breakdown below
+(7 967), plus the start screen and music hookup (+116), plus the sound engine (+755:
+pad, reverb, liquid, normalising - with the score still empty).
 
 The breakdown, 24 Oct 2026, after the lossless pass, the core simplifications and the
 non-feature pass below, and a 120-round packer search on the result:
