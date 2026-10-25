@@ -2249,7 +2249,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     dropRad: 'Rendered radius of a droplet in mm. Below about 1.7 mm (the fine grid cell half-diagonal at 256 cubed) drops start falling between voxels, so a dense stream breaks up into scattered drops.',
     dropVol: 'Volume of one drop in microlitres. Together with pourRate this sets how fast the glasses fill: mL/s = pourRate x dropVol x 60 / 1000.',
     bounces: 'Maximum refraction/reflection interfaces per ray. Deep interior shots need 20+; the wide tower is fine around 8. Each extra bounce costs render time, and too few shatters the image into checkerboard shards where rays run out.',
-    simSpeed: 'Simulation speed multiplier, on top of the timeline's own speed. Below 1 it is real slow motion: each step covers less sim time and the liquid moves every frame. Above 1 the sim runs more full 1/60 s steps per frame (16 at most; ff +20s for big jumps). 0 freezes it while the camera keeps moving.',
+    simSpeed: 'Simulation speed multiplier, on top of the speed the timeline sets. Below 1 it is real slow motion: each step covers less sim time and the liquid moves every frame. Above 1 the sim runs more full 1/60 s steps per frame (16 at most; ff +20s for big jumps). 0 freezes it while the camera keeps moving.',
     expo: 'Exposure applied before tonemapping.',
     cgain: 'Brightness of the photon caustic map on the table. It carries the direct light too, so 0 leaves the table lit by ambient only.',
     padGain: 'Audio, heard after "hear audio": the pad\'s level. The whole mix is normalised at the end, so this sets the pad against the liquid, not the overall volume.',
