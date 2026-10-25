@@ -2294,6 +2294,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['expo',     'range', 1.45, 0.20, 4.00, 0.05, 2],
     ['cgain',    'range', 0.05, 0.00, 0.30, 0.005,3],
     ['padGain',  'range', 0.01, 0,    0.2,  0.001,3],
+    ['master',   'range', 0.9,  0,    2,    0.01, 2],
     ['padCut',   'range', 1400, 200,  6000, 10,   0],
     ['padAtk',   'range', 2.5,  0.05, 8,    0.05, 2],
     ['padRel',   'range', 4,    0.1,  10,   0.1,  1],
@@ -2389,6 +2390,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     expo: 'Exposure applied before tonemapping.',
     cgain: 'Brightness of the photon caustic map on the table. It carries the direct light too, so 0 leaves the table lit by ambient only.',
     padGain: 'Audio, heard after "hear audio": the pad\'s level. The whole mix is normalised at the end, so this sets the pad against the liquid, not the overall volume.',
+    master: 'Audio: the overall level. Fixed, not normalised: watch the peak in this column\'s header - past 1 the release clips, so turn this down.',
     padCut: 'Audio: the pad\'s lowpass cutoff in Hz - lower is darker and softer, higher brighter.',
     padAtk: 'Audio: seconds a chord takes to swell in.',
     padRel: 'Audio: seconds a chord takes to fade after it ends. Longer lets chords overlap into each other.',
@@ -2535,7 +2537,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     b.title = 'Reload with sound: the audio sliders and track boxes come along. When "rendering audio..." turns into "click here to start", click that box. From then the trk* boxes switch tracks on and off live, and an audio slider is heard a moment after you let go of it. Add &testpad=1 to the URL for a held test chord while the score is empty; &fs=1 for fullscreen as in the release.';
     b.onclick = () => {
       const q = new URLSearchParams(location.search);
-      for (const k of ['padGain', 'padCut', 'padAtk', 'padRel', 'padStagger', 'padBw',
+      for (const k of ['padGain', 'master', 'padCut', 'padAtk', 'padRel', 'padStagger', 'padBw',
                        'padBwScale', 'verbLen',
                        'verbMix', 'fxVerbLen', 'fxVerbMix', 'sfxGain', 'streamGain', 'drips',
                        'bRmin', 'bRmax', 'bGamma',
@@ -2651,13 +2653,18 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D}
   async function song(sr) {
     const o = new OfflineAudioContext(2, sr * (SHOW_END + 1), sr);
-    let seed = 7;
-    const rnd = () => (seed = seed * 16807 % 2147483647) / 2147483647;
+    // Three independent random sequences from one generator (Park-Miller): the liquid, the
+    // pad and the bubbles each have their own, so editing one never reshuffles another.
+    const rng = q => () => (q = q * 16807 % 2147483647) / 2147483647,
+          rnd = rng(7), TAU = 2 * Math.PI;
     const gain = (v, to) => { const g = o.createGain(); g.gain.value = v; g.connect(to); return g; };
     // Two buses, each with a reverb of its own (built at the end): the pad's goes into a big
     // hall, the liquid's into a short room - one 4 s hall for both made the drips sound
     // like a cave.
-    let bus = gain(1, o.destination);
+    // A fixed master gain, not normalising: scanning and scaling 6 M rendered samples was
+    // ~60 bytes. The harness shows the mix's peak in the audio column (red past 1).
+    const out = gain(ui.master, o.destination);
+    let bus = gain(1, out);
     const pb = bus;
 //#D{
     // A stem keeps one track and leaves out the hall: each track routes into `bus` as it
@@ -2670,22 +2677,22 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D}
 
     // The pad's own random sequence: editing the score must not reshuffle the drips.
-    let s3 = 5;
-    const r3 = () => (s3 = s3 * 16807 % 2147483647) / 2147483647;
+    const r3 = rng(5);
 
     // The pad: PADsynth-lite. Nasca Octavian Paul's PADsynth (ZynAddSubFX) treats every
     // harmonic as a BAND of frequencies with random phases - the pitch scatter of an
     // ensemble - and renders one long table that loops seamlessly. Lite: no FFT; each band
     // is a dozen sines, each a whole number of cycles per loop so the table still loops,
-    // summed with a rotating phasor. The band is padBw cents wide at the fundamental and
+    // summed with a rotating phasor - and 2 pi has to be exact (TAU): with 6.2832 the top
+    // partials drifted up to 0.2 rad over one loop, and the seam clicked every 2.7 s. The band is padBw cents wide at the fundamental and
     // scales as h^(padBwScale - 1) in cents (1: as wide in pitch at every harmonic). Built
     // before the notes, so the score cannot change it.
     const PL = 1 << 17, PF = 220,    // loop length (2.7 s at 48 kHz), the pitch it is built at
           pt = o.createBuffer(1, PL, sr), pd = pt.getChannelData(0);
     for (let h = 1; h < 25; h++) for (let j = 0; j < 12; j++) {
       const g = r3() + r3() + r3() - 1.5,   // roughly gaussian
-            w = 6.2832 * Math.round(PF * h * 2 ** (g * ui.padBw * h ** (ui.padBwScale - 1) / 1200) * PL / sr) / PL,
-            c = Math.cos(w), sn = Math.sin(w), ph = 6.2832 * r3();
+            w = TAU * Math.round(PF * h * 2 ** (g * ui.padBw * h ** (ui.padBwScale - 1) / 1200) * PL / sr) / PL,
+            c = Math.cos(w), sn = Math.sin(w), ph = TAU * r3();
       let x = Math.cos(ph) / h, y = Math.sin(ph) / h;
       for (let i = 0; i < PL; i++) { pd[i] += y; const x1 = x * c - y * sn; y = x * sn + y * c; x = x1; }
     }
@@ -2703,7 +2710,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       const t0 = t + r3() * ui.padStagger;
       for (const pn of [-0.6, 0.6]) {
         const v = o.createBufferSource(), pan = o.createStereoPanner(), e = gain(0, pan);
-        v.buffer = pt; v.loop = true; v.playbackRate.value = 440 * 2 ** ((m - 69) / 12) / PF;
+        v.buffer = pt; v.loop = true; v.playbackRate.value = 2 ** ((m - 57) / 12);   // the table is built at PF = 220 Hz, MIDI 57
         pan.pan.value = pn; pan.connect(lp);
         e.gain.setTargetAtTime(ui.padGain, t0, ui.padAtk / 3);
         e.gain.setTargetAtTime(0, t0 + len, ui.padRel / 3);
@@ -2711,7 +2718,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       }
     }
 
-    const lb = bus = gain(1, o.destination);
+    const lb = bus = gain(1, out);
 
     // The liquid. Measured over a det run of the show: the pour runs throughout, the top
     // glass is already overflowing at t = 0 (the show starts from a warmed-up state), and
@@ -2749,7 +2756,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         if (drip) {
           // a drip: a sine chirping upward over 50 ms - the bubble a drop traps, ringing
           // higher as it closes
-          ph += f * Math.exp(Math.min(s, 0.05) * up) / sr; v = Math.sin(6.283 * ph);
+          ph += f * Math.exp(Math.min(s, 0.05) * up) / sr; v = Math.sin(TAU * ph);
         } else {
           // a splash: noise through a one-pole highpass (1-4 kHz)
           const x = rnd() * 2 - 1; lo += (x - lo) * c; v = x - lo;
@@ -2776,8 +2783,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // rates 1/r^gamma, loudness D r^alpha with D = rnd^beta (most bubbles deep and faint),
     // and only the loud, near-surface ones rise. Own random sequence, so the tracks above
     // stay exactly as they were.
-    let s2 = 3;
-    const r2 = () => (s2 = s2 * 16807 % 2147483647) / 2147483647;
+    const r2 = rng(3);
     const bx = [0, 1, 2, 3, 4].map(() => o.createBuffer(2, sr * (SHOW_END + 1), sr)),
           BX = bx.map(b => [b.getChannelData(0), b.getChannelData(1)]);
     // one bubble: radius rm in mm, amplitude a, rise xi, pan 0..1, starting at t
@@ -2787,25 +2793,28 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       let ph = 0, e = a;
       for (let i = 0; i < n; i++, e *= k) {
         ph += f * (1 + xi * d * i / sr) / sr;
-        const v = e * Math.sin(6.283 * ph);
+        const v = e * Math.sin(TAU * ph);
         Y[0][i0 + i] += v * gl; Y[1][i0 + i] += v * gr;
       }
     };
     // one bubble drawn from the population between lo and hi mm; b skews its depth (b = 1:
     // evenly loud, ui.bBeta: mostly deep and faint - right for a crowd of bubbles, wrong for
     // the one bubble a falling drop makes, which was then nearly always inaudible)
-    const pop = (Y, t, a, lo, hi, pan, xi, b = ui.bBeta) => {
-      const g = 1 - ui.bGamma, u = r2(), D = r2() ** b,
-            rm = Math.abs(g) < 1e-3 ? lo * (hi / lo) ** u : (lo ** g + u * (hi ** g - lo ** g)) ** (1 / g);
+    const pop = (Y, t, a, lo, hi, pan, b = ui.bBeta) => {
+      // inverse CDF of rates ~ 1/r^gamma; at gamma = 1 exactly the power form divides by
+      // zero, so it takes 1e-3 there - log-uniform to within a hair (folded away in the
+      // release, where gamma is a constant)
+      const g = 1 - ui.bGamma || 1e-3, u = r2(), D = r2() ** b,
+            rm = (lo ** g + u * (hi ** g - lo ** g)) ** (1 / g);
       // loudness relative to the largest size the call allows: with r^alpha in mm, one rare
       // 7 mm bubble near the surface peaked at 2.2 and the peak normalising turned the whole
       // soundtrack down 2.5x for it
-      bub(Y, t, rm, a * D * (rm / hi) ** ui.bAlpha, xi ?? (D > ui.bRiseCut ? ui.bXi : 0), pan);
+      bub(Y, t, rm, a * D * (rm / hi) ** ui.bAlpha, D > ui.bRiseCut ? ui.bXi : 0, pan);
     };
     for (const [t, drip, nr, pan] of EV) {
       if (drip) {
         // a drip: its bubble, and often one or two smaller ones as it breaks up
-        pop(BX[0], t, ui.drip2Gain * nr, ui.bRmin, ui.bRmax, pan, undefined, 1);
+        pop(BX[0], t, ui.drip2Gain * nr, ui.bRmin, ui.bRmax, pan, 1);
         for (let j = r2() * 3 | 0; j--;)
           pop(BX[0], t + 0.002 + r2() * 0.02, ui.drip2Gain * nr * 0.5, ui.bRmin, ui.bRmax / 2, pan);
       } else {
@@ -2835,8 +2844,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
             f = ui.popF * (1 - (1 - ui.popGlide) * Math.exp(-s / 0.008));
       // the thump falls like a kick drum: from twice popThumpF down to it within ~20 ms
       ph += f / sr; tp += ui.popThumpF * (1 + Math.exp(-s / 0.01)) / sr; lo += (x - lo) * 0.3;
-      const v = ui.popGain * (Math.sin(6.283 * ph) * Math.exp(-s / ui.popDecay)
-        + ui.popThump * Math.sin(6.283 * tp) * Math.exp(-s / ui.popThumpLen)
+      const v = ui.popGain * (Math.sin(TAU * ph) * Math.exp(-s / ui.popDecay)
+        + ui.popThump * Math.sin(TAU * tp) * Math.exp(-s / ui.popThumpLen)
         + x * Math.exp(-s / 0.0007)
         + ui.hissGain * (x - lo) * Math.min(1, s / 0.01) * Math.exp(-s / ui.hissLen));
       BX[4][0][i0 + i] += v; BX[4][1][i0 + i] += v;
@@ -2864,19 +2873,19 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         const d = ir.getChannelData(c);
         for (let i = 0; i < d.length; i++) d[i] = (rnd() * 2 - 1) * Math.exp(-7 * i / d.length);
       }
-      cv.buffer = ir; cv.connect(o.destination); from.connect(gain(mix, cv));
+      cv.buffer = ir; cv.connect(out); from.connect(gain(mix, cv));
     }
 
     const b = await o.startRendering();
 //#D{
-    if (only) return b;   // stems stay raw: the live player applies the mix's own gain
-//#D}
-    // normalise the mix to a 0.9 peak: the sliders set balance, this sets level
-    let pk = 1e-9;
+    if (only) return b;   // stems stay raw: the live player applies the master gain
+    // the mix's peak, shown in the audio column: past 1 the release clips
+    let pk = 0;
     for (let c = 0; c < 2; c++) for (const x of b.getChannelData(c)) pk = Math.max(pk, Math.abs(x));
-    for (let c = 0; c < 2; c++) { const d = b.getChannelData(c); for (let i = 0; i < d.length; i++) d[i] *= 0.9 / pk; }
-//#D{
-    song.peak = pk;   // the level before normalising, so balances can be compared
+    song.peak = pk;
+    const hd = document.querySelector('#uia .head');
+    if (hd) { hd.textContent = 'audio - peak ' + pk.toFixed(2) + (pk > 1 ? '  CLIPS: lower master' : '');
+              hd.style.color = pk > 1 ? '#f66' : ''; }
     // ?tick=1: a short click every half second over the top, to check the picture against
     // the audio
     if (cfg.tick) for (let c = 0; c < 2; c++) {
@@ -2941,7 +2950,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   }
   async function liveSetup() {
     const g = (v, to) => { const x = ac.createGain(); x.gain.value = v; x.connect(to); return x; };
-    live.master = g(0.9 / song.peak, ac.destination);
+    live.master = g(ui.master, ac.destination);
     // the pad's bus into a hall, the liquid's into a room - as in song()
     live.mixP = g(1, live.master); live.mixL = g(1, live.master);
     live.cvP = hall(ui.verbLen); live.cvL = hall(ui.fxVerbLen);
@@ -2957,6 +2966,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     if (!live.master) return;
     const now = ac.currentTime;
     for (const k in STEMS) live.g[k].gain.setTargetAtTime(ui[STEMS[k]] ? 1 : 0, now, 0.02);
+    live.master.gain.setTargetAtTime(ui.master, now, 0.02);
     live.sendP.gain.setTargetAtTime(ui.trkVerb ? ui.verbMix : 0, now, 0.02);
     live.sendL.gain.setTargetAtTime(ui.trkVerb ? ui.fxVerbMix : 0, now, 0.02);
   }
@@ -2986,13 +2996,12 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
           liveStart(k, now, Math.max(0, now - tA));
         }
       }
-      live.master.gain.setTargetAtTime(0.9 / song.peak, ac.currentTime, 0.1);
       liveApply();
     });
   }
   for (const k in STEMS) uiEl[STEMS[k]].inp.addEventListener('input', liveApply);
   uiEl.trkVerb.inp.addEventListener('input', liveApply);
-  for (const k of [...Object.keys(AFFECTS), 'verbMix', 'verbLen', 'fxVerbMix', 'fxVerbLen'])
+  for (const k of [...Object.keys(AFFECTS), 'verbMix', 'verbLen', 'fxVerbMix', 'fxVerbLen', 'master'])
     uiEl[k].inp.addEventListener('change', () => { liveApply(); liveChange(k); });
 //#D}
 

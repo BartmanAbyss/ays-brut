@@ -7,7 +7,7 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (PADsynth pad, reverbs, liquid sounds, cork
-pop) work. `build/intro.cmd` is **9 476 bytes, 1 284 OVER the 8 192 budget** while two
+pop) work. `build/intro.cmd` is **9 394 bytes, 1 202 OVER the 8 192 budget** while two
 liquids both ship for the A/B (about 290 less once decided), so features have to be
 cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
@@ -187,9 +187,10 @@ sounds the same every run. Three parts:
   (`fxVerbLen` 0.6 s, `fxVerbMix` 0.25): one 4 s hall for everything made the drips sound
   like a cave. +21 bytes for the second one.
 
-The mix is normalised to a 0.9 peak, so the sliders set balance, not level. Render time:
-~2 s (most of it the pad and the reverb). Default balance, RMS: the pad 0.064 against the
-liquid 0.011 on the wide opening and 0.056 on the macro shot.
+The level is a fixed `master` gain (0.9), not normalised: the harness shows the mix's peak
+in the audio column's header, red with "CLIPS" past 1 - then turn `master` down. (It was
+normalised to a 0.9 peak; scanning and scaling the 6 M rendered samples cost 25 bytes.)
+Render time: ~3 s.
 
 **To hear it**, press *hear audio* in the harness panel: it reloads with `?gate=1&show=1`
 and the audio sliders in the URL; click the page. Add `&testpad=1` for the test chord.
@@ -197,8 +198,8 @@ The harness then plays the soundtrack as four **stems** - pad, stream, drips, sp
 through a live hall, and the `trk*` boxes switch each track (and the reverb) on and off
 while the show runs. Letting go of an audio slider re-renders just the stems it touches
 (the pad takes ~2 s, the rest a fraction of that) and swaps them in at the playback
-position; the mix's normalising gain is then re-measured. With everything on it is the
-release mix: the stems sum to it within 6e-7. The release itself renders one mix and
+position; the peak shown is then re-measured. With everything on it is the release mix:
+the stems times `master` sum to it within 3e-7. The release itself renders one mix and
 ships none of this (drips and splashes having a buffer each cost 18 bytes).
 
 The start box says what is happening: "rendering audio..." (about 10 s in the harness,
@@ -260,9 +261,25 @@ to say what it is. Track `pop`, at `popT` (0.5 s), in three parts:
   (`hissGain`).
 
 No study quantifies the pop's own sound, so these are physics-shaped starting points to
-tune by ear. Peak 0.985 with the deeper thump: the pop is now the loudest moment, so it sets
-the normalising - more pop bass turns everything else down a little. +90 bytes, +18 for
-the kick-like thump.
+tune by ear. Peak 0.985 (raw) with the deeper thump: the pop is the loudest moment, so it
+is what clips first if `master` or the pop go up. +90 bytes, +18 for the kick-like
+thump.
+
+#### Audio size pass: 9 476 -> 9 394
+
+| change | bytes | sound |
+|---|---|---|
+| one random-generator factory for the three sequences; one exact 2 pi (`TAU`) | | same sequences |
+| the bubble-size formula without its gamma = 1 special case (folded away in the release) | | same |
+| no unused pitch-rise parameter on the bubble population | | same |
+| pad playback rate as 2^((m - 57) / 12) | | same |
+| *together* | **-57** | levels within 0.2% |
+| a fixed `master` gain instead of normalising the rendered mix | **-25** | the same at 0.9 |
+
+The exact 2 pi also fixed a bug: the PADsynth table used 6.2832, so over one 2.7 s loop the
+top partials drifted up to 0.2 rad and the seam clicked every loop. The old liquid tracks
+(stream, drips, splashes) were left alone: they go once the A/B against the bubble model
+is decided, worth about 290 bytes.
 
 #### The pad: PADsynth (decided by A/B)
 
@@ -704,7 +721,7 @@ from the release.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, puddle, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
 screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 9 476 bytes with both liquids in for the A/B.
+`intro.cmd` is 9 394 bytes with both liquids in for the A/B.
 
 Next:
 1. **Size** — about 1 000 bytes over once the liquid A/B is decided, before the score and
@@ -930,11 +947,12 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 476 bytes (25 Oct 2026), 1 284 OVER 8 192**: the breakdown below
+**`intro.cmd` is 9 394 bytes (25 Oct 2026), 1 202 OVER 8 192**: the breakdown below
 (7 967), plus the start screen and music hookup (+116), plus the sound engine (+773: pad,
 reverb, liquid, normalising - with the score still empty), plus the bubble-model tracks
 for the A/B (+364), the liquid's own room (+21) and the cork pop (+106 with the loudness
-fixes), the deeper pop (+18) and the PADsynth pad in place of the saw pad (+111). With the
+fixes), the deeper pop (+18) and the PADsynth pad in place of the saw pad (+111), less the
+audio size pass (-82). With the
 bubble model replacing the old liquid, about 290 less (it costs +76 over the old liquid,
 fizz included).
 
