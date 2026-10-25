@@ -6,10 +6,9 @@ entirely by SDF raymarching. Target: an **8192-byte PC intro** for **ComParade 2
 dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
-click-to-start screen and the sound engine (string pad, reverb, liquid sounds) work.
-`build/intro.cmd` is **9 754 bytes, 1 562 OVER the 8 192 budget** while two liquids and two
-pads both ship for the A/B (about 290 + 250 less once each is decided), so
-features have to be
+click-to-start screen and the sound engine (PADsynth pad, reverbs, liquid sounds, cork
+pop) work. `build/intro.cmd` is **9 476 bytes, 1 284 OVER the 8 192 budget** while two
+liquids both ship for the A/B (about 290 less once decided), so features have to be
 cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
@@ -171,9 +170,9 @@ sounds the same every run. Three parts:
 - **The pad** plays `SCORE`: chords as `[start s, length s, MIDI notes...]`. **The score is
   written by hand** - the party bans generated music - and is empty in the repository;
   `?testpad=1` adds one plain held chord in the harness (dev-only lines, never shipped) to
-  judge the timbre by. Each note is five sawtooth voices detuned by `padDetune` cents and
-  spread across the stereo field, into one lowpass (`padCut`) that a 0.07 Hz LFO swings by
-  40%, with `padAtk`/`padRel` swells.
+  judge the timbre by. The pad is PADsynth-lite (*The pad*, below): each note plays one
+  looped table of smeared harmonics twice, panned apart, through a lowpass (`padCut`),
+  with `padAtk`/`padRel` swells and the notes of a chord up to `padStagger` apart.
 - **The liquid**: a steady band of hiss for the stream, and drips (sines chirping upward
   over 50 ms) and splashes (high-passed noise bursts) as a Poisson process. Its rate
   follows what the simulation does, measured over a det run of the show: the pour runs
@@ -265,11 +264,13 @@ tune by ear. Peak 0.985 with the deeper thump: the pop is now the loudest moment
 the normalising - more pop bass turns everything else down a little. +90 bytes, +18 for
 the kick-like thump.
 
-#### The pad: upgraded, and a PADsynth alternative (A/B)
+#### The pad: PADsynth (decided by A/B)
 
-The five-saw pad sounded synthetic for the usual reasons: the same even detune on every
-note, so every note beats alike; every voice starting at once; nothing moving but one
-filter LFO. Two answers, as tracks to compare (`trkPad`, `trkPad2`):
+The first pad - five detuned sawtooth voices per note - sounded synthetic for the usual
+reasons: the same even detune on every note, so every note beats alike; every voice
+starting at once; nothing moving but one filter LFO. Two answers were built as tracks and
+compared by ear; **the PADsynth pad won and is the only pad now** (the saw pad and its
+upgrade are gone; this records what was tried):
 
 - **The saw pad, upgraded** - each with its own slider, 0 = off:
   - `padRand`: a random detune per voice on top of the even spread, so no two notes beat
@@ -288,17 +289,18 @@ filter LFO. Two answers, as tracks to compare (`trkPad`, `trkPad2`):
   sine a whole number of cycles per 2.7 s loop, summed with a rotating phasor. Each note
   plays the table twice, from different points of the loop, panned apart.
 
-Defaults level both with the old pad (RMS 0.068 and 0.069 against 0.063). Bytes, measured
-by building each variant: the upgrade +136; PADsynth *instead of* the saw pad +111; both
-in, as now, +389. Render time: a full render is ~6 s with a chord and both pads (the
-pad's stem 2.2 s, mostly the modulated delays; pad2 0.8 s); one pad ships, so the release
-loses one of them. The pad's slow modulations run at block rate (`k-rate`): the drift and
-the breathing filter need no per-sample updates. The pad has its own random sequence, so
-editing the score never reshuffles the drips.
+Bytes, measured by building each variant: the upgrade +136; PADsynth *instead of* the saw
+pad +111 - so the one that sounded better was also the cheaper. Shipped: 9 476, the
+predicted figure, 278 less than with both. The pad's level matches the old one (RMS 0.067
+against 0.063). Rendering the pad costs ~0.8 s; the upgraded saw pad cost 2.2 s, mostly in
+its modulated delays. The pad has its own random sequence, so editing the score never
+reshuffles the drips.
 
 The harness also has **rewind** (top bar): back to t = 0 without reloading. The simulation
 lives in buffers that start zeroed plus a few clocks, so clearing both is exactly a fresh
-load; with sound on the stems restart with it and nothing is rendered again.
+load; with sound on the stems restart with it and nothing is rendered again. With sound
+on, **pause** suspends the audio too: the show runs on the audio clock, so both stop on
+the same sample and resume together.
 
 ### Rendering
 
@@ -702,11 +704,11 @@ from the release.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, puddle, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
 screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 9 754 bytes with both liquids and both pads in for the A/B.
+`intro.cmd` is 9 476 bytes with both liquids in for the A/B.
 
 Next:
-1. **Size** — about 1 000 bytes over once both A/Bs are decided, before the score and any
-   text.
+1. **Size** — about 1 000 bytes over once the liquid A/B is decided, before the score and
+   any text.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
 2. **The score** — must be **human-composed**; the party bans prompt-based music. Chords
@@ -928,13 +930,13 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 754 bytes (25 Oct 2026), 1 562 OVER 8 192**: the breakdown below
+**`intro.cmd` is 9 476 bytes (25 Oct 2026), 1 284 OVER 8 192**: the breakdown below
 (7 967), plus the start screen and music hookup (+116), plus the sound engine (+773: pad,
 reverb, liquid, normalising - with the score still empty), plus the bubble-model tracks
 for the A/B (+364), the liquid's own room (+21) and the cork pop (+106 with the loudness
-fixes), the deeper pop (+18), the pad upgrade (+136) and the PADsynth pad (+253 next to
-it). With the bubble model replacing the old liquid, about 290 less (it costs +76 over the
-old liquid, fizz included); with one pad, 136 or 253 less.
+fixes), the deeper pop (+18) and the PADsynth pad in place of the saw pad (+111). With the
+bubble model replacing the old liquid, about 290 less (it costs +76 over the old liquid,
+fizz included).
 
 The breakdown, 24 Oct 2026, after the lossless pass, the core simplifications and the
 non-feature pass below, and a 120-round packer search on the result:
