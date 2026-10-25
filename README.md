@@ -1145,10 +1145,97 @@ to reverse at the end if bytes are short.
 
 ---
 
-## Credits / prior art
+## Credits and references
 
-- **INCENDIUM** (Bercon + pestis, Revision 2025) — 4 kb WebGPU intro with a 3D fluid sim and
-  compute-shader music. The packaging model and the byte budget come from it. MIT.
-- **Roquefort** (Bercon) — 256³ WebGPU fluid. MIT.
+Everything the intro uses that came from someone else, for the NFO. Ideas and algorithms
+were implemented from their descriptions; no third-party code ships in the intro. The
+build tools in `build/vendor` are third-party code and keep their licences (below).
+
+### Prior art and packaging
+
+- **INCENDIUM** (Bercon + pestis, Revision 2025) - 4 kb WebGPU intro with a 3D fluid sim and
+  compute-shader music. The packaging model, the byte budget and the dropper's trick -
+  PowerShell serving its own bytes as `Content-Encoding: br` - come from it. MIT.
+- **Roquefort** (Bercon) - 256³ WebGPU fluid. MIT.
 - Shadertoy work by **wyatt** and **michael0884** informed the nearest-particle-as-SDF idea.
-  Studied, not copied — Shadertoy defaults to CC BY-NC-SA.
+  Studied, not copied - Shadertoy defaults to CC BY-NC-SA.
+- **Pakettic** (Veikko Sariola / pestis, MIT) - the model for `build/pack.py`: packing as a
+  search over orderings and names, scored by compressed size, with late-acceptance hill
+  climbing. Reimplemented, not copied.
+- **Shader Minifier** (Laurent Le Brun / Ctrl-Alt-Test, Apache-2.0) - the trick of letting a
+  local take the name of a global its function never touches. Idea only.
+
+### Rendering
+
+- **Sphere tracing** - J. C. Hart, "Sphere tracing: a geometric method for the antialiased
+  ray tracing of implicit surfaces", *The Visual Computer* 12(10), 1996.
+- **Over-relaxed sphere tracing** - B. Keinert, H. Schäfer, J. Korndörfer, U. Ganse,
+  M. Stamminger, "Enhanced Sphere Tracing", STAG 2014 (Eurographics Italian Chapter),
+  doi:10.2312/stag.20141233.
+- **Distance-field modelling** - Inigo Quilez's articles: SDF primitives (capped cylinder,
+  capsule) and the polynomial smooth minimum used for the glass's joins
+  (iquilezles.org/articles/distfunctions, /smin).
+- **Nested dielectrics by priority** (glass, champagne and bottle glass meeting without
+  coincident surfaces) - C. M. Schmidt, B. Budge, "Simple Nested Dielectrics in Ray Traced
+  Images", *Journal of Graphics Tools* 7(2):1-8, 2002.
+- **Fresnel term** - C. Schlick, "An Inexpensive BRDF Model for Physically-based
+  Rendering", *Computer Graphics Forum* 13(3), 1994 (Schlick's approximation).
+- **Absorption** - the Beer-Lambert law.
+- **Caustics by tracing photons from the light** - after H. W. Jensen, "Global
+  Illumination using Photon Maps", Eurographics Rendering Workshop 1996; here splatted
+  into a table texture.
+- **Jump flooding** (the spray's far field) - G. Rong, T.-S. Tan, "Jump Flooding in GPU
+  with Applications to Voronoi Diagram and Distance Transform", I3D 2006.
+- **Hash** - `pcg3d` from M. Jarzynski, M. Olano, "Hash Functions for GPU Rendering",
+  *Journal of Computer Graphics Techniques* 9(3):21-38, 2020.
+- **Tonemapping** - K. Narkowicz's fit of the ACES filmic curve, "ACES Filmic Tone Mapping
+  Curve" (blog, 2016).
+- **Smootherstep** (shapes and camera easing) - the quintic fade from K. Perlin, "Improving
+  Noise", SIGGRAPH 2002.
+
+### Simulation
+
+- **Collision as a position constraint** (no tunnelling through the 1.4 mm glass at any
+  speed) - in the spirit of M. Müller, B. Heidelberger, M. Hennix, J. Ratcliff, "Position
+  Based Dynamics", *J. Visual Communication and Image Representation* 18(2), 2007.
+- The per-glass surface waves are the discrete 2D wave equation; the puddle is height-field
+  flow. Both textbook, no single source.
+
+### Sound
+
+- **Bubble acoustics** - M. Minnaert, "On musical air-bubbles and the sounds of running
+  water", *Philosophical Magazine* 16(104):235-248, 1933 (the resonance 3/r).
+- **The liquid's bubble model** (damping, pitch rise, size and depth distributions) -
+  K. van den Doel, "Physically Based Models for Liquid Sounds", *ACM Transactions on
+  Applied Perception* 2(4), 2005; first at ICAD 2004.
+- **Fizz** (bubbles bursting at the surface, pitch rising as the cavity collapses) -
+  M. Poujol, R. Wunenburger, F. Ollivier, A. Antkowiak, J. Pierre, "Sound of
+  effervescence", *Physical Review Fluids* 6, 013604, 2021.
+- **The cork pop** - shaped after G. Liger-Belair, D. Cordier, R. Georges, "Under-expanded
+  supersonic CO2 freezing jets during champagne cork popping", *Science Advances* 5(9),
+  2019, doi:10.1126/sciadv.aav5528; and the Helmholtz resonance of the open neck.
+- **The pad** - PADsynth, by Nasca Octavian Paul (ZynAddSubFX): harmonics as bands of
+  frequencies with random phases in one looped table. A lite version without the FFT.
+- **Random numbers** - S. K. Park, K. W. Miller, "Random Number Generators: Good Ones Are
+  Hard to Find", *Communications of the ACM* 31(10), 1988 (the minimal standard, 16807).
+- Champagne acoustics background (not implemented directly): K. Spratt, K. Lee,
+  P. Wilson, "Champagne acoustics", *Physics Today* 2018.
+
+### Build tools
+
+- **wgslender** (Hugo Daniel, CC0-1.0) - WGSL tree-shaking. Vendored.
+- **terser** (BSD-2-Clause) - JS minification, with its dependencies acorn, commander,
+  source-map-support, buffer-from, @jridgewell/* (MIT) and source-map (BSD-3-Clause).
+  Vendored; licences in `build/vendor/node_modules`.
+- **Brotli** (Google, MIT) - via Python's `brotli` package.
+- **Late-acceptance hill climbing** (the packer search) - E. K. Burke, Y. Bykov, "The Late
+  Acceptance Hill-Climbing Heuristic", *European Journal of Operational Research* 258(1),
+  2017 (Bykov's 2008 report first).
+- Evaluated, not used: **Roadroller** (Kang Seonghoon, MIT) - see *Minifying* in CLAUDE.md.
+
+### Disclosure
+
+The party requires full disclosure of generative-AI use and bans prompt-based music. The
+NFO has to say that much of the code - renderer, simulation, sound engine and build - was
+written with an AI coding assistant (Claude, by Anthropic) under the author's direction,
+and that the music (the score) is composed by the author. The wording is the author's.
