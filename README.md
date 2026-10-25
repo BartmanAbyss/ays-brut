@@ -7,7 +7,7 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (PADsynth pad, reverbs, liquid sounds, cork
-pop) work. `build/intro.cmd` is **8 770 bytes, 578 OVER the 8 192 budget**, so features have
+pop) work. `build/intro.cmd` is **8 762 bytes, 570 OVER the 8 192 budget**, so features have
 to be cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
@@ -719,10 +719,10 @@ from the release.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
 screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 8 770 bytes.
+`intro.cmd` is 8 762 bytes.
 
 Next:
-1. **Size** — 578 bytes over, before the score and any text. The puddle is cut (-362);
+1. **Size** — 570 bytes over, before the score and any text. The puddle is cut (-362);
    next candidates in *Feature cuts, measured*, and a packer search on the new shader.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
@@ -945,7 +945,7 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 770 bytes (25 Oct 2026), 578 OVER 8 192**, after cutting the table
+**`intro.cmd` is 8 762 bytes (25 Oct 2026), 570 OVER 8 192**, after cutting the table
 puddle (-362, measured with the old search state; 0.4 ms faster on heavy tier2). Before
 that: **9 132**, the breakdown below (7 967),
 plus the start screen and music hookup (+116), plus the sound (+1 049 all told, the score

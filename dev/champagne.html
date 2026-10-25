@@ -550,15 +550,17 @@ fn waveUpdate(@builtin(global_invocation_id) gi: vec3u, @builtin(num_workgroups)
   let lap = vecs[V_WAVE + wIdx(g, c + vec2i(1,0))].x + vecs[V_WAVE + wIdx(g, c - vec2i(1,0))].x
           + vecs[V_WAVE + wIdx(g, c + vec2i(0,1))].x + vecs[V_WAVE + wIdx(g, c - vec2i(0,1))].x - 4.0 * eta;
 
-  var nw = 2.0 * eta - old + 0.25 * lap - 0.06 * (eta - old) - imp;
+  // (eta1, not nw: nw is the grid size here - a local of the same name compiled in the
+  // harness but the packer gave both one short name, and the release would not compile)
+  var eta1 = 2.0 * eta - old + 0.25 * lap - 0.06 * (eta - old) - imp;
 
   // damp to zero at the disc boundary
   let rr = length((vec2f(c) + 0.5) / f32(WN) - 0.5) * 2.0;
-  if (rr > 0.94) { nw *= 0.2; }
-  nw = clamp(nw, -WMAX, WMAX);
+  if (rr > 0.94) { eta1 *= 0.2; }
+  eta1 = clamp(eta1, -WMAX, WMAX);
 
   let foam = clamp(e.z * 0.978 + fin, 0.0, 1.6);   // mousse collapses over a few seconds
-  vecs[V_WAVE + n] = vec4f(nw, eta, foam, 0.0);
+  vecs[V_WAVE + n] = vec4f(eta1, eta, foam, 0.0);
 }
 
 // ── caustics: trace photons from the key light through glass+champagne onto the table ──
