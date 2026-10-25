@@ -235,6 +235,17 @@ filled exactly one glass. The rule the dispatch order now follows: a pass that *
 state** belongs in the per-step loop, a pass that **builds a structure for rendering** (the
 narrow band, the JFA, the puddle's coarse bound) belongs per frame.
 
+**Integrating a level over a shape whose area goes to zero overshoots.** The glass level
+was `L += Q / A(L)`, and a spherical cap's area is ~0 at the bottom, so the first drops
+of a step sent the level to the rim and the overflow, computed with that tiny area, lost
+the excess. The top glass read full 0.3 s into the pour, and the error depended on the
+step size - it only showed when slow motion made the steps smaller and the glass filled
+differently. Keep the conserved quantity (volume) as the state and derive the rest.
+
+**Slow motion must shrink the step, not skip it.** Whole 1/60 s steps run less often show
+the same frame several times (at 0.25, motion at 15 fps). A smaller step means everything
+sized per step has to scale: waves, decay rates, emission cadence, the motion streak.
+
 **One sim step per rendered frame makes the sim run at the refresh rate.** It reads as
 correct because the step size is fixed, but the step *rate* is then the frame rate:
 measured 1.160× at 66 fps and 0.624× at 39. Against music that error accumulates for the
@@ -450,7 +461,7 @@ search scores for brotli, not for it. Worth adopting at the very end, when every
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 310 bytes. `intro.cmd` is **8 750** (25 Oct 2026), 558
+  stale. Our dropper header is 310 bytes. `intro.cmd` is **8 842** (25 Oct 2026), 650
   OVER, with the start screen and the sound engine in but the score empty and no text;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The

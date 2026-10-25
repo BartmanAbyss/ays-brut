@@ -56,18 +56,19 @@
 struct U {
   res      : vec2f,
   time     : f32,
-  frame    : f32,
+  frame    : f32,          // sim time in 1/60 s units at the start of this frame's steps
   camPos   : vec3f,
   shut     : f32,
-  camTgt   : vec3f,
+  dt       : f32,          // this frame's step: 1/60 s, less in slow motion
+  tgtY     : f32,          // the camera looks at (0, tgtY, 0)
   evx      : f32,
-  emitPos  : vec3f,
   evz      : f32,
+  emitPos  : vec3f,
+  fade     : f32,          // brightness multiplier for fades (1 = full)
 //#D{
   view     : f32,
   fov      : f32,
   maxSteps : f32,
-  dt       : f32,
   spawnMod : f32,
   nPart    : f32,
   pvol     : f32,
@@ -114,7 +115,7 @@ const A_CAUST = A_WIMP + 2 * 14 * 32 * 32; // wave impulses [0..N), foam [N..2N)
 @group(0) @binding(5) var<storage, read_write> vecs : array<vec4f>;
 const V_GLASS  = 32 * 32 * 32;             // coarse far field, packed for the render | then:
 const V_WAVE   = V_GLASS + 14;             // glass level (x)
-const V_CAUSTF = V_WAVE + 14 * 32 * 32;    // waves: eta, etaOld, foam; then blurred caustics
+const V_CAUSTF = V_WAVE + 14 * 32 * 32;    // waves: eta, velocity, foam; then blurred caustics
 @group(0) @binding(6) var<storage, read_write> prof : array<atomic<u32>>;  // profiler banks
 // Profiler. Counters compile into the profiling pipeline only (constants: { PROF: 1 }); the
 // normal pipeline compiles every `if (PROF)` away, so its timing is untouched, and the
@@ -394,9 +395,11 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
   // bottle slot almost always lands on an index that is still alive.
   let POOL = max(u32(u.nPart) / 6u, 1u);
 
-  // nw.y - 1 is the sub-step index: without it every substep in a frame shares one
+  // The emission cadence counts SIM TIME in 1/60 s units, not steps: a slow-motion step
+  // covers less time, and counting steps would pour faster per sim second the slower the
+  // shot. nw.y - 1 is the sub-step index: without it every substep in a frame shares one
   // spawn cadence, so fast-forward advances the drops without emitting new ones.
-  let fc = u32(u.frame) + nw.y - 1u;
+  let fc = u32(u.frame + f32(nw.y - 1u) * u.dt * 60.0);
 
   if (p.life <= 0.0) {
     let h = rnd3(i, fc, 3u);
@@ -454,8 +457,9 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
     // at the same point: by the time spill is falling at ~1 m/s a cohort lands ~17 mm from
     // the next one, which reads as a chain of discrete beads. Advancing each drop by a
     // random fraction of the step - position and velocity, gravity included - makes the
-    // emission continuous rather than stroboscopic.
-    let ts = h.z * u.dt;
+    // emission continuous rather than stroboscopic. Over a full 1/60 s, not over the step:
+    // in slow motion a cadence's drops are all born in the first short step of it.
+    let ts = h.z / 60.0;
     p.vel += vec3f(0.0, -9.81 * ts, 0.0);
     p.pos += p.vel * ts;
   }
@@ -513,23 +517,35 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
   parts[i] = p;
 }
 
-// ── bulk level per glass: dL/dt = Q / A(L), overflow spills at the rim ──
+// ── bulk level per glass: the volume is the state, the level follows from it ──
 // One glass's level for this step, from the volume poured in; the excess goes to overflow.
 // Run by the first NG threads of the step's first waveUpdate (marked by a grid height of
 // 2) - a kernel of its own was 14 threads and an entry point.
+// The level was integrated, L += Q / A(L), and the bowl is a spherical cap whose area is
+// ~0 at the bottom: the first drops arriving in a step pushed the level to the rim at
+// once, and (L - LMAX) * A at that tiny area sent almost none of the excess on as
+// overflow. The top glass read FULL 0.3 s into the pour, having received 12 of its 280 mL,
+// and the rest vanished - and how badly depended on the step size, so slow motion filled
+// differently. Now the volume V is kept (in .y) and the level is the exact inverse of the
+// cap volume V = pi h^2 (R - h/3): with h = R (1 - c), c^3 - 3c + 2 - 3V/(pi R^3) = 0,
+// solved by the trigonometric root that runs from c = 1 (empty) to 0 (a hemisphere).
 fn glassUpdate(g: i32) {
   let inflow = f32(atomicExchange(&atom[A_GVOL + u32(g)], 0u)) * VUNIT;
-  if (u.fillOv >= 0.0) { vecs[V_GLASS + g] = vec4f(u.fillOv * LMAX, 0.0, 0.0, 0.0); return; }
-  var L = vecs[V_GLASS + g].x;
-  let y  = Y0 + L;
-  let r2 = max(R_IN * R_IN - (y - SPH_CY) * (y - SPH_CY), 1e-6);
-  let A  = PI * r2;
-  L += inflow / A;
-  if (L > LMAX) {
-    atomicAdd(&atom[A_GVOL + u32(NG + g)], u32(max((L - LMAX) * A, 0.0) / VUNIT));
-    L = LMAX;
+//#D{
+  if (u.fillOv >= 0.0) {
+    let h = u.fillOv * LMAX;
+    vecs[V_GLASS + g] = vec4f(h, PI * h * h * (R_IN - h / 3.0), 0.0, 0.0);
+    return;
   }
-  vecs[V_GLASS + g] = vec4f(L, 0.0, 0.0, 0.0);
+//#D}
+  let VM = PI * LMAX * LMAX * (R_IN - LMAX / 3.0);    // what a glass holds at the spill level
+  var V = vecs[V_GLASS + g].y + inflow;
+  if (V > VM) {
+    atomicAdd(&atom[A_GVOL + u32(NG + g)], u32((V - VM) / VUNIT));
+    V = VM;
+  }
+  let c = 2.0 * cos(acos(1.5 * V / (PI * R_IN * R_IN * R_IN) - 1.0) / 3.0 - 2.0943951);
+  vecs[V_GLASS + g] = vec4f(R_IN * (1.0 - c), V, 0.0, 0.0);
 }
 
 // ── surface waves: 2D wave equation on each glass's disc ──
@@ -544,23 +560,27 @@ fn waveUpdate(@builtin(global_invocation_id) gi: vec3u, @builtin(num_workgroups)
   let imp = f32(i32(atomicExchange(&atom[A_WIMP + n], 0u))) * WUNIT;
   let fin = f32(i32(atomicExchange(&atom[A_WIMP + n + NWCELL], 0u))) * FUNIT;
   let e   = vecs[V_WAVE + n];
-  var eta = e.x;
-  let old = e.y;
+  let eta = e.x;
 
   let lap = vecs[V_WAVE + wIdx(g, c + vec2i(1,0))].x + vecs[V_WAVE + wIdx(g, c - vec2i(1,0))].x
           + vecs[V_WAVE + wIdx(g, c + vec2i(0,1))].x + vecs[V_WAVE + wIdx(g, c - vec2i(0,1))].x - 4.0 * eta;
 
   // (eta1, not nw: nw is the grid size here - a local of the same name compiled in the
   // harness but the packer gave both one short name, and the release would not compile)
-  var eta1 = 2.0 * eta - old + 0.25 * lap - 0.06 * (eta - old) - imp;
+  // Velocity form, so the step can shrink for slow motion: e.y is the surface velocity per
+  // standard substep, and q = dt / (1/60 s) scales the acceleration, the damping and the
+  // advance. At q = 1 it is the leapfrog this replaced, eta' = 2 eta - old + ... A drop's
+  // impulse is a velocity kick whatever the step.
+  let q = u.dt * 60.0;
+  var eta1 = eta + (e.y * (1.0 - 0.06 * q) + 0.25 * q * lap - imp) * q;
 
   // damp to zero at the disc boundary
   let rr = length((vec2f(c) + 0.5) / f32(WN) - 0.5) * 2.0;
   if (rr > 0.94) { eta1 *= 0.2; }
   eta1 = clamp(eta1, -WMAX, WMAX);
 
-  let foam = clamp(e.z * 0.978 + fin, 0.0, 1.6);   // mousse collapses over a few seconds
-  vecs[V_WAVE + n] = vec4f(eta1, eta, foam, 0.0);
+  let foam = clamp(e.z * (1.0 - 0.022 * q) + fin, 0.0, 1.6);   // mousse collapses over a few seconds
+  vecs[V_WAVE + n] = vec4f(eta1, (eta1 - eta) / q, foam, 0.0);
 }
 
 // ── caustics: trace photons from the key light through glass+champagne onto the table ──
@@ -587,7 +607,7 @@ fn causticBlur(@builtin(global_invocation_id) g: vec3u) {
 fn photons(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
   if (i >= u32(u.nPhoton)) { return; }
-  let h = rnd3(i, u32(u.frame), 5u);
+  let h = rnd3(i, u32(u.frame * 64.0), 5u);   // u.frame moves < 1 per frame in slow motion
 
   let L  = lightDir();
   let t1 = normalize(cross(L, vec3f(0.0, 1.0, 0.0)));
@@ -1236,7 +1256,7 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
 @fragment fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
   let uv = (fc.xy * 2.0 - u.res) / u.res.y;
   let ro = u.camPos;
-  let fw = normalize(u.camTgt - ro);
+  let fw = normalize(vec3f(0.0, u.tgtY, 0.0) - ro);
   let rt = normalize(cross(fw, vec3f(0.0, 1.0, 0.0)));
   let up = cross(rt, fw);
   let rd = normalize(uv.x * rt - uv.y * up + fw * u.fov);
@@ -1377,7 +1397,7 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
 //#D{
   if (PROF) { pc[56] += u32(tir); pc[57] += pSpray; pc[58] += pGlass; pc[59] += pBulk; }
 //#D}
-  var col = tonemap(acc * u.expo);
+  var col = tonemap(acc * u.expo) * u.fade;
 
 //#D{
   let v = u.view;
@@ -1738,7 +1758,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   let clockT = 0;              // master clock, seconds; the sim step index derives from it
   let showStep = 0;            // show time in whole SIM_DT steps - the clock the music owns
   let showPend = 0, showT = 0, burstSteps = 0;
-  let frameSteps = 1;          // sim steps this rendered frame stands for; sizes the streak
+  // Sim time simulated so far, in 1/60 s units. A step is 1 unit, or less in slow motion
+  // (see frame()), so this is not a step count.
+  let simU = 0;
+  let frameSim = 1;            // sim time this rendered frame stands for, units; sizes the streak
+  let stepDt = SIM_DT;         // this frame's step
   // A redraw while paused (a slider moved) must re-render the CURRENT state and nothing
   // else. As a plain frame it stepped the sim whenever the clock was ahead - and pausing in
   // det mode always leaves exactly one step pending - and re-shot the photons, so every
@@ -1746,7 +1770,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   let redrawOnly = false;
   const f32 = new Float32Array(48);
   const t0 = performance.now();
-  let last = t0, acc = 0, accN = 0, frameNo = 0, simStep = 0, ffSteps = 0;
+  let last = t0, acc = 0, accN = 0, frameNo = 0, ffSteps = 0;
 
   function writeUniforms(time) {
     let ang, dist = ui.dist, camY = ui.camY, tgtY = ui.tgtY;
@@ -1768,13 +1792,13 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const W = ui.pourWander * 0.001;
     const w0 = wob(time), w1 = wob(time + 0.02);
     // in struct U order: what the release keeps first...
-    f32.set([canvas.width, canvas.height, time, simStep,
-             Math.sin(ang) * dist, camY, Math.cos(ang) * dist, ui.shutter * SIM_DT * frameSteps,
-             0, tgtY, 0, (w1[0] - w0[0]) * W / 0.02,            // target; bottle drift velocity x
-             w0[0] * W, 0.555, w0[1] * W, (w1[1] - w0[1]) * W / 0.02]);   // emitter; drift z
+    f32.set([canvas.width, canvas.height, time, simU,
+             Math.sin(ang) * dist, camY, Math.cos(ang) * dist, ui.shutter * SIM_DT * frameSim,
+             stepDt, tgtY, (w1[0] - w0[0]) * W / 0.02, (w1[1] - w0[1]) * W / 0.02,   // bottle drift velocity
+             w0[0] * W, 0.555, w0[1] * W, 1]);                  // emitter; fade
 //#D{
     // ...then the harness controls, which the release folds into the shader
-    f32.set([ui.view, 1.6, cfg.steps, SIM_DT, Math.max(1, Math.round((cfg.npart / 6) / ui.pourRate)),
+    f32.set([ui.view, 1.6, cfg.steps, Math.max(1, Math.round((cfg.npart / 6) / ui.pourRate)),
              cfg.npart, ui.dropVol * 1e-9, cfg.nphoton, ui.cgain, cfg.single ? 1 : 0, cfg.noliq ? 1 : 0,
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
@@ -1884,13 +1908,21 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // as the dispatch's grid height), and reusing one would make two substeps share an RNG
     // stream - the bug that used to thin the pour whenever a frame ran long.
     const burst = burstSteps; burstSteps = 0;
-    const want = Math.floor(clockT / SIM_DT) - simStep;
+    // Slow motion: below speed 1 each step covers LESS sim time, one step per show step,
+    // so the liquid moves every frame. Skipping steps instead (whole 1/60 s steps, run
+    // less often) showed the same frame several times over - at 0.25, motion at 15 fps.
+    // At speed 1 and above steps are 1/60 s as before, more of them when faster; seeks and
+    // fast-forward always take full steps.
+    const big = ffNow + burst > 0;
+    const hu = big ? 1 : Math.min(1, (ui.show ? evalShow(showT).speed : 1) * ui.simSpeed);
+    stepDt = hu * SIM_DT;
+    const want = hu > 0 ? Math.floor((clockT / SIM_DT - simU) / hu + 1e-6) : 0;
     const simSteps = redrawOnly ? 0 : Math.max(0, Math.min(16 + ffNow + burst, want));
-    if (!redrawOnly && want - simSteps > LAG_STEPS) {
+    if (!redrawOnly && (want - simSteps) * hu > LAG_STEPS) {
       // Persistently too slow to hold the clock. In a demo sync beats continuity: drop
       // the steps we cannot afford so the picture stays with the music, and count it so
       // the cost is visible rather than silent.
-      simStep = Math.floor(clockT / SIM_DT) - simSteps;
+      simU = clockT / SIM_DT - simSteps * hu;
       probe.resyncs++;
     }
 
@@ -1901,13 +1933,15 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // motion this frame actually represents.
     // Bounded, and never from a deliberate burst: a seek runs thousands of steps in one
     // frame and would size the streak to all of them.
-    if (!redrawOnly) { frameSteps = (ffNow + burst > 0) ? 1 : Math.max(1, Math.min(simSteps, 4)); }
+    // In slow motion the frame stands for less sim time, so the streak shortens - as a
+    // high-speed camera's exposure does.
+    if (!redrawOnly && simSteps) { frameSim = big ? 1 : Math.min(simSteps * hu, 4); }
     const time = cfg.t !== null ? cfg.t : clockT;
     probe.time  = time;
-    probe.step  = simStep + simSteps;
-    probe.drift = clockT - probe.step * SIM_DT;
+    probe.step  = Math.round(simU + simSteps * hu);
+    probe.drift = clockT - (simU + simSteps * hu) * SIM_DT;
     probe.showT = showT; probe.shot = ui.show ? evalShow(showT).shot : -1;
-    probe.frameSteps = frameSteps; probe.streakMM = ui.shutter * SIM_DT * frameSteps * 1000;
+    probe.frameSteps = +frameSim.toFixed(3); probe.streakMM = ui.shutter * SIM_DT * frameSim * 1000;
     writeUniforms(time);
 
     const enc = device.createCommandEncoder();
@@ -1973,7 +2007,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     readParts();
 
     if (!cfg.fs) resize();   // the pane can be shown or resized without firing a resize event
-    frameNo++; simStep += simSteps; probe.frames = frameNo; probe.ok = true;
+    frameNo++; simU += simSteps * hu; probe.frames = frameNo; probe.ok = true;
     const dt = now - last; last = now;
     acc += dt; accN++;
     if (acc > 400) { probe.frameMs = acc / accN; probe.fps = 1000 / probe.frameMs; acc = 0; accN = 0; updateHud(); }
@@ -2071,7 +2105,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     }
     showStep = Math.round(t / SIM_DT); showT = showStep * SIM_DT; showPend = 0;
     clockT = want;
-    burstSteps = Math.max(0, Math.ceil(want / SIM_DT) - simStep);   // may pass the cap
+    burstSteps = Math.max(0, Math.ceil(want / SIM_DT - simU));   // may pass the cap
     if (cfg.paused) { requestAnimationFrame(frameOnce); }
   }
 
@@ -2405,7 +2439,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     for (const b of bufs.slice(1)) enc.clearBuffer(b);
     device.queue.submit([enc.finish()]);
     clockT = 0; showStep = 0; showPend = 0; showT = 0; burstSteps = 0; ffSteps = 0;
-    simStep = 0; frameNo = 0; frameSteps = 1; last = performance.now();
+    simU = 0; frameNo = 0; frameSim = 1; last = performance.now();
     if (cfg.gate && tA !== undefined) {
       tA = ac.currentTime + 0.1;
       if (live.master) for (const k in STEMS) liveStart(k, tA, 0);

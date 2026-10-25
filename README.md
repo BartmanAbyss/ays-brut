@@ -7,7 +7,7 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (PADsynth pad, reverbs, liquid sounds, cork
-pop) work. `build/intro.cmd` is **8 750 bytes, 558 OVER the 8 192 budget**, so features have
+pop) work. `build/intro.cmd` is **8 842 bytes, 650 OVER the 8 192 budget**, so features have
 to be cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
@@ -71,7 +71,7 @@ Free-falling liquid has no pressure gradient, so it needs no solver. The split:
 | Part | Method |
 |---|---|
 | Stream, splash, spill, droplets | ballistic particles (65 536), no neighbour search |
-| Liquid at rest in each glass | volume ODE `dV/dt = inflow − overflow` + 2D wave field |
+| Liquid at rest in each glass | volume per glass (`dV/dt = inflow − overflow`), level its exact inverse + 2D wave field |
 | Spill on the table | ends where it lands (a 384² height-field puddle was cut for size) |
 | Mousse | foam deposited by impact into the per-glass grid, decaying |
 
@@ -144,6 +144,23 @@ the show clock. Keys are `[t, angle, dist, camY, tgtY, simSpeed, ease]`:
   for linear, so a long drift can run through several keys without stalling at each one.
 - **`simSpeed` is keyed too**, and the sim clock is the integral of it over show steps, so a
   timeline that varies speed stays machine-independent.
+- **Slow motion is real.** Below speed 1 each sim step covers *less* time (`u.dt`), one step
+  per show step, so the liquid moves every frame. It used to run whole 1/60 s steps less
+  often - at 0.25 the same frame showed four times, motion at 15 fps. Everything sized per
+  step scales with the step: the waves (in velocity form, so the step can change), the
+  mousse decay, the bottle's emission (its cadence counts sim time, not steps) and the
+  motion streak, which shortens the way a high-speed camera's exposure does. At speed 1 and
+  above nothing changed: whole steps, more of them when faster. Checked with `det=1`: the
+  same sim time at 0.25 and at 1 fills the glasses to within a few percent (top glass 29.6
+  vs 30.4 mm at 3.3 s, tier 2 starting to fill at the same moment).
+- **The glass level used to jump.** The level was integrated as L += Q / A(L), and a
+  spherical cap's area is nearly 0 at the bottom: the first drops in a step pushed the level
+  to the rim, and almost none of the excess went on as overflow. The top glass read full
+  0.3 s into the pour with 12 of its 280 mL, and how badly depended on the step - slow
+  motion filled differently. The volume is now the state and the level its exact inverse
+  (a cubic, solved in closed form). The top glass now takes ~6 s to fill at the default
+  pour, which also means the first-draft timeline below and the measured drip rates in
+  *Sound* were timed against the wrong fill and have to be redone.
 
 The camera is driven from the table directly and only *mirrored* into the sliders for
 readout. Routing it through them would quantise it to the slider step, and `dist` steps by
@@ -156,9 +173,9 @@ is representative, not bit-identical: a catch-up burst wraps the 16 sub-step slo
 azimuths differ. Seek and live playback to t=12 both gave 9 glasses filled and an identical
 top glass, with per-glass levels differing by the RNG.
 
-The current shot list is a **first draft timed against the simulation's real pace**, which is
-the part that needed measuring rather than guessing: the top glass fills in ~20 s and the
-full tower in ~48 s. The macro shot therefore runs 9—18 s while the top glass is filling, and
+The current shot list is a **first draft**, timed against a pace that turned out to be the
+level-jump bug above ("the top glass fills in ~20 s, the full tower in ~48 s"); it is being
+replaced by the new shot plan. The macro shot therefore runs 9—18 s while the top glass is filling, and
 the cut to tier 2 lands on the first overflow. Duration is 60 s.
 
 ### Sound
@@ -720,10 +737,10 @@ from the release.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
 screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 8 750 bytes.
+`intro.cmd` is 8 842 bytes.
 
 Next:
-1. **Size** — 558 bytes over, before the score and any text. The puddle is cut (-362);
+1. **Size** — 650 bytes over, before the score and any text. The puddle is cut (-362);
    next candidates in *Feature cuts, measured*, and a packer search on the new shader.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
@@ -946,7 +963,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 750 bytes (25 Oct 2026), 558 OVER 8 192**, after cutting the bottle's
+**`intro.cmd` is 8 842 bytes (25 Oct 2026), 650 OVER 8 192**: real slow motion, the exact
+glass volume and a fade slot in the uniforms (+92). Before that 8 750, after cutting the bottle's
 punt (-12) and the table puddle (-362, measured with the old search state; 0.4 ms faster on heavy tier2). Before
 that: **9 132**, the breakdown below (7 967),
 plus the start screen and music hookup (+116), plus the sound (+1 049 all told, the score

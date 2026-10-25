@@ -100,8 +100,8 @@ def cut_dev(text):
 REWRITES = [
     ("    requiredFeatures: hasTS ? ['timestamp-query'] : [],", ''),
     ('      timestampWrites: ts(3),\n', ''),
-    ('    frameNo++; simStep += simSteps; probe.frames = frameNo; probe.ok = true;',
-     '    simStep += simSteps;'),
+    ('    frameNo++; simU += simSteps * hu; probe.frames = frameNo; probe.ok = true;',
+     '    simU += simSteps * hu;'),
     ('    if (cfg.paused || redrawOnly) { updateHud(); return; }', ''),
     ('    if (!cfg.still || frameNo < cfg.warm) requestAnimationFrame(frame); else updateHud();',
      '    requestAnimationFrame(frame);'),
@@ -196,7 +196,7 @@ def release_uniforms(ui):
     rad = math.pi / 180
     npart = float(CFG['npart'])
     return {
-        'view': 0.0, 'fov': 1.6, 'maxSteps': float(CFG['steps']), 'dt': 1 / 60,
+        'view': 0.0, 'fov': 1.6, 'maxSteps': float(CFG['steps']),
         'spawnMod': float(max(1, round((npart / 6) / f('pourRate')))),
         'nPart': npart, 'pvol': f('dropVol') * 1e-9, 'nPhoton': float(CFG['nphoton']),
         'cgain': f('cgain'), 'single': 0.0, 'noliq': 0.0, 'bub': on('bubbles'),
