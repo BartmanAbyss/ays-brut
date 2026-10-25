@@ -7,7 +7,7 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (string pad, reverb, liquid sounds) work.
-`build/intro.cmd` is **9 220 bytes, 1 028 OVER the 8 192 budget** while the old and the
+`build/intro.cmd` is **9 241 bytes, 1 049 OVER the 8 192 budget** while the old and the
 bubble-model liquid tracks both ship for the A/B (8 932 with the bubble model alone), so
 features have to be
 cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
@@ -183,8 +183,10 @@ sounds the same every run. Three parts:
   camera's distance from the timeline: 1 on the macro shot, quieter on the wide ones.
   The drips are written sample by sample: as audio nodes, ~1300 of them took 9.5 s to
   render; as plain loops, milliseconds.
-- **The hall**: a convolution reverb whose impulse is two channels of noise decaying to
-  -60 dB over `verbLen`, fed by `verbMix`.
+- **The reverbs**: convolution, each impulse two channels of noise decaying to -60 dB.
+  The pad goes into a hall (`verbLen` 4 s, `verbMix`), the liquid into a short room
+  (`fxVerbLen` 0.6 s, `fxVerbMix` 0.25): one 4 s hall for everything made the drips sound
+  like a cave. +21 bytes for the second one.
 
 The mix is normalised to a 0.9 peak, so the sliders set balance, not level. Render time:
 ~2 s (most of it the pad and the reverb). Default balance, RMS: the pad 0.064 against the
@@ -633,7 +635,7 @@ from the release.
 
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, puddle, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
-screen with fullscreen and the audio clock, the sound engine. `intro.cmd` is 9 220
+screen with fullscreen and the audio clock, the sound engine. `intro.cmd` is 9 241
 bytes with both liquid models in (8 932 with the bubble model alone).
 
 Next:
@@ -860,7 +862,7 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 220 bytes (25 Oct 2026), 1 028 OVER 8 192**: the breakdown below
+**`intro.cmd` is 9 241 bytes (25 Oct 2026), 1 049 OVER 8 192**: the breakdown below
 (7 967), plus the start screen and music hookup (+116), plus the sound engine (+773: pad,
 reverb, liquid, normalising - with the score still empty), plus the bubble-model tracks
 for the A/B (+364). With the bubble model replacing the old liquid instead: **8 932**

@@ -2297,6 +2297,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['padRel',   'range', 4,    0.1,  10,   0.1,  1],
     ['verbLen',  'range', 4,    0.5,  10,   0.1,  1],
     ['verbMix',  'range', 0.5,  0.00, 2,    0.05, 2],
+    ['fxVerbLen','range', 0.6,  0.1,  6,    0.05, 2],
+    ['fxVerbMix','range', 0.25, 0.00, 2,    0.05, 2],
     ['sfxGain',  'range', 0.25, 0.00, 1,    0.01, 2],
     ['streamGain','range',0.04, 0.00, 0.30, 0.005,3],
     ['drips',    'range', 14,   0,    60,   1,    0],
@@ -2375,8 +2377,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     padDetune: 'Audio: cents between the five sawtooth voices of each note. 0 is one thin saw; 5-15 is the classic ensemble shimmer; past 25 it goes out of tune.',
     padAtk: 'Audio: seconds a chord takes to swell in.',
     padRel: 'Audio: seconds a chord takes to fade after it ends. Longer lets chords overlap into each other.',
-    verbLen: 'Audio: reverb tail in seconds (to -60 dB).',
-    verbMix: 'Audio: how much of everything goes into the reverb. Slow-motion footage usually sits in a big wet space.',
+    verbLen: 'Audio: the pad\'s hall, tail in seconds (to -60 dB).',
+    verbMix: 'Audio: how much of the pad goes into its hall. Slow-motion footage usually sits in a big wet space.',
+    fxVerbLen: 'Audio: the liquid\'s room, tail in seconds (to -60 dB). Short keeps the drips and splashes close and dry; the pad\'s 4 s hall made them sound like a cave.',
+    fxVerbMix: 'Audio: how much of the liquid (old and bubble tracks) goes into its room.',
     sfxGain: 'Audio: level of the drips and splashes, before the camera distance scales them.',
     streamGain: 'Audio: level of the steady pour-stream hiss under the drips.',
     drips: 'Audio: drips and splashes per second while only the top glass overflows; it doubles as the second tier reaches its spill level (19-26 s, measured).',
@@ -2384,7 +2388,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     trkStream: 'Audio track on/off, live: the steady pour-stream hiss.',
     trkDrips: 'Audio track on/off, live: the drips (sines chirping upward).',
     trkSplash: 'Audio track on/off, live: the splashes (bursts of high-passed noise).',
-    trkVerb: 'Audio on/off, live: the reverb on everything. Off is the dry mix.',
+    trkVerb: 'Audio on/off, live: both reverbs, the pad\'s hall and the liquid\'s room. Off is the dry mix.',
     trkDrip2: 'Audio track on/off, live: bubble-model drips (prototype). Same drip times as the old drips track, for A/B.',
     trkSplash2: 'Audio track on/off, live: bubble-model splashes - a cloud of bubbles per splash (prototype). Same splash times as the old splashes track.',
     trkPour2: 'Audio track on/off, live: the pour as a dense population of bubbles (prototype), against the old stream hiss.',
@@ -2503,7 +2507,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     b.onclick = () => {
       const q = new URLSearchParams(location.search);
       for (const k of ['padGain', 'padCut', 'padDetune', 'padAtk', 'padRel', 'verbLen',
-                       'verbMix', 'sfxGain', 'streamGain', 'drips', 'bRmin', 'bRmax', 'bGamma',
+                       'verbMix', 'fxVerbLen', 'fxVerbMix', 'sfxGain', 'streamGain', 'drips',
+                       'bRmin', 'bRmax', 'bGamma',
                        'bXi', 'bRiseCut', 'bBeta', 'bAlpha', 'drip2Gain', 'splash2Gain',
                        'splashN', 'splashLen', 'pour2Gain', 'pourBub', 'fizzGain', 'fizzRate',
                        'fizzXi']) q.set(k, ui[k]);
@@ -2596,10 +2601,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     let seed = 7;
     const rnd = () => (seed = seed * 16807 % 2147483647) / 2147483647;
     const gain = (v, to) => { const g = o.createGain(); g.gain.value = v; g.connect(to); return g; };
+    // Two buses, each with a reverb of its own (built at the end): the pad's goes into a big
+    // hall, the liquid's into a short room - one 4 s hall for both made the drips sound
+    // like a cave.
     let bus = gain(1, o.destination);
-    const cv = o.createConvolver();
-    cv.connect(o.destination);
-    bus.connect(gain(ui.verbMix, cv));
+    const pb = bus;
 //#D{
     // A stem keeps one track and leaves out the hall: each track routes into `bus` as it
     // is built, so the soloed one gets a line straight to the output and the others a gain
@@ -2626,6 +2632,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       e.gain.setTargetAtTime(0, t + len, ui.padRel / 3);
       v.connect(e); v.start(t); v.stop(t + len + ui.padRel * 2);
     }
+
+    const lb = bus = gain(1, o.destination);
 
     // The liquid. Measured over a det run of the show: the pour runs throughout, the top
     // glass is already overflowing at t = 0 (the show starts from a warmed-up state), and
@@ -2747,14 +2755,17 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
                             pour2: bx[2], fizz: bx[3] };
 //#D}
 
-    // the hall: two channels of noise decaying to -60 dB over verbLen (filled last, so its
-    // length does not move the random sequence the drips are drawn from)
-    const ir = o.createBuffer(2, sr * ui.verbLen, sr);
-    for (let c = 0; c < 2; c++) {
-      const d = ir.getChannelData(c);
-      for (let i = 0; i < d.length; i++) d[i] = (rnd() * 2 - 1) * Math.exp(-7 * i / d.length);
+    // the reverbs: two channels of noise decaying to -60 dB, verbLen for the pad's hall and
+    // fxVerbLen for the liquid's room (filled last, so their lengths do not move the random
+    // sequence the drips are drawn from)
+    for (const [from, len, mix] of [[pb, ui.verbLen, ui.verbMix], [lb, ui.fxVerbLen, ui.fxVerbMix]]) {
+      const cv = o.createConvolver(), ir = o.createBuffer(2, sr * len, sr);
+      for (let c = 0; c < 2; c++) {
+        const d = ir.getChannelData(c);
+        for (let i = 0; i < d.length; i++) d[i] = (rnd() * 2 - 1) * Math.exp(-7 * i / d.length);
+      }
+      cv.buffer = ir; cv.connect(o.destination); from.connect(gain(mix, cv));
     }
-    cv.buffer = ir;
 
     const b = await o.startRendering();
 //#D{
@@ -2810,7 +2821,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     solo = null;
     return r;
   }
-  function hall(len) {
+  function hall(len) {   // a reverb into the master, built as song() builds its own
     // the release's hall: two channels of noise decaying to -60 dB over len
     const ir = ac.createBuffer(2, ac.sampleRate * len | 0, ac.sampleRate);
     let sd = 11;
@@ -2826,17 +2837,23 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   async function liveSetup() {
     const g = (v, to) => { const x = ac.createGain(); x.gain.value = v; x.connect(to); return x; };
     live.master = g(0.9 / song.peak, ac.destination);
-    live.mix = g(1, live.master);
-    live.cv = hall(ui.verbLen);
-    live.send = g(0, live.cv); live.mix.connect(live.send);
-    for (const k in STEMS) { live.g[k] = g(0, live.mix); live.buf[k] = await stem(k); }
+    // the pad's bus into a hall, the liquid's into a room - as in song()
+    live.mixP = g(1, live.master); live.mixL = g(1, live.master);
+    live.cvP = hall(ui.verbLen); live.cvL = hall(ui.fxVerbLen);
+    live.sendP = g(0, live.cvP); live.mixP.connect(live.sendP);
+    live.sendL = g(0, live.cvL); live.mixL.connect(live.sendL);
+    for (const k in STEMS) {
+      live.g[k] = g(0, k === 'pad' ? live.mixP : live.mixL);
+      live.buf[k] = await stem(k);
+    }
     liveApply();
   }
   function liveApply() {
     if (!live.master) return;
     const now = ac.currentTime;
     for (const k in STEMS) live.g[k].gain.setTargetAtTime(ui[STEMS[k]] ? 1 : 0, now, 0.02);
-    live.send.gain.setTargetAtTime(ui.trkVerb ? ui.verbMix : 0, now, 0.02);
+    live.sendP.gain.setTargetAtTime(ui.trkVerb ? ui.verbMix : 0, now, 0.02);
+    live.sendL.gain.setTargetAtTime(ui.trkVerb ? ui.fxVerbMix : 0, now, 0.02);
   }
   function liveStart(k, at, off) {
     const s = ac.createBufferSource();
@@ -2849,9 +2866,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   function liveChange(key) {
     liveJob = liveJob.then(async () => {
       if (!live.master) return;
-      if (key === 'verbLen') {
-        const old = live.cv;
-        live.cv = hall(ui.verbLen); live.send.disconnect(); live.send.connect(live.cv);
+      if (key === 'verbLen' || key === 'fxVerbLen') {
+        const P = key === 'verbLen', old = P ? live.cvP : live.cvL, send = P ? live.sendP : live.sendL;
+        const cv = hall(ui[key]);
+        if (P) live.cvP = cv; else live.cvL = cv;
+        send.disconnect(); send.connect(cv);
         setTimeout(() => old.disconnect(), 100);
       }
       await song(ac.sampleRate);   // first: it refreshes song.raw and the mix's gain
@@ -2868,7 +2887,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   }
   for (const k in STEMS) uiEl[STEMS[k]].inp.addEventListener('input', liveApply);
   uiEl.trkVerb.inp.addEventListener('input', liveApply);
-  for (const k of [...Object.keys(AFFECTS), 'verbMix', 'verbLen'])
+  for (const k of [...Object.keys(AFFECTS), 'verbMix', 'verbLen', 'fxVerbMix', 'fxVerbLen'])
     uiEl[k].inp.addEventListener('change', () => { liveApply(); liveChange(k); });
 //#D}
 
