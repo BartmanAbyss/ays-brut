@@ -206,7 +206,7 @@ def release_uniforms(ui):
         'ltAz': f('lightAz') * rad, 'ltEl': f('lightEl') * rad,
         'prad': f('dropRad') * 0.001, 'foamG': f('foam'),
         'botTilt': f('botTilt') * rad, 'botAz': f('botAz') * rad,
-        'botOn': on('bottle'), 'pudOn': on('puddle'),
+        'botOn': on('bottle'),
     }
 
 

@@ -26,7 +26,7 @@ produced false "it's broken" readings more than once.
 user's GPU in the background. The user has asked for this explicitly.
 
 **Reproduce framing via URL params, not prose.** `angle, dist, camY, tgtY, lightAz, lightEl,
-fill, view, w, h, steps, bounces, parts, puddle, bubbles, waves, refl, gridenv` all work.
+fill, view, w, h, steps, bounces, parts, bubbles, waves, refl, gridenv` all work.
 A link beats a description when comparing before/after.
 
 ## Verifying
@@ -44,10 +44,10 @@ A link beats a description when comparing before/after.
   after. With levels pinned the frame is bit-identical between loads; with spill running it
   is not (the overflow emitters race on a compare-and-swap). Noise floor: up to a few dozen
   table pixels by one level (the photon map's integer decay settles on neighbouring fixed
-  points). Grab only after things settle - the puddle bound reaches the dev shader through
-  an async readback, and a grab before it lands differs by up to 19 levels on 15% of pixels.
+  points). Grab only after things settle (the table puddle, since cut, reached the shader
+  through an async readback; a grab before it landed differed on 15% of pixels).
 - Isolation views settle arguments far faster than reasoning: `liquid`, `glass`, `tir`,
-  `puddle`, `bottle`, `medium`, `steps`, plus `gridEnv` for reflection/refraction direction.
+  `bottle`, `medium`, `steps`, plus `gridEnv` for reflection/refraction direction.
 - **The pane must be on screen.** A hidden browser pane runs the page as a background page
   at ~2 fps; the per-pass timestamps still measure real work, but the GPU downclocks between
   frames and inflates them. If `frameMs` is wildly larger than `gpuMs.total`, the reading is
@@ -365,7 +365,7 @@ its analysis (`--no-mangle --no-whitespace`) and keeps our naming: 287 bytes bet
 either alone. `--no-whitespace` is required - globals are found with a line-anchored
 pattern that a one-line file defeats. Its validator also rejects our `atomicAdd` calls as
 `@must_use` where Dawn accepts them, so `wgslender validate` reports errors on a shader
-that compiles and runs. Re-check all 13 entry points (11 compute, `vs`, `fs`) survive tree-shaking after adding
+that compiles and runs. Re-check all 11 entry points (9 compute, `vs`, `fs`) survive tree-shaking after adding
 a compute pass.
 
 **wgslender tree-shakes; it does not constant-fold.** Inlining the release uniforms alone
@@ -444,7 +444,7 @@ search scores for brotli, not for it. Worth adopting at the very end, when every
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 310 bytes. `intro.cmd` is **9 132** (25 Oct 2026), 940
+  stale. Our dropper header is 310 bytes. `intro.cmd` is **8 770** (25 Oct 2026), 578
   OVER, with the start screen and the sound engine in but the score empty and no text;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The

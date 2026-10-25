@@ -7,7 +7,7 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (PADsynth pad, reverbs, liquid sounds, cork
-pop) work. `build/intro.cmd` is **9 132 bytes, 940 OVER the 8 192 budget**, so features have
+pop) work. `build/intro.cmd` is **8 770 bytes, 578 OVER the 8 192 budget**, so features have
 to be cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
@@ -71,7 +71,7 @@ Free-falling liquid has no pressure gradient, so it needs no solver. The split:
 |---|---|
 | Stream, splash, spill, droplets | ballistic particles (65 536), no neighbour search |
 | Liquid at rest in each glass | volume ODE `dV/dt = inflow − overflow` + 2D wave field |
-| Spill on the table | 384² height field with yield-threshold flow |
+| Spill on the table | ends where it lands (a 384² height-field puddle was cut for size) |
 | Mousse | foam deposited by impact into the per-glass grid, decaying |
 
 This gives a razor-sharp meniscus (the thing particle fluids get wrong) and costs a fraction
@@ -342,17 +342,17 @@ recording it as a point makes a pour read as a string of frozen beads.
 
 ```
 sim        N steps per frame, N from the clock — everything that advances state:
-           simParticles → puddleUpdate (its first 14 threads: the glass volumes) → waveUpdate ×3
+           simParticles → waveUpdate ×3 (the first one's first 14 threads: the glass volumes)
 build      once per frame — a rendering structure, needs only the final state:
-           puddleCoarse (tallest film per block)
            clearFine (+ coarse clear) → scatterFine (+ far-field seeds) → jfaCoarse ×5
            → resolveFine (+ packs the far field for the render)
 photon     causticDecay → photons → causticBlur
 render     camera raymarch + post (one full-screen triangle)
 ```
 
-Eleven compute entry points. Each dispatch passes its small index (sub-step, flood pass) as
-the height of its grid, `num_workgroups.y - 1`, so no per-dispatch uniforms exist.
+Nine compute entry points. Each dispatch passes its small index (sub-step, flood pass, the
+wave dispatch that also updates the glasses) as the height of its grid,
+`num_workgroups.y - 1`, so no per-dispatch uniforms exist.
 
 The split matters: the puddle, glass volumes and waves used to live in `build` and so
 advanced once per *frame* while the particles advanced on the clock. See *Timing*.
@@ -364,8 +364,6 @@ advanced once per *frame* while the particles advanced on the clock. See *Timing
 | Particle narrow band | 320³ | 1.94 mm |
 | Coarse nearest-particle (JFA) | 32³ | 19.4 mm |
 | Caustic map | 768², ±0.55 m | 1.43 mm |
-| Table puddle | 384², ±0.55 m | 2.86 mm |
-| Puddle blocks (tallest film, for the bound) | 48² | 22.9 mm |
 | Per-glass wave + foam | 32² × 14 | — |
 
 Domain: `(-0.31, -0.015, -0.31)`, 0.62 m cube.
@@ -645,8 +643,8 @@ The release asks for no features and no limits, so it runs on any WebGPU device 
 defaults. That took three changes, since several defaults were close to biting:
 
 - **Storage buffers:** the default is 8 per stage. The storage is merged by element type
-  into 6 bindings (`parts`, `fine`, `fineF`, `atom`, `vecs`, `flts`) at fixed offsets;
-  the dev build adds the profiler's counter bank as a 7th.
+  into 5 bindings (`parts`, `fine`, `fineF`, `atom`, `vecs`) at fixed offsets; the dev
+  build adds the profiler's counter bank as a 6th. (A sixth, `flts`, held the puddle.)
 - **Workgroup size:** the default caps it at 256. 320³/256 would be 128 000 workgroups,
   over the 65 535 per-dimension cap, so `clearFine` and `resolveFine` handle two cells per
   thread.
@@ -660,15 +658,15 @@ The dev harness requests `timestamp-query` when the adapter has it, for the per-
 
 Panel, top right. Every control has a tooltip; every one is also a URL parameter.
 
-**View** — `beauty · steps · normals · medium · liquid · glass · tir · bottle · puddle`.
+**View** — `beauty · steps · normals · medium · liquid · glass · tir · bottle`.
 The isolation views are the debugging workhorses: `liquid`/`glass` show one field alone,
-`tir` reddens total internal reflection, `puddle` shows the height field with contours,
+`tir` reddens total internal reflection,
 `bottle` shows the magnum alone, flat-lit, for shape comparison.
 
 **Camera presets** — `tower · pour · macro · tier2 · top · bottl`.
 
 **Sliders/toggles** — `spin, angle, dist, camY, tgtY, lightAz, lightEl, gridEnv, rtrace,
-drops, bubbles, waves, puddle, reflect, autofill, fill, pourRate, dropVol, dropRad, foam,
+drops, bubbles, waves, reflect, autofill, fill, pourRate, dropVol, dropRad, foam,
 bottle, botTilt, botAz, pourWander, wanderSpd, shutter, bounces, simSpeed, expo, cgain`.
 
 **Buttons** — `ff +20s` (jump the sim forward), `restart`, `pause` (also spacebar).
@@ -691,7 +689,7 @@ refraction is sampling.
 
 `window.__probe()` returns JSON: per-pass GPU times (`timestamp-query`), fps, adapter info,
 shader compile and validation errors, glass levels in mm, particle counts and bottle-stream
-extent, puddle depth/wet-block/bound stats, and the clock's `step`, `drift` and `resyncs`.
+extent, and the clock's `step`, `drift` and `resyncs`.
 Drift should stay under one step (16.7 ms); the HUD shows it live. `?selftest=1` runs assertions and logs
 PASS/FAIL.
 
@@ -718,13 +716,14 @@ from the release.
 
 ## Roadmap
 
-Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, puddle, bottle,
+Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
 screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 9 132 bytes.
+`intro.cmd` is 8 770 bytes.
 
 Next:
-1. **Size** — 940 bytes over, before the score and any text.
+1. **Size** — 578 bytes over, before the score and any text. The puddle is cut (-362);
+   next candidates in *Feature cuts, measured*, and a packer search on the new shader.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
 2. **The score** — must be **human-composed**; the party bans prompt-based music. Chords
@@ -946,7 +945,9 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 132 bytes (25 Oct 2026), 940 OVER 8 192**: the breakdown below (7 967),
+**`intro.cmd` is 8 770 bytes (25 Oct 2026), 578 OVER 8 192**, after cutting the table
+puddle (-362, measured with the old search state; 0.4 ms faster on heavy tier2). Before
+that: **9 132**, the breakdown below (7 967),
 plus the start screen and music hookup (+116), plus the sound (+1 049 all told, the score
 still empty): the PADsynth pad, two reverbs, the bubble-model liquid with fizz, the cork
 pop and the fixed master gain - after it was built with a saw pad and a first liquid next
@@ -1054,7 +1055,7 @@ against the packer's default state, before the core pass above (the puddle's sha
 
 | Option | saves | what it does to the look |
 |---|---|---|
-| puddle | 707 | 1.3% of pixels from above, <0.5% elsewhere: a few glints by the tower base |
+| puddle - **cut 25 Oct: -362 on the shipped build** | 707 | 1.3% of pixels from above, <0.5% elsewhere: a few glints by the tower base |
 | photon lighting -> analytic spot | 589 | the lit disc stays; the tower's shadow and the caustic glints go |
 | waves + foam | 447 | every champagne surface becomes a flat mirror |
 | bottle removed | 355 | the stream pours out of thin air |
@@ -1198,8 +1199,8 @@ build tools in `build/vendor` are third-party code and keep their licences (belo
 - **Collision as a position constraint** (no tunnelling through the 1.4 mm glass at any
   speed) - in the spirit of M. Müller, B. Heidelberger, M. Hennix, J. Ratcliff, "Position
   Based Dynamics", *J. Visual Communication and Image Representation* 18(2), 2007.
-- The per-glass surface waves are the discrete 2D wave equation; the puddle is height-field
-  flow. Both textbook, no single source.
+- The per-glass surface waves are the discrete 2D wave equation. Textbook, no single
+  source.
 
 ### Sound
 
