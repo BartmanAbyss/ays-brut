@@ -7,9 +7,8 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (PADsynth pad, reverbs, liquid sounds, cork
-pop) work. `build/intro.cmd` is **9 394 bytes, 1 202 OVER the 8 192 budget** while two
-liquids both ship for the A/B (about 290 less once decided), so features have to be
-cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
+pop) work. `build/intro.cmd` is **9 132 bytes, 940 OVER the 8 192 budget**, so features have
+to be cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
 ---
@@ -173,15 +172,14 @@ sounds the same every run. Three parts:
   judge the timbre by. The pad is PADsynth-lite (*The pad*, below): each note plays one
   looped table of smeared harmonics twice, panned apart, through a lowpass (`padCut`),
   with `padAtk`/`padRel` swells and the notes of a chord up to `padStagger` apart.
-- **The liquid**: a steady band of hiss for the stream, and drips (sines chirping upward
-  over 50 ms) and splashes (high-passed noise bursts) as a Poisson process. Its rate
-  follows what the simulation does, measured over a det run of the show: the pour runs
-  throughout, the top glass is already overflowing at t = 0 (the show starts from a
-  warmed-up state), and the second tier reaches its spill level between 19 and 26 s,
-  which doubles the spray - so `drips` per second doubles there. Loudness follows the
+- **The liquid**: the bubble model (*The bubble model*, below) - drips, splash clouds, the
+  pour and the fizz, written sample by sample (as audio nodes, ~1300 drips took 9.5 s to
+  render; as plain loops, milliseconds). The drip and splash moments are a Poisson process
+  whose rate follows what the simulation does, measured over a det run of the show: the
+  pour runs throughout, the top glass is already overflowing at t = 0 (the show starts
+  from a warmed-up state), and the second tier reaches its spill level between 19 and
+  26 s, which doubles the spray - so `drips` per second doubles there. Loudness follows the
   camera's distance from the timeline: 1 on the macro shot, quieter on the wide ones.
-  The drips are written sample by sample: as audio nodes, ~1300 of them took 9.5 s to
-  render; as plain loops, milliseconds.
 - **The reverbs**: convolution, each impulse two channels of noise decaying to -60 dB.
   The pad goes into a hall (`verbLen` 4 s, `verbMix`), the liquid into a short room
   (`fxVerbLen` 0.6 s, `fxVerbMix` 0.25): one 4 s hall for everything made the drips sound
@@ -208,7 +206,7 @@ buffers), then "click here to start: show + sound". Only that box starts the sho
 panel stays usable meanwhile; the harness does not go fullscreen (`&fs=1` does, as the
 release does). The track boxes come along in the URL on "hear audio".
 
-#### The bubble model (prototype, four tracks for A/B)
+#### The bubble model (the liquid, decided by A/B)
 
 The first drips sounded synthetic, and for a reason the literature names. K. van den Doel,
 "Physically based models for liquid sounds" (ACM TAP 2005), finds that liquid sound is
@@ -219,19 +217,22 @@ for a falling drop. The first drips rose 2-4x over 50 ms and rang 15-65 ms whate
 pitch: the paper's "blowing through a straw". Real liquid is a population: sizes from rates
 1/r^gamma (0-3 streams, above ~5 rain), loudness D r^alpha with D = rnd^beta (most bubbles
 deep and faint, beta ~10), the rise only on the loud near-surface ones, and the smallest
-bubbles (~0.2 mm) essential - without them it turns into a nozzle. All four new tracks use
-one bubble function:
+bubbles (~0.2 mm) essential - without them it turns into a nozzle. It was built as four
+tracks next to the first liquid (a stream hiss, chirping sines, high-passed noise bursts),
+compared by ear, and replaced it. All four use one bubble function:
 
 | track | what it is | sliders |
 |---|---|---|
-| `drip2` | per drip, one bubble from the population and 0-2 smaller ones as it breaks up; the old drip times | `drip2Gain` |
-| `splash2` | per splash, a cloud of `splashN` bubbles over `splashLen`, densest at the impact; the old splash times | `splash2Gain`, `splashN`, `splashLen` |
-| `pour2` | the stream as `pourBub` bubbles per second (up to ~1000/s is dripping to an intimate stream) | `pour2Gain`, `pourBub` |
+| `drips` | per drip, one bubble from the population and 0-2 smaller ones as it breaks up | `dripGain` |
+| `splashes` | per splash, a cloud of `splashN` bubbles over `splashLen`, densest at the impact | `splashGain`, `splashN`, `splashLen` |
+| `pour` | the stream as `pourBub` bubbles per second (up to ~1000/s is dripping to an intimate stream) | `pourGain`, `pourBub` |
 | `fizz` | CO2 bubbles bursting at the surface: 0.15-0.5 mm, every one heard, pitch rising as the cavity collapses (Poujol et al., "Sound of effervescence", Phys. Rev. Fluids 2021) | `fizzGain`, `fizzRate`, `fizzXi` |
 
-Shared: `bRmin`, `bRmax`, `bGamma`, `bXi`, `bRiseCut`, `bBeta`, `bAlpha`. The harness starts
-with the bubble tracks on and the old liquid off; the `trk*` boxes flip between them.
-Render time +1.2 s.
+Shared: `bRmin`, `bRmax`, `bGamma`, `bXi`, `bRiseCut`, `bBeta`, `bAlpha`. Toggles: `trkDrips`,
+`trkSplash`, `trkPour`, `trkFizz`. Dropping the first liquid saved 262 bytes and halved
+the render (3.2 -> 1.9 s for a full mix); the drip and splash times kept their process,
+though not their exact moments (the first liquid's noise drew from the same random
+sequence).
 
 Two corrections after the first listen. **Loudness is relative to the largest bubble**
 (`(r / rmax)^alpha`): with r in mm, one rare 7 mm bubble near the surface peaked at 2.2, and
@@ -277,9 +278,8 @@ thump.
 | a fixed `master` gain instead of normalising the rendered mix | **-25** | the same at 0.9 |
 
 The exact 2 pi also fixed a bug: the PADsynth table used 6.2832, so over one 2.7 s loop the
-top partials drifted up to 0.2 rad and the seam clicked every loop. The old liquid tracks
-(stream, drips, splashes) were left alone: they go once the A/B against the bubble model
-is decided, worth about 290 bytes.
+top partials drifted up to 0.2 rad and the seam clicked every loop. The first liquid
+tracks were left alone in this pass; removing them afterwards saved 262.
 
 #### The pad: PADsynth (decided by A/B)
 
@@ -721,11 +721,10 @@ from the release.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, puddle, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
 screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 9 394 bytes with both liquids in for the A/B.
+`intro.cmd` is 9 132 bytes.
 
 Next:
-1. **Size** — about 1 000 bytes over once the liquid A/B is decided, before the score and
-   any text.
+1. **Size** — 940 bytes over, before the score and any text.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
 2. **The score** — must be **human-composed**; the party bans prompt-based music. Chords
@@ -947,14 +946,12 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 394 bytes (25 Oct 2026), 1 202 OVER 8 192**: the breakdown below
-(7 967), plus the start screen and music hookup (+116), plus the sound engine (+773: pad,
-reverb, liquid, normalising - with the score still empty), plus the bubble-model tracks
-for the A/B (+364), the liquid's own room (+21) and the cork pop (+106 with the loudness
-fixes), the deeper pop (+18) and the PADsynth pad in place of the saw pad (+111), less the
-audio size pass (-82). With the
-bubble model replacing the old liquid, about 290 less (it costs +76 over the old liquid,
-fizz included).
+**`intro.cmd` is 9 132 bytes (25 Oct 2026), 940 OVER 8 192**: the breakdown below (7 967),
+plus the start screen and music hookup (+116), plus the sound (+1 049 all told, the score
+still empty): the PADsynth pad, two reverbs, the bubble-model liquid with fizz, the cork
+pop and the fixed master gain - after it was built with a saw pad and a first liquid next
+to the final ones for A/B, and those were removed (-278, -262), and an audio size pass
+(-82).
 
 The breakdown, 24 Oct 2026, after the lossless pass, the core simplifications and the
 non-feature pass below, and a 120-round packer search on the result:

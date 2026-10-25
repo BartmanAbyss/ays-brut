@@ -2305,8 +2305,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['verbMix',  'range', 0.5,  0.00, 2,    0.05, 2],
     ['fxVerbLen','range', 0.6,  0.1,  6,    0.05, 2],
     ['fxVerbMix','range', 0.25, 0.00, 2,    0.05, 2],
-    ['sfxGain',  'range', 0.25, 0.00, 1,    0.01, 2],
-    ['streamGain','range',0.04, 0.00, 0.30, 0.005,3],
     ['drips',    'range', 14,   0,    60,   1,    0],
     ['bRmin',    'range', 0.2,  0.1,  3,    0.05, 2],
     ['bRmax',    'range', 7,    0.5,  30,   0.5,  1],
@@ -2315,11 +2313,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['bRiseCut', 'range', 0.9,  0,    1,    0.01, 2],
     ['bBeta',    'range', 10,   0,    20,   0.5,  1],
     ['bAlpha',   'range', 1.5,  0,    3,    0.1,  1],
-    ['drip2Gain','range', 1.0,  0,    3,    0.01, 2],
-    ['splash2Gain','range',0.9, 0,    3,    0.01, 2],
+    ['dripGain','range', 1.0,  0,    3,    0.01, 2],
+    ['splashGain','range',0.9, 0,    3,    0.01, 2],
     ['splashN',  'range', 30,   1,    150,  1,    0],
     ['splashLen','range', 0.12, 0.01, 0.6,  0.01, 2],
-    ['pour2Gain','range', 0.55, 0,    3,    0.01, 2],
+    ['pourGain','range', 0.55, 0,    3,    0.01, 2],
     ['pourBub',  'range', 400,  10,   3000, 10,   0],
     ['fizzGain', 'range', 0.1,  0,    0.5,  0.005,3],
     ['fizzRate', 'range', 300,  0,    3000, 10,   0],
@@ -2335,12 +2333,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['hissGain', 'range', 0.25, 0,    1,    0.01, 2],
     ['hissLen',  'range', 0.35, 0.05, 2,    0.05, 2],
     ['trkPad',   'check', true],
-    ['trkStream','check', false],
-    ['trkDrips', 'check', false],
-    ['trkSplash','check', false],
-    ['trkDrip2', 'check', true],
-    ['trkSplash2','check', true],
-    ['trkPour2', 'check', true],
+    ['trkDrips', 'check', true],
+    ['trkSplash','check', true],
+    ['trkPour', 'check', true],
     ['trkFizz',  'check', true],
     ['trkPop',   'check', true],
     ['trkVerb',  'check', true],
@@ -2400,19 +2395,14 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     verbLen: 'Audio: the pad\'s hall, tail in seconds (to -60 dB).',
     verbMix: 'Audio: how much of the pad goes into its hall. Slow-motion footage usually sits in a big wet space.',
     fxVerbLen: 'Audio: the liquid\'s room, tail in seconds (to -60 dB). Short keeps the drips and splashes close and dry; the pad\'s 4 s hall made them sound like a cave.',
-    fxVerbMix: 'Audio: how much of the liquid (old and bubble tracks) goes into its room.',
-    sfxGain: 'Audio: level of the drips and splashes, before the camera distance scales them.',
-    streamGain: 'Audio: level of the steady pour-stream hiss under the drips.',
+    fxVerbMix: 'Audio: how much of the liquid goes into its room.',
     drips: 'Audio: drips and splashes per second while only the top glass overflows; it doubles as the second tier reaches its spill level (19-26 s, measured).',
     trkPad: 'Audio track on/off, live (after "hear audio" and the click): the pad (PADsynth). Silent unless the score has chords or the URL has &testpad=1.',
-    trkStream: 'Audio track on/off, live: the steady pour-stream hiss.',
-    trkDrips: 'Audio track on/off, live: the drips (sines chirping upward).',
-    trkSplash: 'Audio track on/off, live: the splashes (bursts of high-passed noise).',
     trkVerb: 'Audio on/off, live: both reverbs, the pad\'s hall and the liquid\'s room. Off is the dry mix.',
-    trkDrip2: 'Audio track on/off, live: bubble-model drips (prototype). Same drip times as the old drips track, for A/B.',
-    trkSplash2: 'Audio track on/off, live: bubble-model splashes - a cloud of bubbles per splash (prototype). Same splash times as the old splashes track.',
-    trkPour2: 'Audio track on/off, live: the pour as a dense population of bubbles (prototype), against the old stream hiss.',
-    trkFizz: 'Audio track on/off, live: champagne fizz - tiny bubbles bursting at the surface (prototype).',
+    trkDrips: 'Audio track on/off, live: bubble-model drips - one bubble per drip, and often one or two smaller ones as it breaks up.',
+    trkSplash: 'Audio track on/off, live: bubble-model splashes - a cloud of bubbles per splash.',
+    trkPour: 'Audio track on/off, live: the pour as a dense population of bubbles.',
+    trkFizz: 'Audio track on/off, live: champagne fizz - tiny bubbles bursting at the surface.',
     bRmin: 'Bubble model: smallest bubble radius in mm. Pitch is 3/r (0.2 mm = 15 kHz). The paper found leaving out the smallest bubbles always makes streams and drips worse.',
     bRmax: 'Bubble model: largest bubble radius in mm (7 mm = 430 Hz). Large bubbles alone sound like blowing through a straw; in a cloud they add body.',
     bGamma: 'Bubble model: size distribution, relative rates 1/r^gamma - higher means more small bubbles. 0-3 sounds like streaming, above ~5 like rain (van den Doel).',
@@ -2420,11 +2410,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     bRiseCut: 'Bubble model: only bubbles louder than this (depth factor D, 0-1) get the pitch rise - the ones near the surface. 0.9 per the paper; 0 makes every bubble rise.',
     bBeta: 'Bubble model: depth factor D = rnd^beta - higher makes most bubbles deep and faint, with a few loud ones. 10 sounded best in the paper.',
     bAlpha: 'Bubble model: loudness grows as radius^alpha. 1.5 is physical; lower brings the small (high) bubbles forward - closer; higher is more distant.',
-    drip2Gain: 'Bubble drips: level. Each drip is one bubble, and often one or two smaller ones as it breaks up.',
-    splash2Gain: 'Bubble splashes: level of each bubble in the cloud.',
+    dripGain: 'Bubble drips: level. Each drip is one bubble, and often one or two smaller ones as it breaks up.',
+    splashGain: 'Bubble splashes: level of each bubble in the cloud.',
     splashN: 'Bubble splashes: bubbles per splash.',
     splashLen: 'Bubble splashes: seconds over which a splash\'s bubbles form, densest at the impact.',
-    pour2Gain: 'Bubble pour: level, scaled by the camera distance like the rest.',
+    pourGain: 'Bubble pour: level, scaled by the camera distance like the rest.',
     pourBub: 'Bubble pour: bubbles per second. Up to ~1000 is dripping to an intimate stream, 10000 dense, 100000 a waterfall (van den Doel).',
     fizzGain: 'Fizz: level.',
     fizzRate: 'Fizz: bursts per second, all glasses together.',
@@ -2539,15 +2529,15 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       const q = new URLSearchParams(location.search);
       for (const k of ['padGain', 'master', 'padCut', 'padAtk', 'padRel', 'padStagger', 'padBw',
                        'padBwScale', 'verbLen',
-                       'verbMix', 'fxVerbLen', 'fxVerbMix', 'sfxGain', 'streamGain', 'drips',
+                       'verbMix', 'fxVerbLen', 'fxVerbMix', 'drips',
                        'bRmin', 'bRmax', 'bGamma',
-                       'bXi', 'bRiseCut', 'bBeta', 'bAlpha', 'drip2Gain', 'splash2Gain',
-                       'splashN', 'splashLen', 'pour2Gain', 'pourBub', 'fizzGain', 'fizzRate',
+                       'bXi', 'bRiseCut', 'bBeta', 'bAlpha', 'dripGain', 'splashGain',
+                       'splashN', 'splashLen', 'pourGain', 'pourBub', 'fizzGain', 'fizzRate',
                        'fizzXi', 'popT', 'popGain', 'popF', 'popGlide', 'popDecay', 'popThump',
                        'popThumpF', 'popThumpLen',
                        'hissGain', 'hissLen']) q.set(k, ui[k]);
-      for (const k of ['trkPad', 'trkStream', 'trkDrips', 'trkSplash', 'trkDrip2', 'trkSplash2',
-                       'trkPour2', 'trkFizz', 'trkPop', 'trkVerb']) q.set(k, ui[k] ? 1 : 0);
+      for (const k of ['trkPad', 'trkDrips', 'trkSplash',
+                       'trkPour', 'trkFizz', 'trkPop', 'trkVerb']) q.set(k, ui[k] ? 1 : 0);
       q.set('gate', '1'); q.set('show', '1');
       location.search = q.toString();
     };
@@ -2672,7 +2662,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // connected to nothing - which the renderer never pulls, so they cost nothing either.
     const only = solo;   // read once, before the first await: renders may overlap
     const tap = k => { if (only) bus = k === only ? gain(1, o.destination) : o.createGain(); };
-    const keep = (only === 'pad' || only === 'stream') && { ...ui };
+    const keep = only === 'pad' && { ...ui };
     if (keep) Object.assign(ui, { drips: 0, pourBub: 0, fizzRate: 0 });
 //#D}
 
@@ -2725,55 +2715,18 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // the second tier reaches its spill level between 19 and 26 s, which doubles the spray.
     // Loudness follows the camera too: 1 at the macro shot's distance, quieter when wide.
     const near = t => Math.min(1, 0.2 / evalShow(t).dist);
-    const nz = o.createBuffer(1, sr * 2, sr), nd = nz.getChannelData(0);
-    for (let i = 0; i < nd.length; i++) nd[i] = rnd() * 2 - 1;
-    // the stream: a steady band of hiss
-//#D{
-    tap('stream');
-//#D}
-    const st = o.createBufferSource(), bp = o.createBiquadFilter(), sg = gain(0, bus);
-    st.buffer = nz; st.loop = true; bp.type = 'bandpass'; bp.frequency.value = 1500;
-    st.connect(bp); bp.connect(sg); st.start();
-    for (let t = 0; t < SHOW_END; t += 0.25) sg.gain.setTargetAtTime(ui.streamGain * near(t), t, 0.05);
-    // Drips and splashes, as a Poisson process whose rate follows the spill. Written sample
-    // by sample, into a buffer each (so each is a track): ~1300 events as audio nodes took
-    // 9.5 s to render, as plain loops they take milliseconds.
-    const sx = [0, 1].map(() => o.createBuffer(2, sr * (SHOW_END + 1), sr)),
-          X = sx.map(b => [b.getChannelData(0), b.getChannelData(1)]);
-    const EV = [];   // the drip and splash times, which the bubble tracks reuse
+    // The drip and splash moments: a Poisson process whose rate follows the spill - each
+    // [time, drip or splash, loudness from the camera, pan]. (A stream hiss and drips and
+    // splashes of their own - sines chirping upward, high-passed noise - came first; the
+    // bubble model below replaced them.)
+    const EV = [];
     for (let t = 0; t < SHOW_END;) {
       const u = Math.min(1, Math.max(0, (t - 19) / 7));
       t -= Math.log(1 - rnd()) / (ui.drips * (1 + u * u * (3 - 2 * u)) + 1e-6);
-      const a = ui.sfxGain * near(t) * (0.3 + rnd()), pan = rnd() * 0.8 + 0.1,
-            dec = 0.015 + rnd() * 0.05, drip = rnd() < 0.7, f = 500 + rnd() * 1500,
-            up = Math.log(2 + rnd() * 2) / 0.05, c = 0.12 + rnd() * 0.28, i0 = t * sr | 0,
-            Y = X[drip ? 0 : 1];
-      EV.push([t, drip, near(t), pan]);
-      let ph = 0, lo = 0;
-      for (let i = 0; i < sr * 0.3; i++) {
-        const s = i / sr, env = a * Math.min(1, s / 0.003) * Math.exp(-s / dec);
-        let v;
-        if (drip) {
-          // a drip: a sine chirping upward over 50 ms - the bubble a drop traps, ringing
-          // higher as it closes
-          ph += f * Math.exp(Math.min(s, 0.05) * up) / sr; v = Math.sin(TAU * ph);
-        } else {
-          // a splash: noise through a one-pole highpass (1-4 kHz)
-          const x = rnd() * 2 - 1; lo += (x - lo) * c; v = x - lo;
-        }
-        Y[0][i0 + i] += v * env * Math.sqrt(1 - pan);
-        Y[1][i0 + i] += v * env * Math.sqrt(pan);
-      }
-    }
-    for (const b of sx) {
-//#D{
-      tap(b === sx[0] ? 'drips' : 'splashes');
-//#D}
-      const n = o.createBufferSource();
-      n.buffer = b; n.connect(bus); n.start();
+      EV.push([t, rnd() < 0.7, near(t), rnd() * 0.8 + 0.1]);
     }
 
-    // ── the bubble model (prototype, four tracks to A/B against the ones above) ──
+    // ── the liquid: the bubble model ──
     // van den Doel, "Physically based models for liquid sounds" (ACM TAP 2005): liquid
     // sound is bubbles ringing. A bubble of radius r rings at the Minnaert frequency 3/r Hz
     // (r in m), damped by d = 0.043 f + 0.0014 f^1.5 - so small bubbles are short high
@@ -2781,9 +2734,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // f(t) = f0 (1 + xi d t), xi ~0.1 for a falling drop (the old drips rose 2-4x, the
     // paper's "blowing through a straw"). Real liquid is a POPULATION: sizes drawn from
     // rates 1/r^gamma, loudness D r^alpha with D = rnd^beta (most bubbles deep and faint),
-    // and only the loud, near-surface ones rise. Own random sequence, so the tracks above
-    // stay exactly as they were.
-    const r2 = rng(3);
+    // and only the loud, near-surface ones rise.
+    const r2 = rnd;
     const bx = [0, 1, 2, 3, 4].map(() => o.createBuffer(2, sr * (SHOW_END + 1), sr)),
           BX = bx.map(b => [b.getChannelData(0), b.getChannelData(1)]);
     // one bubble: radius rm in mm, amplitude a, rise xi, pan 0..1, starting at t
@@ -2814,19 +2766,19 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     for (const [t, drip, nr, pan] of EV) {
       if (drip) {
         // a drip: its bubble, and often one or two smaller ones as it breaks up
-        pop(BX[0], t, ui.drip2Gain * nr, ui.bRmin, ui.bRmax, pan, 1);
+        pop(BX[0], t, ui.dripGain * nr, ui.bRmin, ui.bRmax, pan, 1);
         for (let j = r2() * 3 | 0; j--;)
-          pop(BX[0], t + 0.002 + r2() * 0.02, ui.drip2Gain * nr * 0.5, ui.bRmin, ui.bRmax / 2, pan);
+          pop(BX[0], t + 0.002 + r2() * 0.02, ui.dripGain * nr * 0.5, ui.bRmin, ui.bRmax / 2, pan);
       } else {
         // a splash: a cloud of bubbles, densest at the impact and thinning out
         for (let j = 0; j < ui.splashN; j++)
-          pop(BX[1], t + ui.splashLen * r2() ** 2, ui.splash2Gain * nr, ui.bRmin, ui.bRmax,
+          pop(BX[1], t + ui.splashLen * r2() ** 2, ui.splashGain * nr, ui.bRmin, ui.bRmax,
               Math.min(1, Math.max(0, pan + (r2() - 0.5) * 0.3)));
       }
     }
     // the pour: a steady stream is a dense population of bubbles
     for (let t = 0; t < SHOW_END; t -= Math.log(1 - r2()) / ui.pourBub)
-      pop(BX[2], t, ui.pour2Gain * near(t), ui.bRmin, ui.bRmax, 0.3 + r2() * 0.4);
+      pop(BX[2], t, ui.pourGain * near(t), ui.bRmin, ui.bRmax, 0.3 + r2() * 0.4);
     // fizz: CO2 bubbles bursting at the surface of every filled glass - tiny (0.15-0.5 mm),
     // high, quick, rising in pitch as the cavity collapses (Poujol et al., "Sound of
     // effervescence", Phys. Rev. Fluids 2021). AT the surface, so not the population's
@@ -2852,7 +2804,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     }
     for (const b of bx) {
 //#D{
-      tap(['drip2', 'splash2', 'pour2', 'fizz', 'pop'][bx.indexOf(b)]);
+      tap(['drips', 'splashes', 'pour', 'fizz', 'pop'][bx.indexOf(b)]);
 //#D}
       const n = o.createBufferSource();
       n.buffer = b; n.connect(bus); n.start();
@@ -2860,8 +2812,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D{
     if (keep) Object.assign(ui, keep);
     // the sample-loop tracks ARE their stems: a full render leaves them here for the player
-    if (!only) song.raw = { drips: sx[0], splashes: sx[1], drip2: bx[0], splash2: bx[1],
-                            pour2: bx[2], fizz: bx[3], pop: bx[4] };
+    if (!only) song.raw = { drips: bx[0], splashes: bx[1], pour: bx[2], fizz: bx[3], pop: bx[4] };
 //#D}
 
     // the reverbs: two channels of noise decaying to -60 dB, verbLen for the pad's hall and
@@ -2908,17 +2859,15 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // an audio slider re-renders just the stems it touches and swaps them in where playback
   // is. With everything on it is the release mix: the same stems, a hall built the same
   // way, and the gain the release normalises by (re-measured after every change).
-  const STEMS = { pad: 'trkPad', stream: 'trkStream', drips: 'trkDrips', splashes: 'trkSplash',
-                  drip2: 'trkDrip2', splash2: 'trkSplash2', pour2: 'trkPour2', fizz: 'trkFizz',
+  const STEMS = { pad: 'trkPad', drips: 'trkDrips', splashes: 'trkSplash', pour: 'trkPour', fizz: 'trkFizz',
                   pop: 'trkPop' };
-  const BUB = ['drip2', 'splash2', 'pour2', 'fizz'];
+  const BUB = ['drips', 'splashes', 'pour', 'fizz'];
   const AFFECTS = { padGain: ['pad'], padCut: ['pad'], padAtk: ['pad'], padRel: ['pad'],
-                    padStagger: ['pad'], padBw: ['pad'], padBwScale: ['pad'], streamGain: ['stream'], sfxGain: ['drips', 'splashes'],
-                    drips: ['drips', 'splashes', 'drip2', 'splash2'],
+                    padStagger: ['pad'], padBw: ['pad'], padBwScale: ['pad'], drips: ['drips', 'splashes'],
                     bRmin: BUB, bRmax: BUB, bGamma: BUB, bXi: BUB, bRiseCut: BUB, bBeta: BUB,
-                    bAlpha: BUB, drip2Gain: ['drip2'], splash2Gain: ['splash2'],
-                    splashN: ['splash2'], splashLen: ['splash2'], pour2Gain: ['pour2'],
-                    pourBub: ['pour2'], fizzGain: ['fizz'], fizzRate: ['fizz'], fizzXi: ['fizz'],
+                    bAlpha: BUB, dripGain: ['drips'], splashGain: ['splashes'],
+                    splashN: ['splashes'], splashLen: ['splashes'], pourGain: ['pour'],
+                    pourBub: ['pour'], fizzGain: ['fizz'], fizzRate: ['fizz'], fizzXi: ['fizz'],
                     popT: ['pop'], popGain: ['pop'], popF: ['pop'], popGlide: ['pop'],
                     popDecay: ['pop'], popThump: ['pop'], popThumpF: ['pop'], popThumpLen: ['pop'],
                     hissGain: ['pop'], hissLen: ['pop'] };
