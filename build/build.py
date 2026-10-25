@@ -25,6 +25,7 @@ CFG = {
     'nphoton': '65536', 'cgain': '0.05', 'paused': 'false', 'det': 'false',
     'show': 'true', 'showt': '0',
     'gate': 'true', 'tick': 'false',     # the release always opens on the start screen
+    'fs': 'true',                        # ...and goes fullscreen at the click
 }
 # ui.* comes from the panel's own SPEC defaults, so the two cannot drift. These two are
 # the release's choices rather than the panel's.

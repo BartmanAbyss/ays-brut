@@ -1641,6 +1641,7 @@ const cfg = {
   gate:     Q.get('gate') === '1',     // the release's start screen: click, fullscreen, audio clock
   tick:     Q.get('tick') === '1',     // with gate: a click every half second, to check sync
   testPad:  Q.get('testpad') === '1',  // one plain held chord, to judge the pad's timbre by
+  fs:       Q.get('fs') === '1',       // with gate: go fullscreen at the click, as the release does
 };
 //#D}
 
@@ -1870,7 +1871,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     canvas.style.height = (cfg.h * k) + 'px';
     canvas.style.margin = ((innerHeight - cfg.h * k) / 2) + 'px auto 0';
   }
-  if (!cfg.gate) { resize(); addEventListener('resize', resize); }
+  if (!cfg.fs) { resize(); addEventListener('resize', resize); }
 
   const SIM_DT = 1 / 60;
   const LAG_STEPS = 30;        // 0.5 s behind the clock before we give up the missed steps
@@ -2146,7 +2147,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     readParts();
     readPuddle();
 
-    if (!cfg.gate) resize();   // the pane can be shown or resized without firing a resize event
+    if (!cfg.fs) resize();   // the pane can be shown or resized without firing a resize event
     frameNo++; simStep += simSteps; probe.frames = frameNo; probe.ok = true;
     const dt = now - last; last = now;
     acc += dt; accN++;
@@ -2295,10 +2296,30 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['sfxGain',  'range', 0.25, 0.00, 1,    0.01, 2],
     ['streamGain','range',0.04, 0.00, 0.30, 0.005,3],
     ['drips',    'range', 14,   0,    60,   1,    0],
+    ['bRmin',    'range', 0.2,  0.1,  3,    0.05, 2],
+    ['bRmax',    'range', 7,    0.5,  30,   0.5,  1],
+    ['bGamma',   'range', 1.5,  0,    6,    0.1,  1],
+    ['bXi',      'range', 0.1,  0,    2,    0.01, 2],
+    ['bRiseCut', 'range', 0.9,  0,    1,    0.01, 2],
+    ['bBeta',    'range', 10,   0,    20,   0.5,  1],
+    ['bAlpha',   'range', 1.5,  0,    3,    0.1,  1],
+    ['drip2Gain','range', 0.35, 0,    3,    0.01, 2],
+    ['splash2Gain','range',0.05,0,    1,    0.005,3],
+    ['splashN',  'range', 30,   1,    150,  1,    0],
+    ['splashLen','range', 0.12, 0.01, 0.6,  0.01, 2],
+    ['pour2Gain','range', 0.03, 0,    1,    0.005,3],
+    ['pourBub',  'range', 400,  10,   3000, 10,   0],
+    ['fizzGain', 'range', 0.1,  0,    0.5,  0.005,3],
+    ['fizzRate', 'range', 300,  0,    3000, 10,   0],
+    ['fizzXi',   'range', 1,    0,    10,   0.1,  1],
     ['trkPad',   'check', true],
-    ['trkStream','check', true],
-    ['trkDrips', 'check', true],
-    ['trkSplash','check', true],
+    ['trkStream','check', false],
+    ['trkDrips', 'check', false],
+    ['trkSplash','check', false],
+    ['trkDrip2', 'check', true],
+    ['trkSplash2','check', true],
+    ['trkPour2', 'check', true],
+    ['trkFizz',  'check', true],
     ['trkVerb',  'check', true],
   ];
   const PRESET = {
@@ -2360,6 +2381,26 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     trkDrips: 'Audio track on/off, live: the drips (sines chirping upward).',
     trkSplash: 'Audio track on/off, live: the splashes (bursts of high-passed noise).',
     trkVerb: 'Audio on/off, live: the reverb on everything. Off is the dry mix.',
+    trkDrip2: 'Audio track on/off, live: bubble-model drips (prototype). Same drip times as the old drips track, for A/B.',
+    trkSplash2: 'Audio track on/off, live: bubble-model splashes - a cloud of bubbles per splash (prototype). Same splash times as the old splashes track.',
+    trkPour2: 'Audio track on/off, live: the pour as a dense population of bubbles (prototype), against the old stream hiss.',
+    trkFizz: 'Audio track on/off, live: champagne fizz - tiny bubbles bursting at the surface (prototype).',
+    bRmin: 'Bubble model: smallest bubble radius in mm. Pitch is 3/r (0.2 mm = 15 kHz). The paper found leaving out the smallest bubbles always makes streams and drips worse.',
+    bRmax: 'Bubble model: largest bubble radius in mm (7 mm = 430 Hz). Large bubbles alone sound like blowing through a straw; in a cloud they add body.',
+    bGamma: 'Bubble model: size distribution, relative rates 1/r^gamma - higher means more small bubbles. 0-3 sounds like streaming, above ~5 like rain (van den Doel).',
+    bXi: 'Bubble model: pitch rise of the bubbles near the surface, f(t) = f0(1 + xi d t). 0.1 is a falling drop; 0.5-1 large bubbles; ~10 blowing through a straw.',
+    bRiseCut: 'Bubble model: only bubbles louder than this (depth factor D, 0-1) get the pitch rise - the ones near the surface. 0.9 per the paper; 0 makes every bubble rise.',
+    bBeta: 'Bubble model: depth factor D = rnd^beta - higher makes most bubbles deep and faint, with a few loud ones. 10 sounded best in the paper.',
+    bAlpha: 'Bubble model: loudness grows as radius^alpha. 1.5 is physical; lower brings the small (high) bubbles forward - closer; higher is more distant.',
+    drip2Gain: 'Bubble drips: level. Each drip is one bubble, and often one or two smaller ones as it breaks up.',
+    splash2Gain: 'Bubble splashes: level of each bubble in the cloud.',
+    splashN: 'Bubble splashes: bubbles per splash.',
+    splashLen: 'Bubble splashes: seconds over which a splash\'s bubbles form, densest at the impact.',
+    pour2Gain: 'Bubble pour: level, scaled by the camera distance like the rest.',
+    pourBub: 'Bubble pour: bubbles per second. Up to ~1000 is dripping to an intimate stream, 10000 dense, 100000 a waterfall (van den Doel).',
+    fizzGain: 'Fizz: level.',
+    fizzRate: 'Fizz: bursts per second, all glasses together.',
+    fizzXi: 'Fizz: pitch rise of each burst - the cavity collapsing, rising until it is gone (Poujol et al. 2021).',
   };
   const DIG = k => SPEC.find(x => x[0] === k)[6] ?? 2;
   const ui = {}, uiEl = {};
@@ -2420,9 +2461,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     uiRoot.prepend(bar);
   }
   for (const [k, kind, d0, lo, hi, st] of SPEC) {
-    // any range slider takes its value from the URL: ?padCut=900 (the audio needs this - it
-    // is rendered once at load, so "hear audio" carries the sliders over a reload)
-    const def = kind === 'range' && Q.has(k) ? +Q.get(k) : d0;
+    // any slider or box takes its value from the URL: ?padCut=900, ?trkFizz=0 (the audio
+    // needs this - "hear audio" carries the audio sliders and track boxes over its reload)
+    const def = !Q.has(k) ? d0 : kind === 'range' ? +Q.get(k) : Q.get(k) === '1';
     ui[k] = def;
     const row = document.createElement('div'); row.className = 'row';
     const lab = document.createElement('label'); lab.textContent = k;
@@ -2441,16 +2482,22 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     uiEl[k] = { inp, out };
   }
   {
-    // The audio is rendered once at load (song(), below), so moving an audio slider does
-    // nothing until a reload. This carries every audio slider into the URL and reloads with
-    // the start screen on: click it to hear the show with the new sound.
+    // Sound needs the start screen (?gate=1: the click that browsers require before audio,
+    // and the audio clock). This reloads into it, carrying every audio slider and track box
+    // in the URL. Once there, sliders and boxes act live and the button just says so.
     const b = document.createElement('button');
-    b.textContent = 'hear audio';
-    b.title = 'Reload with the start screen and the current audio sliders; click the page to hear the show. Then the trk* boxes switch tracks on and off live, and an audio slider is heard a moment after you let go of it. Add &testpad=1 to the URL for a held test chord while the score is empty.';
+    b.textContent = cfg.gate ? 'audio is live' : 'hear audio';
+    b.disabled = cfg.gate;
+    b.title = 'Reload with sound: the audio sliders and track boxes come along. When "rendering audio..." turns into "click here to start", click that box. From then the trk* boxes switch tracks on and off live, and an audio slider is heard a moment after you let go of it. Add &testpad=1 to the URL for a held test chord while the score is empty; &fs=1 for fullscreen as in the release.';
     b.onclick = () => {
       const q = new URLSearchParams(location.search);
       for (const k of ['padGain', 'padCut', 'padDetune', 'padAtk', 'padRel', 'verbLen',
-                       'verbMix', 'sfxGain', 'streamGain', 'drips']) q.set(k, ui[k]);
+                       'verbMix', 'sfxGain', 'streamGain', 'drips', 'bRmin', 'bRmax', 'bGamma',
+                       'bXi', 'bRiseCut', 'bBeta', 'bAlpha', 'drip2Gain', 'splash2Gain',
+                       'splashN', 'splashLen', 'pour2Gain', 'pourBub', 'fizzGain', 'fizzRate',
+                       'fizzXi']) q.set(k, ui[k]);
+      for (const k of ['trkPad', 'trkStream', 'trkDrips', 'trkSplash', 'trkDrip2', 'trkSplash2',
+                       'trkPour2', 'trkFizz', 'trkVerb']) q.set(k, ui[k] ? 1 : 0);
       q.set('gate', '1'); q.set('show', '1');
       location.search = q.toString();
     };
@@ -2548,6 +2595,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // connected to nothing - which the renderer never pulls, so they cost nothing either.
     const only = solo;   // read once, before the first await: renders may overlap
     const tap = k => { if (only) bus = k === only ? gain(1, o.destination) : o.createGain(); };
+    const keep = (only === 'pad' || only === 'stream') && { ...ui };
+    if (keep) Object.assign(ui, { drips: 0, pourBub: 0, fizzRate: 0 });
     tap('pad');
 //#D}
 
@@ -2587,6 +2636,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // 9.5 s to render, as plain loops they take milliseconds.
     const sx = [0, 1].map(() => o.createBuffer(2, sr * (SHOW_END + 1), sr)),
           X = sx.map(b => [b.getChannelData(0), b.getChannelData(1)]);
+    const EV = [];   // the drip and splash times, which the bubble tracks reuse
     for (let t = 0; t < SHOW_END;) {
       const u = Math.min(1, Math.max(0, (t - 19) / 7));
       t -= Math.log(1 - rnd()) / (ui.drips * (1 + u * u * (3 - 2 * u)) + 1e-6);
@@ -2594,6 +2644,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
             dec = 0.015 + rnd() * 0.05, drip = rnd() < 0.7, f = 500 + rnd() * 1500,
             up = Math.log(2 + rnd() * 2) / 0.05, c = 0.12 + rnd() * 0.28, i0 = t * sr | 0,
             Y = X[drip ? 0 : 1];
+      EV.push([t, drip, near(t), pan]);
       let ph = 0, lo = 0;
       for (let i = 0; i < sr * 0.3; i++) {
         const s = i / sr, env = a * Math.min(1, s / 0.003) * Math.exp(-s / dec);
@@ -2617,6 +2668,73 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       const n = o.createBufferSource();
       n.buffer = b; n.connect(bus); n.start();
     }
+
+    // ── the bubble model (prototype, four tracks to A/B against the ones above) ──
+    // van den Doel, "Physically based models for liquid sounds" (ACM TAP 2005): liquid
+    // sound is bubbles ringing. A bubble of radius r rings at the Minnaert frequency 3/r Hz
+    // (r in m), damped by d = 0.043 f + 0.0014 f^1.5 - so small bubbles are short high
+    // ticks and only large ones ring - and one near the surface rises in pitch,
+    // f(t) = f0 (1 + xi d t), xi ~0.1 for a falling drop (the old drips rose 2-4x, the
+    // paper's "blowing through a straw"). Real liquid is a POPULATION: sizes drawn from
+    // rates 1/r^gamma, loudness D r^alpha with D = rnd^beta (most bubbles deep and faint),
+    // and only the loud, near-surface ones rise. Own random sequence, so the tracks above
+    // stay exactly as they were.
+    let s2 = 3;
+    const r2 = () => (s2 = s2 * 16807 % 2147483647) / 2147483647;
+    const bx = [0, 1, 2, 3].map(() => o.createBuffer(2, sr * (SHOW_END + 1), sr)),
+          BX = bx.map(b => [b.getChannelData(0), b.getChannelData(1)]);
+    // one bubble: radius rm in mm, amplitude a, rise xi, pan 0..1, starting at t
+    const bub = (Y, t, rm, a, xi, pan) => {
+      const f = 3000 / rm, d = 0.043 * f + 0.0014 * f ** 1.5, k = Math.exp(-d / sr),
+            i0 = t * sr | 0, n = 6 * sr / d | 0, gl = Math.sqrt(1 - pan), gr = Math.sqrt(pan);
+      let ph = 0, e = a;
+      for (let i = 0; i < n; i++, e *= k) {
+        ph += f * (1 + xi * d * i / sr) / sr;
+        const v = e * Math.sin(6.283 * ph);
+        Y[0][i0 + i] += v * gl; Y[1][i0 + i] += v * gr;
+      }
+    };
+    // one bubble drawn from the population between lo and hi mm
+    const pop = (Y, t, a, lo, hi, pan, xi) => {
+      const g = 1 - ui.bGamma, u = r2(), D = r2() ** ui.bBeta,
+            rm = Math.abs(g) < 1e-3 ? lo * (hi / lo) ** u : (lo ** g + u * (hi ** g - lo ** g)) ** (1 / g);
+      bub(Y, t, rm, a * D * rm ** ui.bAlpha, xi ?? (D > ui.bRiseCut ? ui.bXi : 0), pan);
+    };
+    for (const [t, drip, nr, pan] of EV) {
+      if (drip) {
+        // a drip: its bubble, and often one or two smaller ones as it breaks up
+        pop(BX[0], t, ui.drip2Gain * nr, ui.bRmin, ui.bRmax, pan);
+        for (let j = r2() * 3 | 0; j--;)
+          pop(BX[0], t + 0.002 + r2() * 0.02, ui.drip2Gain * nr * 0.5, ui.bRmin, ui.bRmax / 2, pan);
+      } else {
+        // a splash: a cloud of bubbles, densest at the impact and thinning out
+        for (let j = 0; j < ui.splashN; j++)
+          pop(BX[1], t + ui.splashLen * r2() ** 2, ui.splash2Gain * nr, ui.bRmin, ui.bRmax,
+              Math.min(1, Math.max(0, pan + (r2() - 0.5) * 0.3)));
+      }
+    }
+    // the pour: a steady stream is a dense population of bubbles
+    for (let t = 0; t < SHOW_END; t -= Math.log(1 - r2()) / ui.pourBub)
+      pop(BX[2], t, ui.pour2Gain * near(t), ui.bRmin, ui.bRmax, 0.3 + r2() * 0.4);
+    // fizz: CO2 bubbles bursting at the surface of every filled glass - tiny (0.15-0.5 mm),
+    // high, quick, rising in pitch as the cavity collapses (Poujol et al., "Sound of
+    // effervescence", Phys. Rev. Fluids 2021). AT the surface, so not the population's
+    // depth model: every burst is heard, at a random strength.
+    for (let t = 0; t < SHOW_END; t -= Math.log(1 - r2()) / ui.fizzRate)
+      bub(BX[3], t, 0.15 + r2() * 0.35, ui.fizzGain * near(t) * r2(), ui.fizzXi, r2());
+    for (const b of bx) {
+//#D{
+      tap(['drip2', 'splash2', 'pour2', 'fizz'][bx.indexOf(b)]);
+//#D}
+      const n = o.createBufferSource();
+      n.buffer = b; n.connect(bus); n.start();
+    }
+//#D{
+    if (keep) Object.assign(ui, keep);
+    // the sample-loop tracks ARE their stems: a full render leaves them here for the player
+    if (!only) song.raw = { drips: sx[0], splashes: sx[1], drip2: bx[0], splash2: bx[1],
+                            pour2: bx[2], fizz: bx[3] };
+//#D}
 
     // the hall: two channels of noise decaying to -60 dB over verbLen (filled last, so its
     // length does not move the random sequence the drips are drawn from)
@@ -2658,13 +2776,22 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // an audio slider re-renders just the stems it touches and swaps them in where playback
   // is. With everything on it is the release mix: the same stems, a hall built the same
   // way, and the gain the release normalises by (re-measured after every change).
-  const STEMS = { pad: 'trkPad', stream: 'trkStream', drips: 'trkDrips', splashes: 'trkSplash' };
+  const STEMS = { pad: 'trkPad', stream: 'trkStream', drips: 'trkDrips', splashes: 'trkSplash',
+                  drip2: 'trkDrip2', splash2: 'trkSplash2', pour2: 'trkPour2', fizz: 'trkFizz' };
+  const BUB = ['drip2', 'splash2', 'pour2', 'fizz'];
   const AFFECTS = { padGain: ['pad'], padCut: ['pad'], padDetune: ['pad'], padAtk: ['pad'],
                     padRel: ['pad'], streamGain: ['stream'], sfxGain: ['drips', 'splashes'],
-                    drips: ['drips', 'splashes'] };
+                    drips: ['drips', 'splashes', 'drip2', 'splash2'],
+                    bRmin: BUB, bRmax: BUB, bGamma: BUB, bXi: BUB, bRiseCut: BUB, bBeta: BUB,
+                    bAlpha: BUB, drip2Gain: ['drip2'], splash2Gain: ['splash2'],
+                    splashN: ['splash2'], splashLen: ['splash2'], pour2Gain: ['pour2'],
+                    pourBub: ['pour2'], fizzGain: ['fizz'], fizzRate: ['fizz'], fizzXi: ['fizz'] };
   const live = window.__live = { buf: {}, src: {}, g: {} };
   let liveJob = Promise.resolve();
   function stem(k) {
+    // the sample-loop tracks come straight from the last full render (song.raw); the pad
+    // and the stream need a render of their own
+    if (song.raw?.[k]) return Promise.resolve(song.raw[k]);
     // song() reads `solo` synchronously as it starts, so clearing it at once keeps any
     // render started meanwhile a full mix
     solo = k;
@@ -2716,6 +2843,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         live.cv = hall(ui.verbLen); live.send.disconnect(); live.send.connect(live.cv);
         setTimeout(() => old.disconnect(), 100);
       }
+      await song(ac.sampleRate);   // first: it refreshes song.raw and the mix's gain
       for (const k of AFFECTS[key] || []) {
         live.buf[k] = await stem(k);
         if (tA !== undefined) {
@@ -2723,7 +2851,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
           liveStart(k, now, Math.max(0, now - tA));
         }
       }
-      await song(ac.sampleRate);
       live.master.gain.setTargetAtTime(0.9 / song.peak, ac.currentTime, 0.1);
       liveApply();
     });
@@ -2741,6 +2868,17 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   let ac, tA;                  // the audio context, and the audio time the show starts at
   if (cfg.gate) {
     ac = new AudioContext();
+//#D{
+    // The harness says what is happening: its HUD reads "booting" until the first frame and
+    // hides the release's bare "click". Only this box starts the show, so the panel stays
+    // usable meanwhile - set the track boxes before starting if you like.
+    const say = document.createElement('div');
+    say.style.cssText = 'position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);' +
+      'padding:24px 36px;font:22px sans-serif;color:#fff;background:#000c;border:1px solid #fff4;' +
+      'border-radius:8px;z-index:9;cursor:pointer';
+    say.textContent = 'rendering audio...';
+    document.body.append(say);
+//#D}
     const b = await song(ac.sampleRate);
 //#D{
     if (!cfg.tick) await liveSetup();   // the harness plays stems instead (?tick=1 keeps the mix)
@@ -2748,8 +2886,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     onclick = () => {
       onclick = null;
       // fullscreen is the screen: size the canvas once, here, rather than on every resize
-      canvas.width = screen.width; canvas.height = screen.height;
-      canvas.requestFullscreen();
+      // (the release always; the harness only with ?fs=1)
+      if (cfg.fs) { canvas.width = screen.width; canvas.height = screen.height; canvas.requestFullscreen(); }
       ac.resume();
       const src = ac.createBufferSource();
       src.buffer = b; src.connect(ac.destination);
@@ -2760,6 +2898,12 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       requestAnimationFrame(frame);
     };
     document.body.append('click');   // unstyled on purpose: -55 bytes against centred white-on-black
+//#D{
+    say.textContent = 'click here to start: show + sound';
+    const go = onclick;
+    onclick = null;
+    say.onclick = () => { say.remove(); go(); };
+//#D}
   } else if (!cfg.paused) requestAnimationFrame(frame);
 
   // frame-count driven, not wall-clock: rAF pauses when the page isn't painting
