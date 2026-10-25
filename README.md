@@ -7,8 +7,8 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (string pad, reverb, liquid sounds) work.
-`build/intro.cmd` is **9 241 bytes, 1 049 OVER the 8 192 budget** while the old and the
-bubble-model liquid tracks both ship for the A/B (8 932 with the bubble model alone), so
+`build/intro.cmd` is **9 347 bytes, 1 155 OVER the 8 192 budget** while the old and the
+bubble-model liquid tracks both ship for the A/B (~290 less with the bubble model alone), so
 features have to be
 cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
@@ -230,9 +230,40 @@ one bubble function:
 | `fizz` | CO2 bubbles bursting at the surface: 0.15-0.5 mm, every one heard, pitch rising as the cavity collapses (Poujol et al., "Sound of effervescence", Phys. Rev. Fluids 2021) | `fizzGain`, `fizzRate`, `fizzXi` |
 
 Shared: `bRmin`, `bRmax`, `bGamma`, `bXi`, `bRiseCut`, `bBeta`, `bAlpha`. The harness starts
-with the bubble tracks on and the old liquid off; the `trk*` boxes flip between them. Raw
-RMS on the macro shot, defaults: drips 0.051 vs `drip2` 0.054, splashes 0.015 vs `splash2`
-0.016, stream 0.007 vs `pour2` 0.027, `fizz` 0.009, pad 0.063. Render time +1.2 s.
+with the bubble tracks on and the old liquid off; the `trk*` boxes flip between them.
+Render time +1.2 s.
+
+Two corrections after the first listen. **Loudness is relative to the largest bubble**
+(`(r / rmax)^alpha`): with r in mm, one rare 7 mm bubble near the surface peaked at 2.2, and
+since the mix is normalised to its peak, that one drip turned the whole soundtrack down
+2.5x. And **a drip's own bubble is evenly loud**: the paper's depth skew (`D = rnd^beta`,
+beta 10) is for crowds of bubbles - on the one bubble a falling drop makes it left nearly
+every drip inaudible, peak 42x the RMS. Secondary bubbles, splash clouds and the pour keep
+it. Defaults re-levelled to the old tracks, raw on the macro shot (RMS / peak): `splash2`
+0.016 / 0.40 against splashes 0.015 / 0.24, `pour2` 0.026 / 0.31 against the stream's
+0.007, `drip2` about 0.02 / 0.5 against drips 0.051 / 0.39 - bubble drips are short ticks,
+and matching the old RMS would have put their peaks over everything. `fizz` 0.009, pad 0.063.
+
+#### The cork pop
+
+The show opens on the bottle being opened, with no picture for it, so the sound alone has
+to say what it is. Track `pop`, at `popT` (0.5 s), in three parts:
+
+- **the crack**: a millisecond of broadband noise as the gas jet leaves the neck - at about
+  twice the speed of sound (Liger-Belair et al., *Science Advances* 2019, high-speed
+  imaging of uncorking);
+- **the plop**: the open neck ringing as a Helmholtz resonator (`popF`, a few hundred Hz),
+  gliding there from `popGlide` x popF in ~25 ms as the cork clears it - below 1 rises,
+  the "plopp" - for `popDecay`, over a 90 Hz thump of the gas expanding (`popThump`);
+- **the rush**: high-passed noise fading over `hissLen` as the rest of the gas leaves
+  (`hissGain`).
+
+No study quantifies the pop's own sound, so these are physics-shaped starting points to
+tune by ear. Peak 0.74, under the normalising limit. +90 bytes.
+
+The harness also has **rewind** (top bar): back to t = 0 without reloading. The simulation
+lives in buffers that start zeroed plus a few clocks, so clearing both is exactly a fresh
+load; with sound on the stems restart with it and nothing is rendered again.
 
 ### Rendering
 
@@ -635,12 +666,13 @@ from the release.
 
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, puddle, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
-screen with fullscreen and the audio clock, the sound engine. `intro.cmd` is 9 241
-bytes with both liquid models in (8 932 with the bubble model alone).
+screen with fullscreen and the audio clock, the sound engine and the cork pop.
+`intro.cmd` is 9 347 bytes with both liquid models in (~290 less with the bubble model
+alone).
 
 Next:
-1. **Size** — 740 bytes over once the A/B is decided for the bubble model (8 932), before
-   the score and any text.
+1. **Size** — ~860 bytes over once the A/B is decided for the bubble model, before the
+   score and any text.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
 2. **The score** — must be **human-composed**; the party bans prompt-based music. Chords
@@ -862,11 +894,12 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 241 bytes (25 Oct 2026), 1 049 OVER 8 192**: the breakdown below
+**`intro.cmd` is 9 347 bytes (25 Oct 2026), 1 155 OVER 8 192**: the breakdown below
 (7 967), plus the start screen and music hookup (+116), plus the sound engine (+773: pad,
 reverb, liquid, normalising - with the score still empty), plus the bubble-model tracks
-for the A/B (+364). With the bubble model replacing the old liquid instead: **8 932**
-(+76 over the old liquid alone, fizz included).
+for the A/B (+364), the liquid's own room (+21) and the cork pop (+106 with the loudness
+fixes). With the bubble model replacing the old liquid, about 290 less: the bubble model
+costs +76 over the old liquid, fizz included.
 
 The breakdown, 24 Oct 2026, after the lossless pass, the core simplifications and the
 non-feature pass below, and a 120-round packer search on the result:

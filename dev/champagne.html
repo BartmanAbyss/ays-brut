@@ -31,6 +31,8 @@
            border:1px solid #444; border-radius:4px; font:12px ui-monospace,Consolas,monospace;
            cursor:pointer; }
   #pause:hover { background:#2a2a32; }
+  #rewind { position:fixed; top:8px; right:226px; padding:6px 10px; background:#1b1b20; color:#ddd;
+           border:1px solid #444; border-radius:4px; font:12px ui-monospace,Consolas,monospace; cursor:pointer; }
   #err { position:fixed; left:8px; bottom:8px; right:8px; max-height:45vh; overflow:auto;
          padding:8px 10px; background:#2a0b0bdd; border:1px solid #833; border-radius:4px;
          white-space:pre-wrap; display:none; }
@@ -42,6 +44,7 @@
 <button id="pause" title="Pause rendering (spacebar). While paused, moving a slider still redraws one frame.">pause</button>
 <button id="ff" title="Jump the simulation forward 20 seconds without waiting.">ff +20s</button>
 <button id="restart" title="Reload the page: empties every glass and restarts the pour from zero.">restart</button>
+<button id="rewind" title="Back to the start without reloading: the simulation starts from zero again and, with sound on, the audio restarts with it - nothing is rendered again.">rewind</button>
 <div id="ui"></div>
 <div id="err"></div>
 
@@ -2309,15 +2312,23 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['bRiseCut', 'range', 0.9,  0,    1,    0.01, 2],
     ['bBeta',    'range', 10,   0,    20,   0.5,  1],
     ['bAlpha',   'range', 1.5,  0,    3,    0.1,  1],
-    ['drip2Gain','range', 0.35, 0,    3,    0.01, 2],
-    ['splash2Gain','range',0.05,0,    1,    0.005,3],
+    ['drip2Gain','range', 1.0,  0,    3,    0.01, 2],
+    ['splash2Gain','range',0.9, 0,    3,    0.01, 2],
     ['splashN',  'range', 30,   1,    150,  1,    0],
     ['splashLen','range', 0.12, 0.01, 0.6,  0.01, 2],
-    ['pour2Gain','range', 0.03, 0,    1,    0.005,3],
+    ['pour2Gain','range', 0.55, 0,    3,    0.01, 2],
     ['pourBub',  'range', 400,  10,   3000, 10,   0],
     ['fizzGain', 'range', 0.1,  0,    0.5,  0.005,3],
     ['fizzRate', 'range', 300,  0,    3000, 10,   0],
     ['fizzXi',   'range', 1,    0,    10,   0.1,  1],
+    ['popT',     'range', 0.5,  0,    60,   0.05, 2],
+    ['popGain',  'range', 0.5,  0,    2,    0.01, 2],
+    ['popF',     'range', 450,  80,   1500, 5,    0],
+    ['popGlide', 'range', 0.6,  0.2,  2.5,  0.05, 2],
+    ['popDecay', 'range', 0.02, 0.003,0.15, 0.001,3],
+    ['popThump', 'range', 0.5,  0,    2,    0.05, 2],
+    ['hissGain', 'range', 0.25, 0,    1,    0.01, 2],
+    ['hissLen',  'range', 0.35, 0.05, 2,    0.05, 2],
     ['trkPad',   'check', true],
     ['trkStream','check', false],
     ['trkDrips', 'check', false],
@@ -2326,6 +2337,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['trkSplash2','check', true],
     ['trkPour2', 'check', true],
     ['trkFizz',  'check', true],
+    ['trkPop',   'check', true],
     ['trkVerb',  'check', true],
   ];
   const PRESET = {
@@ -2409,6 +2421,15 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     fizzGain: 'Fizz: level.',
     fizzRate: 'Fizz: bursts per second, all glasses together.',
     fizzXi: 'Fizz: pitch rise of each burst - the cavity collapsing, rising until it is gone (Poujol et al. 2021).',
+    trkPop: 'Audio track on/off, live: the cork pop.',
+    popT: 'Cork pop: when, in show seconds. It needs no picture - put it before the visuals.',
+    popGain: 'Cork pop: overall level. The mix is normalised to its loudest moment, so a pop far louder than the rest turns everything else down.',
+    popF: 'Cork pop: the pitch the open neck rings at, in Hz - a Helmholtz resonator, a few hundred Hz for a bottle neck. Lower is a bigger, hollower plop.',
+    popGlide: 'Cork pop: where the ringing starts, as a fraction of popF, gliding there in ~25 ms. Below 1 rises (the neck opening as the cork clears it: the "plopp"), above 1 falls.',
+    popDecay: 'Cork pop: how long the neck rings, in seconds. Longer is more hollow and bottle-like, shorter a dry pop.',
+    popThump: 'Cork pop: the low thump of the gas expanding (90 Hz, 30 ms), against the ringing.',
+    hissGain: 'Cork pop: the gas rush after it - "pssh" - level.',
+    hissLen: 'Cork pop: how long the gas rush takes to fade, in seconds.',
   };
   const DIG = k => SPEC.find(x => x[0] === k)[6] ?? 2;
   const ui = {}, uiEl = {};
@@ -2511,9 +2532,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
                        'bRmin', 'bRmax', 'bGamma',
                        'bXi', 'bRiseCut', 'bBeta', 'bAlpha', 'drip2Gain', 'splash2Gain',
                        'splashN', 'splashLen', 'pour2Gain', 'pourBub', 'fizzGain', 'fizzRate',
-                       'fizzXi']) q.set(k, ui[k]);
+                       'fizzXi', 'popT', 'popGain', 'popF', 'popGlide', 'popDecay', 'popThump',
+                       'hissGain', 'hissLen']) q.set(k, ui[k]);
       for (const k of ['trkPad', 'trkStream', 'trkDrips', 'trkSplash', 'trkDrip2', 'trkSplash2',
-                       'trkPour2', 'trkFizz', 'trkVerb']) q.set(k, ui[k] ? 1 : 0);
+                       'trkPour2', 'trkFizz', 'trkPop', 'trkVerb']) q.set(k, ui[k] ? 1 : 0);
       q.set('gate', '1'); q.set('show', '1');
       location.search = q.toString();
     };
@@ -2558,6 +2580,22 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // travels as a link. Done last so it wins over presets.
   for (const [k, kind] of SPEC) { if (kind === 'range' && Q.has(k)) setUI(k, qf(k, ui[k])); }
   document.getElementById('restart').onclick = () => location.reload();
+  // Rewind in place: the whole simulation lives in buffers that start zeroed, and in the
+  // clocks below, so clearing both is exactly a fresh load - without reloading, so the
+  // soundtrack is not rendered again. With sound on, the stems restart with the show.
+  document.getElementById('rewind').onclick = () => {
+    const enc = device.createCommandEncoder();
+    for (const b of bufs.slice(1)) enc.clearBuffer(b);
+    device.queue.submit([enc.finish()]);
+    clockT = 0; showStep = 0; showPend = 0; showT = 0; burstSteps = 0; ffSteps = 0;
+    simStep = 0; frameNo = 0; frameSteps = 1; last = performance.now();
+    pudBound[0] = pudBound[1] = 0; pudBound[2] = 0.02;
+    if (cfg.gate && tA !== undefined) {
+      tA = ac.currentTime + 0.1;
+      if (live.master) for (const k in STEMS) liveStart(k, tA, 0);
+    }
+    if (cfg.paused) requestAnimationFrame(frameOnce);
+  };
   document.getElementById('ff').onclick = () => { ffSteps = 1200; if (cfg.paused) requestAnimationFrame(frameOnce); };
 
   const btn = document.getElementById('pause');
@@ -2700,7 +2738,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // stay exactly as they were.
     let s2 = 3;
     const r2 = () => (s2 = s2 * 16807 % 2147483647) / 2147483647;
-    const bx = [0, 1, 2, 3].map(() => o.createBuffer(2, sr * (SHOW_END + 1), sr)),
+    const bx = [0, 1, 2, 3, 4].map(() => o.createBuffer(2, sr * (SHOW_END + 1), sr)),
           BX = bx.map(b => [b.getChannelData(0), b.getChannelData(1)]);
     // one bubble: radius rm in mm, amplitude a, rise xi, pan 0..1, starting at t
     const bub = (Y, t, rm, a, xi, pan) => {
@@ -2713,16 +2751,21 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         Y[0][i0 + i] += v * gl; Y[1][i0 + i] += v * gr;
       }
     };
-    // one bubble drawn from the population between lo and hi mm
-    const pop = (Y, t, a, lo, hi, pan, xi) => {
-      const g = 1 - ui.bGamma, u = r2(), D = r2() ** ui.bBeta,
+    // one bubble drawn from the population between lo and hi mm; b skews its depth (b = 1:
+    // evenly loud, ui.bBeta: mostly deep and faint - right for a crowd of bubbles, wrong for
+    // the one bubble a falling drop makes, which was then nearly always inaudible)
+    const pop = (Y, t, a, lo, hi, pan, xi, b = ui.bBeta) => {
+      const g = 1 - ui.bGamma, u = r2(), D = r2() ** b,
             rm = Math.abs(g) < 1e-3 ? lo * (hi / lo) ** u : (lo ** g + u * (hi ** g - lo ** g)) ** (1 / g);
-      bub(Y, t, rm, a * D * rm ** ui.bAlpha, xi ?? (D > ui.bRiseCut ? ui.bXi : 0), pan);
+      // loudness relative to the largest size the call allows: with r^alpha in mm, one rare
+      // 7 mm bubble near the surface peaked at 2.2 and the peak normalising turned the whole
+      // soundtrack down 2.5x for it
+      bub(Y, t, rm, a * D * (rm / hi) ** ui.bAlpha, xi ?? (D > ui.bRiseCut ? ui.bXi : 0), pan);
     };
     for (const [t, drip, nr, pan] of EV) {
       if (drip) {
         // a drip: its bubble, and often one or two smaller ones as it breaks up
-        pop(BX[0], t, ui.drip2Gain * nr, ui.bRmin, ui.bRmax, pan);
+        pop(BX[0], t, ui.drip2Gain * nr, ui.bRmin, ui.bRmax, pan, undefined, 1);
         for (let j = r2() * 3 | 0; j--;)
           pop(BX[0], t + 0.002 + r2() * 0.02, ui.drip2Gain * nr * 0.5, ui.bRmin, ui.bRmax / 2, pan);
       } else {
@@ -2741,9 +2784,25 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // depth model: every burst is heard, at a random strength.
     for (let t = 0; t < SHOW_END; t -= Math.log(1 - r2()) / ui.fizzRate)
       bub(BX[3], t, 0.15 + r2() * 0.35, ui.fizzGain * near(t) * r2(), ui.fizzXi, r2());
+    // The cork, before any picture, so the sound alone has to say what it is. Three parts:
+    // the crack - a millisecond of broadband noise as the gas jet escapes (at about twice
+    // the speed of sound: Liger-Belair et al., Science Advances 2019); the plop - the open
+    // neck ringing as a Helmholtz resonator, gliding to popF as the cork clears it, over a
+    // low thump of the gas expanding; and the rush - high-passed noise fading as the rest of
+    // the gas leaves.
+    for (let i = 0, ph = 0, lo = 0, i0 = ui.popT * sr | 0; i < sr * ui.hissLen * 4; i++) {
+      const s = i / sr, x = r2() * 2 - 1,
+            f = ui.popF * (1 - (1 - ui.popGlide) * Math.exp(-s / 0.008));
+      ph += f / sr; lo += (x - lo) * 0.3;
+      const v = ui.popGain * (Math.sin(6.283 * ph) * Math.exp(-s / ui.popDecay)
+        + ui.popThump * Math.sin(565 * s) * Math.exp(-s / 0.03)
+        + x * Math.exp(-s / 0.0007)
+        + ui.hissGain * (x - lo) * Math.min(1, s / 0.01) * Math.exp(-s / ui.hissLen));
+      BX[4][0][i0 + i] += v; BX[4][1][i0 + i] += v;
+    }
     for (const b of bx) {
 //#D{
-      tap(['drip2', 'splash2', 'pour2', 'fizz'][bx.indexOf(b)]);
+      tap(['drip2', 'splash2', 'pour2', 'fizz', 'pop'][bx.indexOf(b)]);
 //#D}
       const n = o.createBufferSource();
       n.buffer = b; n.connect(bus); n.start();
@@ -2752,7 +2811,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     if (keep) Object.assign(ui, keep);
     // the sample-loop tracks ARE their stems: a full render leaves them here for the player
     if (!only) song.raw = { drips: sx[0], splashes: sx[1], drip2: bx[0], splash2: bx[1],
-                            pour2: bx[2], fizz: bx[3] };
+                            pour2: bx[2], fizz: bx[3], pop: bx[4] };
 //#D}
 
     // the reverbs: two channels of noise decaying to -60 dB, verbLen for the pad's hall and
@@ -2799,7 +2858,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // is. With everything on it is the release mix: the same stems, a hall built the same
   // way, and the gain the release normalises by (re-measured after every change).
   const STEMS = { pad: 'trkPad', stream: 'trkStream', drips: 'trkDrips', splashes: 'trkSplash',
-                  drip2: 'trkDrip2', splash2: 'trkSplash2', pour2: 'trkPour2', fizz: 'trkFizz' };
+                  drip2: 'trkDrip2', splash2: 'trkSplash2', pour2: 'trkPour2', fizz: 'trkFizz',
+                  pop: 'trkPop' };
   const BUB = ['drip2', 'splash2', 'pour2', 'fizz'];
   const AFFECTS = { padGain: ['pad'], padCut: ['pad'], padDetune: ['pad'], padAtk: ['pad'],
                     padRel: ['pad'], streamGain: ['stream'], sfxGain: ['drips', 'splashes'],
@@ -2807,7 +2867,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
                     bRmin: BUB, bRmax: BUB, bGamma: BUB, bXi: BUB, bRiseCut: BUB, bBeta: BUB,
                     bAlpha: BUB, drip2Gain: ['drip2'], splash2Gain: ['splash2'],
                     splashN: ['splash2'], splashLen: ['splash2'], pour2Gain: ['pour2'],
-                    pourBub: ['pour2'], fizzGain: ['fizz'], fizzRate: ['fizz'], fizzXi: ['fizz'] };
+                    pourBub: ['pour2'], fizzGain: ['fizz'], fizzRate: ['fizz'], fizzXi: ['fizz'],
+                    popT: ['pop'], popGain: ['pop'], popF: ['pop'], popGlide: ['pop'],
+                    popDecay: ['pop'], popThump: ['pop'], hissGain: ['pop'], hissLen: ['pop'] };
   const live = window.__live = { buf: {}, src: {}, g: {} };
   let liveJob = Promise.resolve();
   function stem(k) {
