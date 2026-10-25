@@ -867,7 +867,8 @@ fn liquidDist(p: vec3f) -> f32 {
 
 // the table is NOT marched — it is intersected analytically (grazing rays used to burn
 // the whole step budget skimming the plane)
-// ── magnum (1.5 L): 345 mm tall, 116 mm body, 30 mm neck, deep punt ──
+// ── magnum (1.5 L): 345 mm tall, 116 mm body, 30 mm neck ──
+// (no punt: the dome in the base was cut for 32 bytes - the base faces away while pouring)
 const BOT_H   = 0.345;
 const BODY_R  = 0.060;                   // height/width 2.87, matching the reference
 const NECK_R  = 0.0150;
@@ -911,9 +912,6 @@ fn sdBottleLocal(p: vec3f) -> f32 {
   // lip ring below the mouth
   let lip = sdCyl(p, NECK_R + 0.0019, BOT_H - 0.013, BOT_H - 0.003) - 0.0011;
   d = min(d, lip);
-  // punt: a dome pushed up into the base
-  let punt = length((p - vec3f(0.0, -0.008, 0.0)) * vec3f(1.0, 0.50, 1.0)) - 0.040;
-  d = max(d, -punt);
   // hollow into a shell, then open the bore so the mouth is a mouth
   let sh = max(d, -(d + BOT_W));
   let bore = sdCyl(p, NECK_R - BOT_W - 0.0006, 0.22, BOT_H + 0.02);

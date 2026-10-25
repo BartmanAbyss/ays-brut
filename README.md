@@ -7,7 +7,7 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (PADsynth pad, reverbs, liquid sounds, cork
-pop) work. `build/intro.cmd` is **8 762 bytes, 570 OVER the 8 192 budget**, so features have
+pop) work. `build/intro.cmd` is **8 750 bytes, 558 OVER the 8 192 budget**, so features have
 to be cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
@@ -57,7 +57,8 @@ flares into as one surface, a concave trumpet 15 mm tall widening to 11 mm (`FLA
 `FLARE_R`). The bowl's cavity is carved back out last, so nothing the fillets or the knuckle
 do underneath can show up inside the bowl. The tower is 1+4+9 = 14 glasses by SDF domain folding, 0.51 m tall, 0.336 m wide.
 
-**Magnum** — 345 mm tall, 116 mm body, 30 mm neck, 3 mm wall, deep punt, hollowed to a shell
+**Magnum** — 345 mm tall, 116 mm body, 30 mm neck, 3 mm wall, a flat base (the punt was cut
+for 32 bytes: the base faces away while it pours), hollowed to a shell
 with the bore opened through the neck. Its silhouette is a radius-vs-height function
 (`bottleR`), not a union of primitives: a champagne shoulder is an S-curve that a cone can't
 make and a wide smooth-min erases. Of 345 mm the body is ~140, shoulder ~175 (span), neck
@@ -719,10 +720,10 @@ from the release.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
 screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 8 762 bytes.
+`intro.cmd` is 8 750 bytes.
 
 Next:
-1. **Size** — 570 bytes over, before the score and any text. The puddle is cut (-362);
+1. **Size** — 558 bytes over, before the score and any text. The puddle is cut (-362);
    next candidates in *Feature cuts, measured*, and a packer search on the new shader.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
@@ -945,8 +946,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 762 bytes (25 Oct 2026), 570 OVER 8 192**, after cutting the table
-puddle (-362, measured with the old search state; 0.4 ms faster on heavy tier2). Before
+**`intro.cmd` is 8 750 bytes (25 Oct 2026), 558 OVER 8 192**, after cutting the bottle's
+punt (-12) and the table puddle (-362, measured with the old search state; 0.4 ms faster on heavy tier2). Before
 that: **9 132**, the breakdown below (7 967),
 plus the start screen and music hookup (+116), plus the sound (+1 049 all told, the score
 still empty): the PADsynth pad, two reverbs, the bubble-model liquid with fizz, the cork
