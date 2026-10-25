@@ -102,7 +102,7 @@ REWRITES = [
     ('      timestampWrites: ts(3),\n', ''),
     ('    frameNo++; simU += simSteps * hu; probe.frames = frameNo; probe.ok = true;',
      '    simU += simSteps * hu;'),
-    ('    if (cfg.paused || redrawOnly) { updateHud(); return; }', ''),
+    ('    if ((cfg.paused && seekTo < 0) || redrawOnly) { updateHud(); return; }   // a seek runs on while paused', ''),
     ('    if (!cfg.still || frameNo < cfg.warm) requestAnimationFrame(frame); else updateHud();',
      '    requestAnimationFrame(frame);'),
     ("""    if (hasTS && !qbusy && qrd.mapState === 'unmapped') {
@@ -203,9 +203,9 @@ def release_uniforms(ui):
         'expo': f('expo'), 'wav': on('waves'), 'pfield': on('drops'), 'bounces': f('bounces'),
         'refl': on('reflect'), 'fillOv': -1.0 if ui['autofill'] == 'true' else f('fill') / 100,
         'envg': on('gridEnv'), 'rtrace': f('rtrace'),
-        'ltAz': f('lightAz') * rad, 'ltEl': f('lightEl') * rad,
+        'ltAz': f('lightAz') * rad,
         'prad': f('dropRad') * 0.001, 'foamG': f('foam'), 'glug': f('glug'), 'glugHz': f('glugHz'),
-        'botTilt': f('botTilt') * rad, 'botAz': f('botAz') * rad,
+        'botAz': f('botAz') * rad,
         'botOn': on('bottle'),
     }
 

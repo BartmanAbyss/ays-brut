@@ -65,6 +65,9 @@ struct U {
   evz      : f32,
   emitPos  : vec3f,
   fade     : f32,          // brightness multiplier for fades (1 = full)
+  ltEl     : f32,          // key light elevation, rad - below 0 the table is unlit
+  pour     : f32,          // share of the bottle's flow, 0..1 (0 = not pouring)
+  botTilt  : f32,          // bottle tilt, rad; 0 hides the bottle
 //#D{
   view     : f32,
   fov      : f32,
@@ -86,12 +89,10 @@ struct U {
   envg     : f32,
   rtrace   : f32,
   ltAz     : f32,
-  ltEl     : f32,
   prad     : f32,
   foamG    : f32,
   glug     : f32,
   glugHz   : f32,
-  botTilt  : f32,
   botAz    : f32,
   botOn    : f32,
   _w2      : f32,
@@ -415,7 +416,7 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
       // frequency itself wandering. On sim time, so slow motion slows the glugs too.
       let m = max(u32(u.spawnMod) / 2u, 1u);
       let gt = 6.2831853 * u.glugHz * u.time;
-      let pg = 0.5 + 0.5 * u.glug * sin(gt + 1.5 * sin(gt * 0.31)) * (0.6 + 0.4 * sin(gt * 0.13));
+      let pg = (0.5 + 0.5 * u.glug * sin(gt + 1.5 * sin(gt * 0.31)) * (0.6 + 0.4 * sin(gt * 0.13))) * u.pour;
       if ((i % m) == (fc % m) && rnd3(i, fc, 7u).x < pg) {
         p.pos  = u.emitPos + vec3f((h.x - 0.5) * 0.004, 0.0, (h.y - 0.5) * 0.004);
         // the stream inherits the bottle's drift, so it trails the wander instead of
@@ -952,7 +953,7 @@ fn sdBottleLocal(p: vec3f) -> f32 {
   return max(sh, -bore);
 }
 fn sdBottle(p: vec3f) -> f32 {
-  if (u.botOn < 0.5) { return 1e9; }
+  if (u.botOn < 0.5 || u.botTilt < 0.01) { return 1e9; }   // tilt 0: not in the scene
   // the mouth sits at the emitter, so the bottle follows the pour's wander for free
   var v = p - u.emitPos;
   v = rotY(v, -u.botAz);
@@ -1772,6 +1773,13 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   let clockT = 0;              // master clock, seconds; the sim step index derives from it
   let showStep = 0;            // show time in whole SIM_DT steps - the clock the music owns
   let showPend = 0, showT = 0, burstSteps = 0;
+//#D{
+  // A seek REPLAYS the timeline, a quarter second of show time per frame, so every key
+  // applies when it should: pour, bottle and light reach the shader once per frame, and a
+  // seek that ran the whole sim in one frame poured from t = 0 with the target's values.
+  // previewT: the scrub slider being dragged - the camera follows, the sim waits.
+  let seekTo = -1, previewT = -1;
+//#D}
   // Sim time simulated so far, in 1/60 s units. A step is 1 unit, or less in slow motion
   // (see frame()), so this is not a step count.
   let simU = 0;
@@ -1787,10 +1795,18 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   let last = t0, acc = 0, accN = 0, frameNo = 0, ffSteps = 0;
 
   function writeUniforms(time) {
-    let ang, dist = ui.dist, camY = ui.camY, tgtY = ui.tgtY;
+    let ang, dist = ui.dist, camY = ui.camY, tgtY = ui.tgtY,
+        fade = 1, el = ui.lightEl, pour = 1, tilt = ui.botTilt;
     if (ui.show) {
       const sh = evalShow(showT);
+//#D{
+      if (previewT >= 0) Object.assign(sh, evalShow(previewT));   // scrubbing: the camera leads
+//#D}
       ang = sh.angle / 57.3; dist = sh.dist; camY = sh.camY; tgtY = sh.tgtY;   // deg -> rad, 0.007% off: -6 bytes
+      fade = sh.fade; el = sh.el; pour = sh.pour; tilt = sh.tilt;
+//#D{
+      setUI('lightEl', el.toFixed(1)); setUI('botTilt', tilt.toFixed(0));
+//#D}
       // Sliders follow for readout only. Driving the camera THROUGH them would quantise it
       // to the slider step - dist steps by 0.01, visible stepping on a push-in that only
       // covers 0.01 in eight seconds.
@@ -1809,15 +1825,16 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     f32.set([canvas.width, canvas.height, time, simU,
              Math.sin(ang) * dist, camY, Math.cos(ang) * dist, ui.shutter * SIM_DT * frameSim,
              stepDt, tgtY, (w1[0] - w0[0]) * W / 0.02, (w1[1] - w0[1]) * W / 0.02,   // bottle drift velocity
-             w0[0] * W, 0.555, w0[1] * W, 1]);                  // emitter; fade
+             w0[0] * W, 0.555, w0[1] * W, fade,                 // emitter; fade
+             el / 57.3, pour, tilt / 57.3]);
 //#D{
     // ...then the harness controls, which the release folds into the shader
     f32.set([ui.view, 1.6, cfg.steps, Math.max(1, Math.round((cfg.npart / 6) / ui.pourRate)),
              cfg.npart, ui.dropVol * 1e-9, cfg.nphoton, ui.cgain, cfg.single ? 1 : 0, cfg.noliq ? 1 : 0,
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
-             ui.lightAz * Math.PI / 180, ui.lightEl * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.botTilt * Math.PI / 180, ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0], 16);
+             ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
+             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0], 19);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
@@ -1904,6 +1921,12 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       showPend += redrawOnly ? 0 : (cfg.det ? SIM_DT : Math.min((now - last) / 1000, 0.25));
       nShow = Math.floor(showPend / SIM_DT);
       showPend -= nShow * SIM_DT;
+//#D{
+      if (seekTo >= 0 && !redrawOnly) {
+        nShow = Math.min(15, seekTo - showStep); showPend = 0;
+        if (nShow <= 0) { nShow = 0; seekTo = -1; }
+      }
+//#D}
     }
     for (let i = 0; i < nShow; i++) {
       const sp = ui.show ? evalShow((showStep + i) * SIM_DT).speed : 1;
@@ -1927,11 +1950,17 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // less often) showed the same frame several times over - at 0.25, motion at 15 fps.
     // At speed 1 and above steps are 1/60 s as before, more of them when faster; seeks and
     // fast-forward always take full steps.
-    const big = ffNow + burst > 0;
+    let big = ffNow + burst > 0;
+//#D{
+    if (seekTo >= 0) big = true;   // a replay takes full steps, as many as it needs
+//#D}
     const hu = big ? 1 : Math.min(1, (ui.show ? evalShow(showT).speed : 1) * ui.simSpeed);
     stepDt = hu * SIM_DT;
     const want = hu > 0 ? Math.floor((clockT / SIM_DT - simU) / hu + 1e-6) : 0;
-    const simSteps = redrawOnly ? 0 : Math.max(0, Math.min(16 + ffNow + burst, want));
+    let simSteps = redrawOnly ? 0 : Math.max(0, Math.min(16 + ffNow + burst, want));
+//#D{
+    if (seekTo >= 0 && !redrawOnly) simSteps = Math.max(0, want);
+//#D}
     if (!redrawOnly && (want - simSteps) * hu > LAG_STEPS) {
       // Persistently too slow to hold the clock. In a demo sync beats continuity: drop
       // the steps we cannot afford so the picture stays with the music, and count it so
@@ -2029,7 +2058,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // A redraw must not schedule anything: frameOnce un-pauses so that frame() runs, and
     // this line used to see 'not paused' and queue a full frame - which stepped the sim
     // before noticing the pause. Every slider move on a paused page cost one hidden step.
-    if (cfg.paused || redrawOnly) { updateHud(); return; }
+    if ((cfg.paused && seekTo < 0) || redrawOnly) { updateHud(); return; }   // a seek runs on while paused
     if (!cfg.still || frameNo < cfg.warm) requestAnimationFrame(frame); else updateHud();
   }
 
@@ -2065,26 +2094,58 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 
   //#D}
   // ── timeline ──
-  // Keys are [t, angle deg, dist, camY, tgtY, simSpeed, ease]. Two keys sharing a t are
-  // a CUT: the later one wins at that instant, so the change is immediate rather than a
-  // one-frame blend. `ease` applies to the segment STARTING at that key - 1 for
-  // smootherstep in and out, 0 for linear, so a long drift can run through several keys
-  // without stalling at each one. simSpeed is keyed too: the fill takes ~30 s of sim time
-  // and the camera does not want to wait for it, so the wide shots run the fluid faster.
+  // Keys are [t, angle deg, dist, camY, tgtY, simSpeed, ease, fade, light elevation deg,
+  // pour, bottle tilt deg]. Two keys sharing a t are a CUT: the later one wins at that
+  // instant, so the change is immediate rather than a one-frame blend. `ease` applies to
+  // the segment STARTING at that key - 1 for smootherstep in and out, 0 for linear, so a
+  // long drift can run through several keys without stalling at each one.
+  // - simSpeed: below 1 real slow motion. In the black between shots it runs FAST, so the
+  //   tower fills while nobody watches (the sim takes at most 16 steps a frame: 8 is safe).
+  // - fade: 0 black .. 1 full. Every shot fades in and out.
+  // - light: the key light's elevation; below 0 it is under the table and the table is dark.
+  // - pour: the share of the bottle's flow, 0 = not pouring. Ramp it for a natural start.
+  // - tilt: the bottle; 0 removes it from the scene, ~118 is the pouring angle.
+  // First draft of the shot plan (26 Oct): 1 the top glass alone, dark, the light rising
+  // from under the table; 2 an orbit round it; 3 black, the cork pops (popT); 4 the pour
+  // in slow motion, the glass filling; 5 an orbit of the tower; 6 tier 2 in slow motion;
+  // 7 to be decided.
   const SHOW = [
-    [  0, 200, 1.000, 0.620, 0.280, 1.0, 1],   // high and wide, tower still empty
-    [  9, 216, 0.820, 0.470, 0.270, 1.0, 1],
-    [  9,  39, 0.180, 0.520, 0.480, 1.0, 1],   // cut: macro, stream into the top glass
-    [ 18,  62, 0.170, 0.550, 0.492, 1.0, 1],
-    [ 18,  39, 0.260, 0.400, 0.320, 1.0, 1],   // cut: tier 2 taking the overflow
-    [ 27,  10, 0.300, 0.360, 0.300, 1.0, 1],
-    [ 27, 124, 0.330, 0.170, 0.220, 1.0, 1],   // cut: low, looking up through the stems
-    [ 36, 152, 0.360, 0.300, 0.240, 1.0, 1],
-    [ 36,  32, 0.420, 0.460, 0.010, 1.0, 1],   // cut: down onto the table, caustics
-    [ 45,  92, 0.460, 0.500, 0.010, 1.0, 1],
-    [ 45, 250, 0.560, 0.400, 0.260, 1.0, 1],   // cut: pull back out
-    [ 56, 300, 0.950, 0.500, 0.270, 1.0, 0],
-    [ 60, 322, 1.000, 0.520, 0.270, 1.0, 0],
+    // 1 - the top glass alone, the light rising from below the table
+    [  0.0,  20, 0.260, 0.470, 0.490, 1,    0, 0,  -25, 0,   0],
+    [  2.0,  25, 0.250, 0.470, 0.490, 1,    0, 1,   -5, 0,   0],
+    [  7.5,  40, 0.220, 0.470, 0.490, 1,    0, 1, 45.6, 0,   0],
+    [  8.5,  43, 0.215, 0.470, 0.490, 1,    0, 0, 45.6, 0,   0],
+    // 2 - an orbit round it
+    [  8.5,  60, 0.300, 0.560, 0.470, 1,    0, 0, 45.6, 0,   0],
+    [  9.5,  82, 0.300, 0.560, 0.470, 1,    0, 1, 45.6, 0,   0],
+    [ 16.0, 225, 0.280, 0.540, 0.470, 1,    0, 1, 45.6, 0,   0],
+    [ 17.0, 247, 0.280, 0.540, 0.470, 1,    0, 0, 45.6, 0,   0],
+    // 3 - black; the cork pops at popT (17.8)
+    [ 19.5,  39, 0.190, 0.530, 0.480, 0.25, 0, 0, 45.6, 0,  95],
+    // 4 - the pour in slow motion: the bottle tips in, the flow starts, the glass fills
+    [ 20.0,  40, 0.190, 0.530, 0.480, 0.25, 1, 1, 45.6, 0, 112],
+    [ 20.4,  41, 0.188, 0.530, 0.480, 0.25, 0, 1, 45.6, 1, 118],
+    [ 26.0,  52, 0.180, 0.530, 0.480, 0.25, 1, 1, 45.6, 1, 118],
+    [ 30.5,  62, 0.180, 0.550, 0.490, 1,    0, 1, 45.6, 1, 118],
+    [ 31.5,  65, 0.180, 0.550, 0.490, 1,    0, 0, 45.6, 1, 118],
+    // black: the sim runs 8x, the top glass overflows and tier 2 fills
+    [ 31.5,  65, 0.180, 0.550, 0.490, 8,    0, 0, 45.6, 1, 118],
+    [ 33.0, 300, 0.850, 0.500, 0.260, 8,    0, 0, 45.6, 1, 118],
+    // 5 - an orbit of the tower
+    [ 33.0, 300, 0.850, 0.500, 0.260, 1.5,  0, 0, 45.6, 1, 118],
+    [ 34.0, 310, 0.840, 0.500, 0.260, 1.5,  0, 1, 45.6, 1, 118],
+    [ 42.5, 400, 0.780, 0.480, 0.260, 1.5,  0, 1, 45.6, 1, 118],
+    [ 43.5, 412, 0.775, 0.480, 0.260, 1.5,  0, 0, 45.6, 1, 118],
+    // black: 8x again, tier 2 overflowing into tier 3
+    [ 43.5, 412, 0.775, 0.480, 0.260, 8,    0, 0, 45.6, 1, 118],
+    [ 45.0,  39, 0.260, 0.400, 0.320, 8,    0, 0, 45.6, 1, 118],
+    // 6 - tier 2 in slow motion
+    [ 45.0,  39, 0.260, 0.400, 0.320, 0.25, 0, 0, 45.6, 1, 118],
+    [ 46.0,  42, 0.258, 0.400, 0.320, 0.25, 0, 1, 45.6, 1, 118],
+    [ 55.0,  60, 0.250, 0.390, 0.320, 0.25, 0, 1, 45.6, 1, 118],
+    [ 56.0,  62, 0.250, 0.390, 0.320, 0.25, 0, 0, 45.6, 1, 118],
+    // 7 - to be decided
+    [ 60.0,  62, 0.250, 0.390, 0.320, 0.25, 0, 0, 45.6, 1, 118],
   ];
   const SHOW_END = SHOW[SHOW.length - 1][0];
   function evalShow(t) {
@@ -2096,7 +2157,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     let u = span > 1e-6 ? (t - a[0]) / span : 0;
     if (a[6]) { u = u * u * u * (u * (u * 6 - 15) + 10); }   // smootherstep, as for shapes
     const m = k => a[k] + (b[k] - a[k]) * u;
-    return { shot: i, angle: m(1), dist: m(2), camY: m(3), tgtY: m(4), speed: m(5) };
+    return { shot: i, angle: m(1), dist: m(2), camY: m(3), tgtY: m(4), speed: m(5),
+             fade: m(7), el: m(8), pour: m(9), tilt: m(10) };
   }
   //#D{
   // Sim seconds elapsed by show time t. A seek needs the same integral the frame loop
@@ -2117,10 +2179,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       location.search = q.toString();
       return;
     }
-    showStep = Math.round(t / SIM_DT); showT = showStep * SIM_DT; showPend = 0;
-    clockT = want;
-    burstSteps = Math.max(0, Math.ceil(want / SIM_DT - simU));   // may pass the cap
-    if (cfg.paused) { requestAnimationFrame(frameOnce); }
+    seekTo = Math.round(t / SIM_DT); previewT = -1;
+    if (cfg.paused) { requestAnimationFrame(frame); }   // replay frames run while paused
   }
 
   //#D}
@@ -2135,7 +2195,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['camY',     'range', 0.44, 0.01, 1.10, 0.005,2],
     ['tgtY',     'range', 0.26, 0.00, 0.62, 0.005,2],
     ['lightAz',  'range', -45,  -180, 180,  1,    0],
-    ['lightEl',  'range', 45.6,   5,  85,  0.5,  1],
+    ['lightEl',  'range', 45.6, -30,  85,  0.5,  1],
     ['gridEnv',  'check', false],
     ['rtrace',   'range', 1,    0,    2,    1,    0],
     ['drops',    'check', true],
@@ -2189,7 +2249,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['fizzGain', 'range', 0.1,  0,    0.5,  0.005,3],
     ['fizzRate', 'range', 300,  0,    3000, 10,   0],
     ['fizzXi',   'range', 1,    0,    10,   0.1,  1],
-    ['popT',     'range', 0.5,  0,    60,   0.05, 2],
+    ['popT',     'range', 17.8, 0,    60,   0.05, 2],
     ['popGain',  'range', 0.5,  0,    2,    0.01, 2],
     ['popF',     'range', 450,  80,   1500, 5,    0],
     ['popGlide', 'range', 0.6,  0.2,  2.5,  0.05, 2],
@@ -2431,7 +2491,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // and doing that per mouse-move would stall the drag.
   uiEl.showT.inp.oninput = () => {
     ui.showT = parseFloat(uiEl.showT.inp.value);
-    showStep = Math.round(ui.showT / SIM_DT); showT = showStep * SIM_DT; showPend = 0;
+    previewT = ui.showT;
     if (cfg.paused) { requestAnimationFrame(frameOnce); }
   };
   uiEl.showT.inp.onchange = () => seekShow(parseFloat(uiEl.showT.inp.value));

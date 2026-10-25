@@ -7,7 +7,7 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (PADsynth pad, reverbs, liquid sounds, cork
-pop) work. `build/intro.cmd` is **8 944 bytes, 752 OVER the 8 192 budget**, so features have
+pop) work. `build/intro.cmd` is **9 127 bytes, 935 OVER the 8 192 budget**, so features have
 to be cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
@@ -136,7 +136,15 @@ need — `?still=1&warm=300` lands on `t = 5.0000` exactly.
 ### The timeline
 
 `?show=1` hands the camera and the simulation speed to a keyframe table, `SHOW`, driven by
-the show clock. Keys are `[t, angle, dist, camY, tgtY, simSpeed, ease]`:
+the show clock. Keys are `[t, angle, dist, camY, tgtY, simSpeed, ease, fade, light, pour,
+tilt]`:
+
+- **`fade`**: 0 black .. 1 full; every shot fades in and out.
+- **`light`**: the key light's elevation in degrees; below 0 it is under the table, which
+  then gets no light at all (the table is lit only by the photon map).
+- **`pour`**: the share of the bottle's flow, 0 = not pouring; ramp it for a natural start.
+- **`tilt`**: the bottle in degrees; 0 takes it out of the scene, ~118 pours.
+- In the black between shots `simSpeed` runs at 8, so the tower fills while nobody watches.
 
 - **Two keys sharing a `t` are a cut.** The later one wins at that instant, so the change is
   immediate instead of a one-frame blend.
@@ -181,15 +189,27 @@ readout. Routing it through them would quantise it to the slider step, and `dist
 
 Scrubbing with `showT` moves the camera immediately, which is what blocking shots needs, and
 the fluid catches up on release. **Backwards means rebuilding the fluid from zero**, because
-the simulation has no inverse — you cannot un-pour it — so it reloads with `?showt=`. A seek
-is representative, not bit-identical: a catch-up burst wraps the 16 sub-step slots, so spill
-azimuths differ. Seek and live playback to t=12 both gave 9 glasses filled and an identical
-top glass, with per-glass levels differing by the RNG.
+the simulation has no inverse — you cannot un-pour it — so it reloads with `?showt=`. **A seek
+replays the timeline** a quarter second of show time per frame (full steps, as many as
+needed): the pour, bottle and light reach the shader once per frame, and a seek that ran
+the whole sim in one frame poured from t = 0 with the target's values. A seek to 50 s takes
+a few seconds. It is representative, not bit-identical: spill azimuths differ by the RNG.
 
-The current shot list is a **first draft**, timed against a pace that turned out to be the
-level-jump bug above ("the top glass fills in ~20 s, the full tower in ~48 s"); it is being
-replaced by the new shot plan. The macro shot therefore runs 9—18 s while the top glass is filling, and
-the cut to tier 2 lands on the first overflow. Duration is 60 s.
+**The shot plan, first draft (26 Oct 2026)**, 60 s:
+
+| show s | shot | sim |
+|---|---|---|
+| 0 - 8.5 | 1. the top glass alone; fades in dark, the light rises from 25° below the table to 45.6° | empty, no pour, no bottle |
+| 8.5 - 17 | 2. an orbit round it | |
+| 17 - 19.5 | 3. black; the cork pops at `popT` 17.8 | the bottle appears, tilted in |
+| 19.5 - 31.5 | 4. the pour in slow motion (0.25, easing to 1): the bottle tips in, the flow starts at 20 s, the top glass fills | top glass ~3/4 full by 29.5 |
+| 31.5 - 33 | black, sim at 8x | top glass overflows, tier 2 fills |
+| 33 - 43.5 | 5. an orbit of the tower (sim 1.5x) | tier 2 nearly full |
+| 43.5 - 45 | black, sim at 8x | |
+| 45 - 56 | 6. tier 2 in slow motion (0.25) | tier 2 full and spilling, tier 3 half full |
+| 56 - 60 | 7. to be decided (black) | |
+
+The sound has not been re-timed to it yet (the drip rates still follow the old measurement).
 
 ### Sound
 
@@ -750,10 +770,10 @@ from the release.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
 screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 8 944 bytes.
+`intro.cmd` is 9 127 bytes.
 
 Next:
-1. **Size** — 752 bytes over, before the score and any text. The puddle is cut (-362);
+1. **Size** — 935 bytes over, before the score and any text. The puddle is cut (-362);
    next candidates in *Feature cuts, measured*, and a packer search on the new shader.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
@@ -976,7 +996,9 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 944 bytes (25 Oct 2026), 752 OVER 8 192**: the glugs and the bowl fix
+**`intro.cmd` is 9 127 bytes (26 Oct 2026), 935 OVER 8 192**: the new timeline - four more
+columns and 28 keys, light, pour and bottle tilt as live uniforms (+183). Before that
+8 944: the glugs and the bowl fix
 (+79), pourWander 20 (+23, a constant). Before that 8 842: real slow motion, the exact
 glass volume and a fade slot in the uniforms (+92). Before that 8 750, after cutting the bottle's
 punt (-12) and the table puddle (-362, measured with the old search state; 0.4 ms faster on heavy tier2). Before
