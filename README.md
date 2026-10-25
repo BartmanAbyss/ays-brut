@@ -7,7 +7,7 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (string pad, reverb, liquid sounds) work.
-`build/intro.cmd` is **8 838 bytes, 646 OVER the 8 192 budget**, so features have to be
+`build/intro.cmd` is **8 856 bytes, 664 OVER the 8 192 budget**, so features have to be
 cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
@@ -188,9 +188,15 @@ The mix is normalised to a 0.9 peak, so the sliders set balance, not level. Rend
 ~2 s (most of it the pad and the reverb). Default balance, RMS: the pad 0.064 against the
 liquid 0.011 on the wide opening and 0.056 on the macro shot.
 
-**To hear it**, set the audio sliders in the harness and press *hear audio*: it reloads with
-`?gate=1&show=1` and the sliders in the URL; click the page. The audio is rendered at load,
-so a slider change is only heard after that reload.
+**To hear it**, press *hear audio* in the harness panel: it reloads with `?gate=1&show=1`
+and the audio sliders in the URL; click the page. Add `&testpad=1` for the test chord.
+The harness then plays the soundtrack as four **stems** - pad, stream, drips, splashes -
+through a live hall, and the `trk*` boxes switch each track (and the reverb) on and off
+while the show runs. Letting go of an audio slider re-renders just the stems it touches
+(the pad takes ~2 s, the rest a fraction of that) and swaps them in at the playback
+position; the mix's normalising gain is then re-measured. With everything on it is the
+release mix: the stems sum to it within 6e-7. The release itself renders one mix and
+ships none of this (drips and splashes having a buffer each cost 18 bytes).
 
 ### Rendering
 
@@ -593,11 +599,11 @@ from the release.
 
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, puddle, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
-screen with fullscreen and the audio clock, the sound engine. `intro.cmd` is 8 838
-bytes, 646 over.
+screen with fullscreen and the audio clock, the sound engine. `intro.cmd` is 8 856
+bytes, 664 over.
 
 Next:
-1. **Size** — 646 bytes over with the sound in (+755), before the score and any text.
+1. **Size** — 664 bytes over with the sound in (+773), before the score and any text.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
 2. **The score** — must be **human-composed**; the party bans prompt-based music. Chords
@@ -819,8 +825,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 838 bytes (25 Oct 2026), 646 OVER 8 192**: the breakdown below
-(7 967), plus the start screen and music hookup (+116), plus the sound engine (+755:
+**`intro.cmd` is 8 856 bytes (25 Oct 2026), 664 OVER 8 192**: the breakdown below
+(7 967), plus the start screen and music hookup (+116), plus the sound engine (+773:
 pad, reverb, liquid, normalising - with the score still empty).
 
 The breakdown, 24 Oct 2026, after the lossless pass, the core simplifications and the

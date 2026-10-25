@@ -2295,6 +2295,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['sfxGain',  'range', 0.25, 0.00, 1,    0.01, 2],
     ['streamGain','range',0.04, 0.00, 0.30, 0.005,3],
     ['drips',    'range', 14,   0,    60,   1,    0],
+    ['trkPad',   'check', true],
+    ['trkStream','check', true],
+    ['trkDrips', 'check', true],
+    ['trkSplash','check', true],
+    ['trkVerb',  'check', true],
   ];
   const PRESET = {
     tower: { dist: 0.800, camY: 0.440, tgtY: 0.260, angle: 39 },
@@ -2350,6 +2355,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     sfxGain: 'Audio: level of the drips and splashes, before the camera distance scales them.',
     streamGain: 'Audio: level of the steady pour-stream hiss under the drips.',
     drips: 'Audio: drips and splashes per second while only the top glass overflows; it doubles as the second tier reaches its spill level (19-26 s, measured).',
+    trkPad: 'Audio track on/off, live (after "hear audio" and the click): the string pad. Silent unless the score has chords or the URL has &testpad=1.',
+    trkStream: 'Audio track on/off, live: the steady pour-stream hiss.',
+    trkDrips: 'Audio track on/off, live: the drips (sines chirping upward).',
+    trkSplash: 'Audio track on/off, live: the splashes (bursts of high-passed noise).',
+    trkVerb: 'Audio on/off, live: the reverb on everything. Off is the dry mix.',
   };
   const DIG = k => SPEC.find(x => x[0] === k)[6] ?? 2;
   const ui = {}, uiEl = {};
@@ -2436,7 +2446,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // the start screen on: click it to hear the show with the new sound.
     const b = document.createElement('button');
     b.textContent = 'hear audio';
-    b.title = 'Reload with the start screen and the current audio sliders; click the page to hear the show. Add &testpad=1 to the URL for a held test chord while the score is empty.';
+    b.title = 'Reload with the start screen and the current audio sliders; click the page to hear the show. Then the trk* boxes switch tracks on and off live, and an audio slider is heard a moment after you let go of it. Add &testpad=1 to the URL for a held test chord while the score is empty.';
     b.onclick = () => {
       const q = new URLSearchParams(location.search);
       for (const k of ['padGain', 'padCut', 'padDetune', 'padAtk', 'padRel', 'verbLen',
@@ -2520,14 +2530,26 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // The whole soundtrack, rendered offline before the click: a slow render costs load time,
   // never a hitch, and the browser's own oscillators are band-limited and its convolver
   // makes a hall from a buffer of noise. Seeded, so every run sounds the same.
+//#D{
+  let solo = null;   // a track name: song() renders that track alone, dry (a stem)
+//#D}
   async function song(sr) {
     const o = new OfflineAudioContext(2, sr * (SHOW_END + 1), sr);
     let seed = 7;
     const rnd = () => (seed = seed * 16807 % 2147483647) / 2147483647;
     const gain = (v, to) => { const g = o.createGain(); g.gain.value = v; g.connect(to); return g; };
-    const bus = gain(1, o.destination), cv = o.createConvolver();
+    let bus = gain(1, o.destination);
+    const cv = o.createConvolver();
     cv.connect(o.destination);
     bus.connect(gain(ui.verbMix, cv));
+//#D{
+    // A stem keeps one track and leaves out the hall: each track routes into `bus` as it
+    // is built, so the soloed one gets a line straight to the output and the others a gain
+    // connected to nothing - which the renderer never pulls, so they cost nothing either.
+    const only = solo;   // read once, before the first await: renders may overlap
+    const tap = k => { if (only) bus = k === only ? gain(1, o.destination) : o.createGain(); };
+    tap('pad');
+//#D}
 
     // the pad: five sawtooth voices per note, detuned and spread across the stereo field,
     // into one lowpass whose cutoff a slow LFO swings so the pad breathes
@@ -2553,20 +2575,25 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const nz = o.createBuffer(1, sr * 2, sr), nd = nz.getChannelData(0);
     for (let i = 0; i < nd.length; i++) nd[i] = rnd() * 2 - 1;
     // the stream: a steady band of hiss
+//#D{
+    tap('stream');
+//#D}
     const st = o.createBufferSource(), bp = o.createBiquadFilter(), sg = gain(0, bus);
     st.buffer = nz; st.loop = true; bp.type = 'bandpass'; bp.frequency.value = 1500;
     st.connect(bp); bp.connect(sg); st.start();
     for (let t = 0; t < SHOW_END; t += 0.25) sg.gain.setTargetAtTime(ui.streamGain * near(t), t, 0.05);
     // Drips and splashes, as a Poisson process whose rate follows the spill. Written sample
-    // by sample into one buffer: ~1300 events as audio nodes took 9.5 s to render, as plain
-    // loops they take milliseconds.
-    const sx = o.createBuffer(2, sr * (SHOW_END + 1), sr), X = [sx.getChannelData(0), sx.getChannelData(1)];
+    // by sample, into a buffer each (so each is a track): ~1300 events as audio nodes took
+    // 9.5 s to render, as plain loops they take milliseconds.
+    const sx = [0, 1].map(() => o.createBuffer(2, sr * (SHOW_END + 1), sr)),
+          X = sx.map(b => [b.getChannelData(0), b.getChannelData(1)]);
     for (let t = 0; t < SHOW_END;) {
       const u = Math.min(1, Math.max(0, (t - 19) / 7));
       t -= Math.log(1 - rnd()) / (ui.drips * (1 + u * u * (3 - 2 * u)) + 1e-6);
       const a = ui.sfxGain * near(t) * (0.3 + rnd()), pan = rnd() * 0.8 + 0.1,
             dec = 0.015 + rnd() * 0.05, drip = rnd() < 0.7, f = 500 + rnd() * 1500,
-            up = Math.log(2 + rnd() * 2) / 0.05, c = 0.12 + rnd() * 0.28, i0 = t * sr | 0;
+            up = Math.log(2 + rnd() * 2) / 0.05, c = 0.12 + rnd() * 0.28, i0 = t * sr | 0,
+            Y = X[drip ? 0 : 1];
       let ph = 0, lo = 0;
       for (let i = 0; i < sr * 0.3; i++) {
         const s = i / sr, env = a * Math.min(1, s / 0.003) * Math.exp(-s / dec);
@@ -2579,12 +2606,17 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
           // a splash: noise through a one-pole highpass (1-4 kHz)
           const x = rnd() * 2 - 1; lo += (x - lo) * c; v = x - lo;
         }
-        X[0][i0 + i] += v * env * Math.sqrt(1 - pan);
-        X[1][i0 + i] += v * env * Math.sqrt(pan);
+        Y[0][i0 + i] += v * env * Math.sqrt(1 - pan);
+        Y[1][i0 + i] += v * env * Math.sqrt(pan);
       }
     }
-    const sxs = o.createBufferSource();
-    sxs.buffer = sx; sxs.connect(bus); sxs.start();
+    for (const b of sx) {
+//#D{
+      tap(b === sx[0] ? 'drips' : 'splashes');
+//#D}
+      const n = o.createBufferSource();
+      n.buffer = b; n.connect(bus); n.start();
+    }
 
     // the hall: two channels of noise decaying to -60 dB over verbLen (filled last, so its
     // length does not move the random sequence the drips are drawn from)
@@ -2596,6 +2628,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     cv.buffer = ir;
 
     const b = await o.startRendering();
+//#D{
+    if (only) return b;   // stems stay raw: the live player applies the mix's own gain
+//#D}
     // normalise the mix to a 0.9 peak: the sliders set balance, this sets level
     let pk = 1e-9;
     for (let c = 0; c < 2; c++) for (const x of b.getChannelData(c)) pk = Math.max(pk, Math.abs(x));
@@ -2616,6 +2651,87 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   }
 //#D{
   window.__song = song;   // await __song(48000) -> the AudioBuffer, for checking levels
+
+  // ── live stems (harness only) ──
+  // With ?gate=1 the harness plays the soundtrack as four stems through a live hall, so
+  // each track switches on and off while the show runs (the trk* boxes), and letting go of
+  // an audio slider re-renders just the stems it touches and swaps them in where playback
+  // is. With everything on it is the release mix: the same stems, a hall built the same
+  // way, and the gain the release normalises by (re-measured after every change).
+  const STEMS = { pad: 'trkPad', stream: 'trkStream', drips: 'trkDrips', splashes: 'trkSplash' };
+  const AFFECTS = { padGain: ['pad'], padCut: ['pad'], padDetune: ['pad'], padAtk: ['pad'],
+                    padRel: ['pad'], streamGain: ['stream'], sfxGain: ['drips', 'splashes'],
+                    drips: ['drips', 'splashes'] };
+  const live = window.__live = { buf: {}, src: {}, g: {} };
+  let liveJob = Promise.resolve();
+  function stem(k) {
+    // song() reads `solo` synchronously as it starts, so clearing it at once keeps any
+    // render started meanwhile a full mix
+    solo = k;
+    const r = song(ac.sampleRate);
+    solo = null;
+    return r;
+  }
+  function hall(len) {
+    // the release's hall: two channels of noise decaying to -60 dB over len
+    const ir = ac.createBuffer(2, ac.sampleRate * len | 0, ac.sampleRate);
+    let sd = 11;
+    for (let c = 0; c < 2; c++) {
+      const d = ir.getChannelData(c);
+      for (let i = 0; i < d.length; i++)
+        d[i] = ((sd = sd * 16807 % 2147483647) / 2147483647 * 2 - 1) * Math.exp(-7 * i / d.length);
+    }
+    const cv = ac.createConvolver();
+    cv.buffer = ir; cv.connect(live.master);
+    return cv;
+  }
+  async function liveSetup() {
+    const g = (v, to) => { const x = ac.createGain(); x.gain.value = v; x.connect(to); return x; };
+    live.master = g(0.9 / song.peak, ac.destination);
+    live.mix = g(1, live.master);
+    live.cv = hall(ui.verbLen);
+    live.send = g(0, live.cv); live.mix.connect(live.send);
+    for (const k in STEMS) { live.g[k] = g(0, live.mix); live.buf[k] = await stem(k); }
+    liveApply();
+  }
+  function liveApply() {
+    if (!live.master) return;
+    const now = ac.currentTime;
+    for (const k in STEMS) live.g[k].gain.setTargetAtTime(ui[STEMS[k]] ? 1 : 0, now, 0.02);
+    live.send.gain.setTargetAtTime(ui.trkVerb ? ui.verbMix : 0, now, 0.02);
+  }
+  function liveStart(k, at, off) {
+    const s = ac.createBufferSource();
+    s.buffer = live.buf[k]; s.connect(live.g[k]); s.start(at, off);
+    live.src[k]?.stop(at);
+    live.src[k] = s;
+  }
+  // after "hear audio", a slider let go: re-render what it touches, swap it in at the
+  // playback position, then re-measure the release's normalising gain
+  function liveChange(key) {
+    liveJob = liveJob.then(async () => {
+      if (!live.master) return;
+      if (key === 'verbLen') {
+        const old = live.cv;
+        live.cv = hall(ui.verbLen); live.send.disconnect(); live.send.connect(live.cv);
+        setTimeout(() => old.disconnect(), 100);
+      }
+      for (const k of AFFECTS[key] || []) {
+        live.buf[k] = await stem(k);
+        if (tA !== undefined) {
+          const now = ac.currentTime + 0.05;
+          liveStart(k, now, Math.max(0, now - tA));
+        }
+      }
+      await song(ac.sampleRate);
+      live.master.gain.setTargetAtTime(0.9 / song.peak, ac.currentTime, 0.1);
+      liveApply();
+    });
+  }
+  for (const k in STEMS) uiEl[STEMS[k]].inp.addEventListener('input', liveApply);
+  uiEl.trkVerb.inp.addEventListener('input', liveApply);
+  for (const k of [...Object.keys(AFFECTS), 'verbMix', 'verbLen'])
+    uiEl[k].inp.addEventListener('change', () => { liveApply(); liveChange(k); });
 //#D}
 
   // ── start screen ──
@@ -2626,6 +2742,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   if (cfg.gate) {
     ac = new AudioContext();
     const b = await song(ac.sampleRate);
+//#D{
+    if (!cfg.tick) await liveSetup();   // the harness plays stems instead (?tick=1 keeps the mix)
+//#D}
     onclick = () => {
       onclick = null;
       // fullscreen is the screen: size the canvas once, here, rather than on every resize
@@ -2635,6 +2754,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       const src = ac.createBufferSource();
       src.buffer = b; src.connect(ac.destination);
       src.start(tA = ac.currentTime + 0.1);
+//#D{
+      if (live.master) { src.disconnect(); for (const k in STEMS) liveStart(k, tA, 0); }
+//#D}
       requestAnimationFrame(frame);
     };
     document.body.append('click');   // unstyled on purpose: -55 bytes against centred white-on-black
