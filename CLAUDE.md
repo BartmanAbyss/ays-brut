@@ -242,6 +242,10 @@ the excess. The top glass read full 0.3 s into the pour, and the error depended 
 step size - it only showed when slow motion made the steps smaller and the glass filled
 differently. Keep the conserved quantity (volume) as the state and derive the rest.
 
+**A position constraint must leave slack.** Putting a drop exactly ON the bowl's
+interior sphere let float rounding flip the next substep's "was it inside?" test, and the
+drop fell through the glass. Constrain to a radius inside, test against the full radius.
+
 **Slow motion must shrink the step, not skip it.** Whole 1/60 s steps run less often show
 the same frame several times (at 0.25, motion at 15 fps). A smaller step means everything
 sized per step has to scale: waves, decay rates, emission cadence, the motion streak.
@@ -461,7 +465,7 @@ search scores for brotli, not for it. Worth adopting at the very end, when every
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 310 bytes. `intro.cmd` is **8 842** (25 Oct 2026), 650
+  stale. Our dropper header is 310 bytes. `intro.cmd` is **8 944** (25 Oct 2026), 752
   OVER, with the start screen and the sound engine in but the score empty and no text;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The

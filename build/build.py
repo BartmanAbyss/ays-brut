@@ -204,7 +204,7 @@ def release_uniforms(ui):
         'refl': on('reflect'), 'fillOv': -1.0 if ui['autofill'] == 'true' else f('fill') / 100,
         'envg': on('gridEnv'), 'rtrace': f('rtrace'),
         'ltAz': f('lightAz') * rad, 'ltEl': f('lightEl') * rad,
-        'prad': f('dropRad') * 0.001, 'foamG': f('foam'),
+        'prad': f('dropRad') * 0.001, 'foamG': f('foam'), 'glug': f('glug'), 'glugHz': f('glugHz'),
         'botTilt': f('botTilt') * rad, 'botAz': f('botAz') * rad,
         'botOn': on('bottle'),
     }

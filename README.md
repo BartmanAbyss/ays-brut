@@ -7,7 +7,7 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (PADsynth pad, reverbs, liquid sounds, cork
-pop) work. `build/intro.cmd` is **8 842 bytes, 650 OVER the 8 192 budget**, so features have
+pop) work. `build/intro.cmd` is **8 944 bytes, 752 OVER the 8 192 budget**, so features have
 to be cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
@@ -160,7 +160,20 @@ the show clock. Keys are `[t, angle, dist, camY, tgtY, simSpeed, ease]`:
   motion filled differently. The volume is now the state and the level its exact inverse
   (a cubic, solved in closed form). The top glass now takes ~6 s to fill at the default
   pour, which also means the first-draft timeline below and the measured drip rates in
-  *Sound* were timed against the wrong fill and have to be redone.
+  *Sound* were timed against the wrong fill and have to be redone (the sound once the
+  timeline settles).
+- **Drops resting on the bowl fell through it.** The bowl constraint put a drop's centre
+  exactly on the interior sphere, and float rounding then made about half of those test as
+  outside the next substep - unconstrained, so in an empty glass the stream ran straight
+  through the bottom for the first ~1/4 s (hidden before by the level jump, which absorbed
+  drops at the rim). The centre is now kept a drop radius inside, and in a nearly empty
+  glass a drop reaching the bottom is absorbed.
+- **The bottle glugs.** Air pushing in through the neck interrupts a real pour a few times a
+  second. The emission cadence offers twice the drops and keeps a share p that pulses on sim
+  time - 0.5 on average (the `pourRate` you set), swinging by `glug` (0.7) at about
+  `glugHz` (3.5), the frequency wandering. At `glug` 1 the drops in flight swing between
+  ~170 and ~1 130 against 520-690 steady; the fill rate is unchanged. The pour's bubble
+  sound pulses with the same function. `pourWander` is now 20 mm.
 
 The camera is driven from the table directly and only *mirrored* into the sliders for
 readout. Routing it through them would quantise it to the slider step, and `dist` steps by
@@ -737,10 +750,10 @@ from the release.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
 screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 8 842 bytes.
+`intro.cmd` is 8 944 bytes.
 
 Next:
-1. **Size** — 650 bytes over, before the score and any text. The puddle is cut (-362);
+1. **Size** — 752 bytes over, before the score and any text. The puddle is cut (-362);
    next candidates in *Feature cuts, measured*, and a packer search on the new shader.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
@@ -963,7 +976,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 842 bytes (25 Oct 2026), 650 OVER 8 192**: real slow motion, the exact
+**`intro.cmd` is 8 944 bytes (25 Oct 2026), 752 OVER 8 192**: the glugs and the bowl fix
+(+79), pourWander 20 (+23, a constant). Before that 8 842: real slow motion, the exact
 glass volume and a fade slot in the uniforms (+92). Before that 8 750, after cutting the bottle's
 punt (-12) and the table puddle (-362, measured with the old search state; 0.4 ms faster on heavy tier2). Before
 that: **9 132**, the breakdown below (7 967),
