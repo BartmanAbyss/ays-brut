@@ -97,6 +97,9 @@ struct U {
   glugHz   : f32,
   botAz    : f32,
   botOn    : f32,
+  bkBreath : f32,
+  bkSpeed  : f32,
+  bkLife   : f32,
   _w2      : f32,
 //#D}
 };
@@ -1131,12 +1134,26 @@ fn bokeh(rd: vec3f) -> vec3f {
   for (var i = -1; i <= 1; i++) {
     for (var k = -1; k <= 1; k++) {
       let id = b + vec2f(f32(i), f32(k));
-      let r  = rnd3(u32(i32(id.x) + 2048), u32(i32(id.y) + 2048), 17u);
+      let cx = u32(i32(id.x) + 2048);
+      let cy = u32(i32(id.y) + 2048);
+      var r  = rnd3(cx, cy, 17u);
+      var lf = 1.0;
+      // Each cell lives through cycles of bkLife seconds, phase-shifted per cell, and every
+      // cycle rolls it a new disc - or none - so discs fade out and come back elsewhere.
+      // Brightness fades over the first and last ~21% of a cycle (6f(1-f) reaches 1 there).
+      if (u.bkLife > 0.0) {
+        let lt = u.time / u.bkLife + rnd3(cx, cy, 5u).x;
+        r  = rnd3(cx, cy, 17u + u32(lt));
+        let f = fract(lt);
+        lf = min(6.0 * f * (1.0 - f), 1.0);
+      }
       if (r.z > 0.46) { continue; }
       let ctr = id + 0.5 + (r.xy - 0.5) * 0.7;
-      let rad = 0.11 + r.x * 0.15;
+      // breathing: each disc at its own rate and phase. The 3x3 neighbourhood holds a disc
+      // up to ~1.1 cells across, so the radius (0.26 at most) has room to grow 4x.
+      let rad = (0.11 + r.x * 0.15) * (1.0 + u.bkBreath * sin(u.time * u.bkSpeed * (0.7 + r.y * 0.6) + r.z * 13.7));
       let m   = smoothstep(rad, rad * 0.5, length(g - ctr));
-      acc += mix(vec3f(1.0, 0.66, 0.28), vec3f(0.50, 0.70, 1.0), r.y) * m * (0.45 + r.x * 2.2);
+      acc += mix(vec3f(1.0, 0.66, 0.28), vec3f(0.50, 0.70, 1.0), r.y) * m * (0.45 + r.x * 2.2) * lf;
     }
   }
   return acc * exp(-abs(el) * 1.9);
@@ -1802,7 +1819,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // det mode always leaves exactly one step pending - and re-shot the photons, so every
   // slider drag advanced the spill and nudged the caustics. A/B on one frame was impossible.
   let redrawOnly = false;
-  const f32 = new Float32Array(48);
+  const f32 = new Float32Array(52);
   const t0 = performance.now();
   let last = t0, acc = 0, accN = 0, frameNo = 0, ffSteps = 0;
 
@@ -1846,7 +1863,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0], 21);
+             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife], 21);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
@@ -2220,6 +2237,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['lightEl',  'range', 45.6, -30,  85,  0.5,  1],
     ['tableY',   'range', 0,    0,    0.34, 0.005,3],
     ['envAmt',   'range', 1,    0,    1,    0.01, 2],
+    ['bkBreath', 'range', 0.25, 0,    1,    0.01, 2],
+    ['bkSpeed',  'range', 0.5,  0,    3,    0.05, 2],
+    ['bkLife',   'range', 9,    0,    30,   0.5,  1],
     ['gridEnv',  'check', false],
     ['rtrace',   'range', 1,    0,    2,    1,    0],
     ['drops',    'check', true],
@@ -2311,6 +2331,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     camY: 'Camera height above the table, in metres. The tower is 0.51 m tall.',
     tgtY: 'Height the camera aims at, in metres. 0.26 is mid-tower, 0.48 is the top glass.',
     lightAz: 'Key light azimuth in degrees: swings the light around the tower. Moves the specular, the shadows and the caustics together.',
+    bkBreath: 'How much the background bokeh discs breathe: their radius swings by this share. 0 = fixed size.',
+    bkSpeed: 'Breathing rate in rad/s (each disc 0.7-1.3x of it, with its own phase). 0.5 is a ~12 s breath.',
+    bkLife: 'Seconds each bokeh disc lives: it fades in, holds, fades out, and its cell rolls a new disc elsewhere (or none). 0 = static discs, as before.',
     envAmt: 'Environment brightness: the sky, the fill lights, the softbox seen in the glass, the haze and the table ambient. 0 leaves only what the key light lights through the photon map. A timeline column: shot 1 brings it up with the light.',
     tableY: 'Table height in m. Raised to a tier\'s base (0.17 = tier 2, 0.34 = the top glass) it hides the tiers below: the glasses stand on the table. Drops reaching it end there, so hidden tiers get no spill.',
     lightEl: 'Key light elevation in degrees above the horizon. Low is raking and dramatic, high is overhead.',

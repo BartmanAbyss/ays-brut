@@ -7,7 +7,7 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (PADsynth pad, reverbs, liquid sounds, cork
-pop) work. `build/intro.cmd` is **9 264 bytes, 1 072 OVER the 8 192 budget**, so features have
+pop) work. `build/intro.cmd` is **9 313 bytes, 1 121 OVER the 8 192 budget**, so features have
 to be cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
@@ -784,10 +784,10 @@ from the release.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
 screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 9 264 bytes.
+`intro.cmd` is 9 313 bytes.
 
 Next:
-1. **Size** — 1 072 bytes over, before the score and any text. The puddle is cut (-362);
+1. **Size** — 1 121 bytes over, before the score and any text. The puddle is cut (-362);
    next candidates in *Feature cuts, measured*, and a packer search on the new shader.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
@@ -1010,7 +1010,12 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 264 bytes (26 Oct 2026), 1 072 OVER 8 192**: the environment's
+**`intro.cmd` is 9 313 bytes (26 Oct 2026), 1 121 OVER 8 192**: the bokeh animates (+49) -
+each disc breathes at its own rate (`bkBreath`, `bkSpeed`), and every `bkLife` seconds,
+phase-shifted per cell, a cell fades its disc out and rolls a new one, or none, so the lights
+drift around the room. It runs on the show clock, so it keeps real time through slow motion,
+and costs nothing measurable: the environment is only sampled where rays leave the scene.
+`bkLife` 0 gives the old static discs. Before that 9 264: the environment's
 brightness as a timeline column (+56). Before that 9 208: the table height as a
 timeline column, with the photons and drops following it (+81). Before that 9 127: the new
 timeline - four more
@@ -1131,7 +1136,7 @@ against the packer's default state, before the core pass above (the puddle's sha
 | photon lighting -> analytic spot | 589 | the lit disc stays; the tower's shadow and the caustic glints go |
 | waves + foam | 447 | every champagne surface becomes a flat mirror |
 | bottle removed | 355 | the stream pours out of thin air |
-| bokeh lights | 176 | the light discs behind the tower and their reflections go |
+| bokeh lights | ~225 | the light discs behind the tower and their reflections go (176 static, +49 animated) |
 | bottle, plain profile | 168 | no lip, punt, neck taper or heel bevel; hard to see at pouring distance |
 | foam only | 134 | subtle: the cream texture calms |
 | bubbles | 80 | not visible at tier2 distance |
@@ -1179,7 +1184,7 @@ slight underestimates):
 | caustics (photon pass, map) | 410+ | | `photons` | 270 |
 | spray far field (seed, flood, pack) | 330 | | `scatterFine` | 240 |
 | waves + foam | 320 | | `waveUpdate` | 220 |
-| bokeh | 180 | | `sdCoupe` | 220 |
+| bokeh (animated) | ~230 | | `sdCoupe` | 220 |
 | reflection trace | 100 | | `liquidDist` | 180 |
 | glass overflow | 100 | | `env` | 130 |
 | bubbles | 90 | | | |
