@@ -12,6 +12,8 @@ Out:  build/intro.cmd    the deliverable: a dropper that serves its own brotli p
 import io, math, os, re, struct, subprocess, sys, zlib
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, ROOT)      # build/timeline.py, also under python -I
+import timeline  # noqa: E402
 SRC = os.path.join(ROOT, '..', 'dev', 'champagne.html')
 OUT = os.path.join(ROOT, 'intro.html')
 
@@ -528,6 +530,10 @@ def prepare(verbose=False):
     ui.update(UI_OVERRIDE)
 
     say('source           wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
+    # the shot table is harness-side; the release gets it flattened into one key list
+    js, warn = timeline.emit_release(js)
+    for w in warn:
+        print('WARNING: per-shot slider values are harness-only, not in this build - ' + w)
     wgsl, js = cut_dev(wgsl), cut_dev(js)
     say('harness stripped wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
     js = strip_js(js, ui)

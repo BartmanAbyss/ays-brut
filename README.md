@@ -26,11 +26,13 @@ precisely so `file://` works — a `file://` page has an opaque origin and canno
 own siblings.
 
 To drive it from a tool that can't open local files (the Claude browser pane, for example),
-serve it instead:
+or to use the timeline editor's save, serve it instead:
 
 ```bash
-python -m http.server 8787 --bind 127.0.0.1
+python dev/serve.py
 ```
+
+That is `python -m http.server` on 127.0.0.1:8787 plus the editor's save (below).
 
 Requires a browser with WebGPU: Chrome, Edge and Firefox all run both the harness and the
 release (*Browsers*, below). Developed against an **RTX 4070**.
@@ -135,9 +137,15 @@ need — `?still=1&warm=300` lands on `t = 5.0000` exactly.
 
 ### The timeline
 
-`?show=1` hands the camera and the simulation speed to a keyframe table, `SHOW`, driven by
-the show clock. Keys are `[t, angle, dist, camY, tgtY, simSpeed, ease, fade, light, pour,
-tilt]`:
+`?show=1` hands the camera and the simulation speed to the timeline, driven by the show
+clock. It is a list of **shots** (`SHOTS`, between `// SHOTS:BEGIN` and `// SHOTS:END`),
+each with a name, a length, its own keys from t = 0 to t = its length, and optionally a
+fade length (`fade`) and its own values for a few look sliders (`ov`). `flattenShots()` lays
+them end to end into `SHOW`, the key list the show reads; a shot whose first key repeats the
+previous shot's last one runs on from it without a cut. The build does the same flattening
+in Python (`build/timeline.py`), so the release ships the key list it always did; a shot's
+`fade` and `ov` are harness-only for now and the build says so when it leaves them out.
+Keys are `[t, angle, dist, camY, tgtY, simSpeed, ease, fade, light, pour, tilt, table, env]`:
 
 - **`fade`**: 0 black .. 1 full; every shot fades in and out.
 - **`light`**: the key light's elevation in degrees; below 0 it is under the table, which
@@ -224,6 +232,57 @@ a few seconds. It is representative, not bit-identical: spill azimuths differ by
 | 61.75 - 64.25 | 7. to be decided; for now the whole tower, wide | tier 3 about half full |
 
 The sound has not been re-timed to it yet (the drip rates still follow the old measurement).
+
+#### The timeline editor (`?edit=1`)
+
+`python dev/serve.py`, then http://localhost:8787/champagne.html?edit=1. No sound is rendered
+in the editor at all, and the show is on.
+
+- **The strip** at the bottom: every shot end to end, each as wide as it is long. Click one
+  to select it and jump to its start; ctrl- or shift-click to add to the selection. `*`
+  marks a shot that differs from what was last saved; hover for its times, fade and values.
+- **len** sets the selected shot's length in seconds; **scale** / **-10%** / **+10%** stretch
+  every selected shot, keys and all. The shots after it move; the playhead stays on the same
+  moment of the shot. **fade** sets the selected shot's fade in and out, in seconds (the same
+  at both ends, whatever its length; 0 cuts hard; empty: its keys' fade, as before).
+- **loop** plays the selection over and over. The simulation's state at a shot's first frame
+  is kept on the GPU (~20 MB a shot, the last four), so each pass, and each jump back to a
+  shot, starts there at once instead of replaying the show from 0. It is replayed only when
+  something it depends on has changed: an earlier shot, or a global that changes the
+  simulation (`ED.SIM`).
+- **rec**: slider moves go into the shot under the playhead. The timeline's own sliders
+  (angle, dist, camY, tgtY, lightEl, botTilt, tableY, envAmt) shift all of that shot's keys
+  by the move, so a camera move keeps its shape; the look sliders a shot may set for itself
+  (lightAz, expo, cgain, shutter, bkBreath, bkSpeed, bkLife - `ED.PER_SHOT`) become the shot's
+  own values. Everything else is global, rec or not: anything that changes the simulation
+  would make a shot's start depend on the shots before it, and the debug switches are not
+  looks. With rec off, the timeline still drives its own sliders.
+- **Marks**: a slider's label is blue when its keys in this shot differ from the saved ones,
+  red when the shot sets its own value, yellow when its global value is not the default
+  (`?param=` values count). The ↺ at the end of a marked row puts it back.
+- **undo / redo**: every change, sliders included - buttons, ctrl+z, ctrl+y or ctrl+shift+z.
+- **save** writes the shots and every global you changed (not those that only came from the
+  URL) into `dev/champagne.html`: the shot block, and each slider's default in `SPEC`. Commit
+  it like any edit. Under a server without the save (`python -m http.server`) it downloads
+  `timeline.json` instead; `python dev/serve.py --apply timeline.json` writes that in.
+
+Going back in time no longer reloads the page anywhere in the harness: it rewinds in place,
+as the rewind button does (with `?gate=1` it still reloads, the show running on the audio
+clock).
+
+Tests:
+
+```bash
+node --test "dev/tests/*.test.mjs"
+python -m unittest discover -s dev/tests -p "test_*.py"
+```
+
+The first runs the editor's logic (pure functions, loaded straight out of the harness) and
+checks its flattening against `build/timeline.py` bit for bit; the second the shot table's
+reading and writing and the save server, on a copy of the file. The UI itself is tested in
+the page: `?edit=1&edtest=1&det=1` clicks, drags, loops and saves (a dry run - the file is
+never written) and leaves `EDTEST PASS` in the console and `__probe().edtest`; the pane has
+to be on screen.
 
 ### Sound
 

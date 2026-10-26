@@ -12,11 +12,15 @@ To see it yourself you need localhost; the browser pane turns `file://` into a s
 snapshot and `data:` URLs have no `navigator.gpu`:
 
 ```bash
-python -m http.server 8787 --bind 127.0.0.1
+python dev/serve.py
 ```
 
-Then navigate to `http://localhost:8787/champagne.html?...`, read `window.__probe()` for
-numbers and errors, and screenshot for the look.
+(`http.server` on 127.0.0.1:8787 plus the timeline editor's save.) Then navigate to
+`http://localhost:8787/champagne.html?...`, read `window.__probe()` for numbers and errors,
+and screenshot for the look. The timeline editor is `?edit=1` (README, *The timeline
+editor*); the user tunes the timeline there and SAVES INTO `dev/champagne.html` - so the
+shot block and slider defaults can change under you between turns. Re-read before editing
+them, and never assume your last version is the current one.
 
 **Force a paint before reading the probe.** The pane pauses `requestAnimationFrame` when it
 isn't painting, so a probe read without a preceding screenshot returns stale zeros. This has
@@ -32,6 +36,10 @@ A link beats a description when comparing before/after.
 ## Verifying
 
 - `?selftest=1` — assertions, logs PASS/FAIL.
+- The timeline editor has tests at three levels; run all three after touching it:
+  `node --test "dev/tests/*.test.mjs"` (its logic), `python -m unittest discover -s dev/tests
+  -p "test_*.py"` (shot table, save server), and `?edit=1&edtest=1&det=1` in the pane
+  (`__probe().edtest`; the pane must be on screen, or no frames run).
 - `?det=1` (implied by `?still=1`) makes frame N always step N, so a run is reproducible
   on any machine. Use it for any A/B: without it the two sides see different sim states.
 - `?show=1&showt=<s>&pause=1` lands on an exact show frame for judging a shot. Without

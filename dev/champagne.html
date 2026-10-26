@@ -33,6 +33,38 @@
   #pause:hover { background:#2a2a32; }
   #rewind { position:fixed; top:8px; right:226px; padding:6px 10px; background:#1b1b20; color:#ddd;
            border:1px solid #444; border-radius:4px; font:12px ui-monospace,Consolas,monospace; cursor:pointer; }
+  /* the timeline editor (?edit=1) */
+  body.edit #uia { display:none; }
+  body.edit #ui { width:236px; max-height:calc(100vh - 150px); }
+  #ui .row .rst { visibility:hidden; flex:none; width:18px; padding:0; background:#1b1b20; color:#ddd;
+        border:1px solid #444; border-radius:3px; font:11px ui-monospace,Consolas,monospace; cursor:pointer; }
+  #ui .row[data-chg=key] label { color:#6bd0ff; }
+  #ui .row[data-chg=shot] label { color:#ff8080; }
+  #ui .row[data-chg=global] label { color:#ffcf6b; }
+  #ui .row[data-chg=key] .rst, #ui .row[data-chg=shot] .rst, #ui .row[data-chg=global] .rst { visibility:visible; }
+  #ui .row[data-rec='1'] { box-shadow:inset 3px 0 #e33; padding-left:4px; }
+  #tl { position:fixed; left:8px; right:262px; bottom:8px; padding:6px 8px; background:#000c;
+        border:1px solid #333; border-radius:4px; z-index:3; font:11px ui-monospace,Consolas,monospace; }
+  #tl .bar { position:relative; display:flex; height:36px; }
+  #tl .shot { flex:none; box-sizing:border-box; height:100%; padding:3px 4px; overflow:hidden;
+        white-space:nowrap; background:#1b1b26; border:1px solid #3a3a48; color:#9ab; cursor:pointer; }
+  #tl .shot.black { background:#0b0b0e; color:#667; }
+  #tl .shot.cur { color:#fff; }
+  #tl .shot.sel { border-color:#ffcf6b; background:#2c2716; }
+  #tl .shot.mod::after { content:' *'; color:#ff8080; }
+  #tl .ph { position:absolute; top:-2px; bottom:-2px; width:2px; background:#ff4d4d; pointer-events:none; }
+  #tl .span { position:absolute; top:0; bottom:0; border:1px solid #6bd0ff; background:#6bd0ff1a;
+        pointer-events:none; display:none; }
+  #tl .tools { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-top:6px; color:#9ab; }
+  #tl button { padding:3px 8px; background:#1b1b20; color:#ddd; border:1px solid #444; border-radius:3px;
+        font:11px ui-monospace,Consolas,monospace; cursor:pointer; }
+  #tl button:disabled { opacity:.4; cursor:default; }
+  #tl button.on { background:#6a1f1f; border-color:#e33; color:#fff; }
+  #tl button.lp.on { background:#17384a; border-color:#6bd0ff; }
+  #tl input { width:52px; background:#111; color:#ffcf6b; border:1px solid #444; border-radius:3px;
+        font:11px ui-monospace,Consolas,monospace; padding:2px 3px; }
+  #tl .msg { flex:1; min-width:120px; color:#ffcf6b; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  #tl .key { color:#667; }
   #err { position:fixed; left:8px; bottom:8px; right:8px; max-height:45vh; overflow:auto;
          padding:8px 10px; background:#2a0b0bdd; border:1px solid #833; border-radius:4px;
          white-space:pre-wrap; display:none; }
@@ -1583,7 +1615,11 @@ const cfg = {
   det:      Q.get('det') === '1' || Q.get('still') === '1',   // frame N is always step N
   show:     Q.get('show') === '1',     // run the timeline instead of the manual camera
   showt:    qf('showt', 0),            // seek here on load (how a backward scrub works)
-  gate:     Q.get('gate') === '1',     // the release's start screen: click, fullscreen, audio clock
+  edit:     Q.get('edit') === '1',     // the timeline editor: no sound, the show on, a shot strip
+  edtest:   Q.get('edtest') === '1',   // with edit: run the editor's in-browser tests
+  // the release's start screen: click, fullscreen, audio clock. Never in the editor: it
+  // renders no audio at all
+  gate:     Q.get('gate') === '1' && Q.get('edit') !== '1',
   tick:     Q.get('tick') === '1',     // with gate: a click every half second, to check sync
   testPad:  Q.get('testpad') === '1',  // one plain held chord, to judge the pad's timbre by
   fs:       Q.get('fs') === '1',       // with gate: go fullscreen at the click, as the release does
@@ -1608,7 +1644,7 @@ function fail(where, e) {
 
 const probe = {
   ok: false, adapter: null, features: [], errors,
-  frameMs: 0, fps: 0, gpuMs: {}, frames: 0, time: 0, live: 0, selftest: null,
+  frameMs: 0, fps: 0, gpuMs: {}, frames: 0, time: 0, live: 0, selftest: null, edtest: null,
   drift: 0, resyncs: 0, step: 0, showT: 0, shot: 0, frameSteps: 1, streakMM: 0,
 };
 window.__probe = () => JSON.parse(JSON.stringify(probe));
@@ -1827,6 +1863,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // seek that ran the whole sim in one frame poured from t = 0 with the target's values.
   // previewT: the scrub slider being dragged - the camera follows, the sim waits.
   let seekTo = -1, previewT = -1;
+  let ed = null;               // the timeline editor, with ?edit=1
 //#D}
   // Sim time simulated so far, in 1/60 s units. A step is 1 unit, or less in slow motion
   // (see frame()), so this is not a step count.
@@ -1853,6 +1890,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       ang = sh.angle / 57.3; dist = sh.dist; camY = sh.camY; tgtY = sh.tgtY;   // deg -> rad, 0.007% off: -6 bytes
       fade = sh.fade; el = sh.el; pour = sh.pour; tilt = sh.tilt; ty = sh.tableY; en = sh.env;
 //#D{
+      // a shot's own fade length (harness-only for now) replaces its keyed fade
+      { const f = ED.fadeAt(ed ? ed.st.shots : SHOTS, previewT >= 0 ? previewT : showT); if (f !== null) fade = f; }
+      probe.fade = fade;
       setUI('lightEl', el.toFixed(1)); setUI('botTilt', tilt.toFixed(0)); setUI('tableY', ty.toFixed(3)); setUI('envAmt', en.toFixed(2));
 //#D}
       // Sliders follow for readout only. Driving the camera THROUGH them would quantise it
@@ -1981,6 +2021,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       clockT += SIM_DT * sp * ui.simSpeed;
     }
     showStep += nShow; showT = showStep * SIM_DT;
+//#D{
+    if (ed) ed.onShow();         // loop wrap, the shot's own slider values, the playhead
+//#D}
     if (ui.show && nShow) { setUI('showT', Math.min(showT, SHOW_END).toFixed(2)); }
     // Fast-forward is a deliberate burst, not a hitch: it has to actually simulate its
     // steps or the glasses never fill, so it raises the ceiling for this frame only. The
@@ -2099,6 +2142,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 
     if (!cfg.fs) resize();   // the pane can be shown or resized without firing a resize event
     frameNo++; simU += simSteps * hu; probe.frames = frameNo; probe.ok = true;
+//#D{
+    if (ed) ed.afterFrame();     // keeps the simulation's state at a shot's first frame
+//#D}
     const dt = now - last; last = now;
     acc += dt; accN++;
     if (acc > 400) { probe.frameMs = acc / accN; probe.fps = 1000 / probe.frameMs; acc = 0; accN = 0; updateHud(); }
@@ -2141,7 +2187,155 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   }
 
   //#D}
+  //#D{
+  // EDITOR-MODEL:BEGIN - the timeline editor's logic as pure functions: no DOM, no page
+  // state, every edit returns a new value. dev/tests/editor.test.mjs loads this block.
+  const ED = (() => {
+    const r6 = x => Math.round(x * 1e6) / 1e6;   // build/timeline.py r6, bit for bit
+    const clone = v => JSON.parse(JSON.stringify(v));
+    // the sliders the timeline drives, and their key column (build/timeline.py SLIDER_COL)
+    const COL = { angle: 1, dist: 2, camY: 3, tgtY: 4, lightEl: 8, botTilt: 10, tableY: 11, envAmt: 12 };
+    // the other sliders a shot may set for itself (build/timeline.py PER_SHOT): looks only.
+    // Anything that changes the simulation stays global, or a shot's start would depend on
+    // what the shots before it set; the debug switches are not looks.
+    const PER_SHOT = ['lightAz', 'expo', 'cgain', 'shutter', 'bkBreath', 'bkSpeed', 'bkLife'];
+    // the globals the simulation depends on: a loop's saved start state is stale once one moves
+    const SIM = ['autofill', 'fill', 'pourRate', 'dropVol', 'dropRad', 'foam', 'glug', 'glugHz',
+                 'bottle', 'botAz', 'pourWander', 'wanderSpd', 'simSpeed', 'waves'];
+    // shot start times, plus the end of the show: n + 1 entries
+    const starts = shots => { const a = [0]; for (const s of shots) a.push(r6(a[a.length - 1] + s.dur)); return a; };
+    // the shots end to end, as SHOW: a key repeating the one before it exactly is dropped
+    function flatten(shots) {
+      const out = [];
+      let t0 = 0;
+      for (const s of shots) {
+        for (const k of s.keys) {
+          const row = [r6(t0 + k[0]), ...k.slice(1)];
+          const p = out[out.length - 1];
+          if (!(p && row.every((v, j) => v === p[j]))) out.push(row);
+        }
+        t0 = r6(t0 + s.dur);
+      }
+      return out;
+    }
+    // the shot playing at t; on a boundary, the one starting there (a cut: the later wins)
+    function shotAt(shots, t) {
+      const st = starts(shots);
+      let i = 0;
+      while (i < shots.length - 1 && t >= st[i + 1]) i++;
+      return i;
+    }
+    // stretch shots by f, their keys with them; nothing else moves but what comes after
+    function scale(shots, idx, f) {
+      if (!(f > 0) || !isFinite(f)) throw new Error('scale factor must be a positive number');
+      const s = clone(shots);
+      for (const i of new Set(idx)) {
+        const sh = s[i], d = Math.max(0.05, r6(sh.dur * f));
+        const g = d / sh.dur;
+        for (const k of sh.keys) k[0] = r6(k[0] * g);
+        sh.dur = d; sh.keys[sh.keys.length - 1][0] = d;
+      }
+      return s;
+    }
+    const setDur = (shots, i, d) => scale(shots, [i], d / shots[i].dur);
+    // where a moment of the old timeline lands in the new one, for keeping the playhead
+    // on the same frame of a shot while it is stretched
+    function mapTime(before, after, t) {
+      const a = starts(before), b = starts(after), i = shotAt(before, t);
+      const u = Math.min(1, Math.max(0, (t - a[i]) / before[i].dur));
+      return r6(b[i] + u * after[i].dur);
+    }
+    function shiftColumn(shots, i, col, delta) {
+      const s = clone(shots);
+      for (const k of s[i].keys) k[col] = r6(k[col] + delta);
+      return s;
+    }
+    function resetColumn(shots, saved, i, col) {
+      const s = clone(shots);
+      s[i].keys.forEach((k, j) => { const b = saved[i] && saved[i].keys[j]; if (b) k[col] = b[col]; });
+      return s;
+    }
+    const columnChanged = (shots, saved, i, col) => !saved[i] ||
+      shots[i].keys.length !== saved[i].keys.length ||
+      shots[i].keys.some((k, j) => k[col] !== saved[i].keys[j][col]);
+    function setOverride(shots, i, k, v) {
+      if (!PER_SHOT.includes(k)) throw new Error(k + ' is a global slider: a shot cannot set it');
+      const s = clone(shots);
+      s[i].ov = { ...(s[i].ov || {}), [k]: v };
+      return s;
+    }
+    function clearOverride(shots, i, k) {
+      const s = clone(shots);
+      if (s[i].ov) delete s[i].ov[k];
+      return s;
+    }
+    // a shot's own fade: in from its start and out to its end over `fade` seconds, whatever
+    // its length. null: the shot has none, and its keys' fade column applies as before
+    function fadeAt(shots, t) {
+      const i = shotAt(shots, t), s = shots[i];
+      if (s.fade === undefined) return null;
+      if (!(s.fade > 0)) return 1;
+      const u = t - starts(shots)[i];
+      return Math.min(1, Math.max(0, Math.min(u, s.dur - u) / s.fade));
+    }
+    function setFade(shots, i, f) {
+      const s = clone(shots);
+      if (f === null || f === undefined) delete s[i].fade;
+      else {
+        if (!(f >= 0) || !isFinite(f)) throw new Error('a fade is a number of seconds, 0 or more');
+        s[i].fade = r6(f);
+      }
+      return s;
+    }
+    const effective = (shots, i, globals, k) =>
+      shots[i].ov && k in shots[i].ov ? shots[i].ov[k] : globals[k];
+    // why a slider row is marked: 'key' - its column in this shot is not what was saved;
+    // 'shot' - this shot sets it; 'global' - its global value is not the default; '' - none
+    function status(st, saved, defaults, i, k) {
+      if (k in COL) return columnChanged(st.shots, saved, i, COL[k]) ? 'key' : '';
+      if (st.shots[i].ov && k in st.shots[i].ov) return 'shot';
+      return st.globals[k] !== defaults[k] ? 'global' : '';
+    }
+    const shotChanged = (shots, saved, i) => JSON.stringify(shots[i]) !== JSON.stringify(saved[i]);
+    // what a shot's start state depends on: every shot before it, and the simulation's globals
+    const signature = (shots, i, globals) => JSON.stringify([shots.slice(0, i), SIM.map(k => globals[k])]);
+    // the span a loop plays: from the first selected shot's start to the last one's end
+    function loopSpan(shots, sel) {
+      const st = starts(shots);
+      return [st[Math.min(...sel)], st[Math.max(...sel) + 1]];
+    }
+    // undo/redo as two stacks of whole states; push() takes the state from BEFORE a change
+    function history(limit = 500) {
+      const u = [], r = [];
+      return {
+        push(prev) { u.push(clone(prev)); if (u.length > limit) u.shift(); r.length = 0; },
+        undo(cur) { if (!u.length) return null; r.push(clone(cur)); return u.pop(); },
+        redo(cur) { if (!r.length) return null; u.push(clone(cur)); return r.pop(); },
+        get canUndo() { return u.length > 0; },
+        get canRedo() { return r.length > 0; },
+      };
+    }
+    // what save sends: the shots, and each global changed in the editor that is no longer
+    // its default (a value that only came from the URL is not saved)
+    function savePayload(st, defaults) {
+      const globals = {};
+      for (const k of st.touched) if (st.globals[k] !== defaults[k]) globals[k] = st.globals[k];
+      return { shots: clone(st.shots), globals };
+    }
+    return { r6, clone, COL, PER_SHOT, SIM, starts, flatten, shotAt, scale, setDur, mapTime,
+             shiftColumn, resetColumn, columnChanged, setOverride, clearOverride, effective,
+             fadeAt, setFade,
+             status, shotChanged, signature, loopSpan, history, savePayload };
+  })();
+  // EDITOR-MODEL:END
+  function flattenShots(shots) { return ED.flatten(shots); }
+  //#D}
   // ── timeline ──
+  // The timeline is a list of SHOTS, each owning its keys from t = 0 to t = dur (times
+  // within the shot). flattenShots() lays them end to end into SHOW, the key list evalShow
+  // reads; a shot whose first key repeats the previous shot's last one runs on from it
+  // without a cut. ov: the shot's own values for the few look sliders a shot may set
+  // (the editor's PER_SHOT) - harness-only for now.
   // Keys are [t, angle deg, dist, camY, tgtY, simSpeed, ease, fade, light elevation deg,
   // pour, bottle tilt deg, table height m, environment brightness]. Two keys sharing a t are a CUT: the later one wins at that
   // instant, so the change is immediate rather than a one-frame blend. `ease` applies to
@@ -2162,50 +2356,88 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // from under the table; 2 an orbit round it; 3 black, the cork pops (popT); 4 the pour
   // in slow motion, the glass filling; 5 an orbit of the tower; 6 tier 2 in slow motion;
   // 7 to be decided.
-  const SHOW = [
-    // 1 - the top glass alone on the table, the light rising from below it
-    [    0.0,  20, 0.300, 0.420, 0.410, 1,    0, 0,  -25, 0,   0, 0.341, 0],
-    [    3.0,  25, 0.290, 0.420, 0.410, 1,    0, 1,   -5, 0,   0, 0.341, 0.1],
-    [  11.25,  40, 0.270, 0.430, 0.415, 1,    0, 1, 45.6, 0,   0, 0.341, 1],
-    [  12.75,  43, 0.265, 0.430, 0.415, 1,    0, 0, 45.6, 0,   0, 0.341, 1],
-    // 2 - an orbit round it
-    [  12.75,  60, 0.320, 0.540, 0.440, 1,    0, 0, 45.6, 0,   0, 0.341, 1],
-    [  13.75,  82, 0.320, 0.540, 0.440, 1,    0, 1, 45.6, 0,   0, 0.341, 1],
-    [ 20.25, 225, 0.300, 0.520, 0.440, 1,    0, 1, 45.6, 0,   0, 0.341, 1],
-    [ 21.25, 247, 0.300, 0.520, 0.440, 1,    0, 0, 45.6, 0,   0, 0.341, 1],
-    // 3 - black; the cork pops at popT (22.05)
-    [ 23.75,  39, 0.190, 0.530, 0.480, 0.25, 0, 0, 45.6, 0,  95, 0.341, 1],
-    // 4 - the pour in slow motion: the bottle tips in, the flow starts, the glass fills
-    [ 24.25,  40, 0.190, 0.530, 0.480, 0.25, 1, 1, 45.6, 0, 112, 0.341, 1],
-    [ 24.65,  41, 0.188, 0.530, 0.480, 0.25, 0, 1, 45.6, 1, 118, 0.341, 1],
-    [ 30.25,  52, 0.180, 0.530, 0.480, 0.25, 1, 1, 45.6, 1, 118, 0.341, 1],
-    [ 34.75,  62, 0.180, 0.550, 0.490, 1,    0, 1, 45.6, 1, 118, 0.341, 1],
-    [ 35.75,  65, 0.180, 0.550, 0.490, 1,    0, 0, 45.6, 1, 118, 0.341, 1],
-    // black: the table drops to tier 2; the sim runs 8x, the top glass overflows into it
-    [ 35.75,  65, 0.180, 0.550, 0.490, 8,    0, 0, 45.6, 1, 118, 0.171, 1],
-    [ 37.25, 300, 0.620, 0.520, 0.330, 8,    0, 0, 45.6, 1, 118, 0.171, 1],
-    // 5 - an orbit of the two tiers
-    [ 37.25, 300, 0.620, 0.520, 0.330, 1.5,  0, 0, 45.6, 1, 118, 0.171, 1],
-    [ 38.25, 310, 0.610, 0.520, 0.330, 1.5,  0, 1, 45.6, 1, 118, 0.171, 1],
-    [ 46.75, 400, 0.560, 0.500, 0.330, 1.5,  0, 1, 45.6, 1, 118, 0.171, 1],
-    [ 47.75, 412, 0.555, 0.500, 0.330, 1.5,  0, 0, 45.6, 1, 118, 0.171, 1],
-    // black: 8x again, tier 2 fills to overflowing
-    [ 47.75, 412, 0.555, 0.500, 0.330, 8,    0, 0, 45.6, 1, 118, 0.171, 1],
-    [ 49.25,  39, 0.260, 0.400, 0.300, 8,    0, 0, 45.6, 1, 118, 0.171, 1],
-    // 6 - tier 2 in slow motion, spilling onto the table
-    [ 49.25,  39, 0.260, 0.400, 0.300, 0.25, 0, 0, 45.6, 1, 118, 0.171, 1],
-    [ 50.25,  42, 0.258, 0.400, 0.300, 0.25, 0, 1, 45.6, 1, 118, 0.171, 1],
-    [ 59.25,  60, 0.250, 0.390, 0.300, 0.25, 0, 1, 45.6, 1, 118, 0.171, 1],
-    [ 60.25,  62, 0.250, 0.390, 0.300, 0.25, 0, 0, 45.6, 1, 118, 0.171, 1],
-    // black: the table drops to the floor, tier 3 starts to fill (8x)
-    [ 60.25,  62, 0.250, 0.390, 0.300, 8,    0, 0, 45.6, 1, 118, 0, 1],
-    [ 61.75, 200, 1.000, 0.620, 0.280, 8,    0, 0, 45.6, 1, 118, 0, 1],
-    // 7 - to be decided; for now the whole tower, wide
-    [ 61.75, 200, 1.000, 0.620, 0.280, 1,    0, 0, 45.6, 1, 118, 0, 1],
-    [ 62.75, 208, 0.980, 0.610, 0.280, 1,    0, 1, 45.6, 1, 118, 0, 1],
-    [ 64.25, 216, 0.960, 0.600, 0.280, 1,    0, 1, 45.6, 1, 118, 0, 1],
+//#D{
+  // SHOTS:BEGIN - written back by the timeline editor's save (?edit=1); hand edits are fine,
+  // keep the format: build/timeline.py reads it.
+  const SHOTS = [
+    { name: '1 glass', dur: 12.75, ov: {},
+      note: 'the top glass alone on the table, dark; the light rises from below it',
+      keys: [
+        [    0,  20,   0.3, 0.42,  0.41,    1, 0, 0,  -25, 0,   0, 0.341,   0],
+        [    3,  25,  0.29, 0.42,  0.41,    1, 0, 1,   -5, 0,   0, 0.341, 0.1],
+        [11.25,  40,  0.27, 0.43, 0.415,    1, 0, 1, 45.6, 0,   0, 0.341,   1],
+        [12.75,  43, 0.265, 0.43, 0.415,    1, 0, 0, 45.6, 0,   0, 0.341,   1],
+      ] },
+    { name: '2 orbit', dur: 8.5, ov: {},
+      note: 'an orbit round it',
+      keys: [
+        [    0,  60,  0.32, 0.54,  0.44,    1, 0, 0, 45.6, 0,   0, 0.341,   1],
+        [    1,  82,  0.32, 0.54,  0.44,    1, 0, 1, 45.6, 0,   0, 0.341,   1],
+        [  7.5, 225,   0.3, 0.52,  0.44,    1, 0, 1, 45.6, 0,   0, 0.341,   1],
+        [  8.5, 247,   0.3, 0.52,  0.44,    1, 0, 0, 45.6, 0,   0, 0.341,   1],
+      ] },
+    { name: '3 pop', dur: 2.5, ov: {},
+      note: 'black; the cork pops at popT. The bottle tips in, unseen',
+      keys: [
+        [    0, 247,   0.3, 0.52,  0.44,    1, 0, 0, 45.6, 0,   0, 0.341,   1],
+        [  2.5,  39,  0.19, 0.53,  0.48, 0.25, 0, 0, 45.6, 0,  95, 0.341,   1],
+      ] },
+    { name: '4 pour', dur: 12, ov: {},
+      note: 'the pour in slow motion: the bottle tips in, the flow starts, the glass fills',
+      keys: [
+        [    0,  39,  0.19, 0.53,  0.48, 0.25, 0, 0, 45.6, 0,  95, 0.341,   1],
+        [  0.5,  40,  0.19, 0.53,  0.48, 0.25, 1, 1, 45.6, 0, 112, 0.341,   1],
+        [  0.9,  41, 0.188, 0.53,  0.48, 0.25, 0, 1, 45.6, 1, 118, 0.341,   1],
+        [  6.5,  52,  0.18, 0.53,  0.48, 0.25, 1, 1, 45.6, 1, 118, 0.341,   1],
+        [   11,  62,  0.18, 0.55,  0.49,    1, 0, 1, 45.6, 1, 118, 0.341,   1],
+        [   12,  65,  0.18, 0.55,  0.49,    1, 0, 0, 45.6, 1, 118, 0.341,   1],
+      ] },
+    { name: 'black', dur: 1.5, ov: {},
+      note: 'the table drops to tier 2; the sim runs 8x, the top glass overflows into it',
+      keys: [
+        [    0,  65,  0.18, 0.55,  0.49,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [  1.5, 300,  0.62, 0.52,  0.33,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
+      ] },
+    { name: '5 tiers', dur: 10.5, ov: {},
+      note: 'an orbit of the two tiers',
+      keys: [
+        [    0, 300,  0.62, 0.52,  0.33,  1.5, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [    1, 310,  0.61, 0.52,  0.33,  1.5, 0, 1, 45.6, 1, 118, 0.171,   1],
+        [  9.5, 400,  0.56,  0.5,  0.33,  1.5, 0, 1, 45.6, 1, 118, 0.171,   1],
+        [ 10.5, 412, 0.555,  0.5,  0.33,  1.5, 0, 0, 45.6, 1, 118, 0.171,   1],
+      ] },
+    { name: 'black', dur: 1.5, ov: {},
+      note: '8x again, tier 2 fills to overflowing',
+      keys: [
+        [    0, 412, 0.555,  0.5,  0.33,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [  1.5,  39,  0.26,  0.4,   0.3,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
+      ] },
+    { name: '6 tier 2', dur: 11, ov: {},
+      note: 'tier 2 in slow motion, spilling onto the table',
+      keys: [
+        [    0,  39,  0.26,  0.4,   0.3, 0.25, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [    1,  42, 0.258,  0.4,   0.3, 0.25, 0, 1, 45.6, 1, 118, 0.171,   1],
+        [   10,  60,  0.25, 0.39,   0.3, 0.25, 0, 1, 45.6, 1, 118, 0.171,   1],
+        [   11,  62,  0.25, 0.39,   0.3, 0.25, 0, 0, 45.6, 1, 118, 0.171,   1],
+      ] },
+    { name: 'black', dur: 1.5, ov: {},
+      note: 'the table drops to the floor, tier 3 starts to fill (8x)',
+      keys: [
+        [    0,  62,  0.25, 0.39,   0.3,    8, 0, 0, 45.6, 1, 118,     0,   1],
+        [  1.5, 200,     1, 0.62,  0.28,    8, 0, 0, 45.6, 1, 118,     0,   1],
+      ] },
+    { name: '7 tower', dur: 2.5, ov: {},
+      note: 'to be decided; for now the whole tower, wide',
+      keys: [
+        [    0, 200,     1, 0.62,  0.28,    1, 0, 0, 45.6, 1, 118,     0,   1],
+        [    1, 208,  0.98, 0.61,  0.28,    1, 0, 1, 45.6, 1, 118,     0,   1],
+        [  2.5, 216,  0.96,  0.6,  0.28,    1, 0, 1, 45.6, 1, 118,     0,   1],
+      ] },
   ];
-  const SHOW_END = SHOW[SHOW.length - 1][0];
+  // SHOTS:END
+//#D}
+  const SHOW = flattenShots(SHOTS);
+  let SHOW_END = SHOW[SHOW.length - 1][0];   // the editor changes it
   function evalShow(t) {
     t = Math.max(0, Math.min(t, SHOW_END));
     let i = 0;
@@ -2228,14 +2460,20 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     return c;
   }
   function seekShow(t) {
+    if (ed) ed.restoreBefore(t);   // a kept shot start at or before t saves the replay
     const want = showIntegral(t);
     if (want < clockT - 1e-6) {
       // The fluid has no inverse - you cannot un-pour it - so going back means building
-      // the state again from zero. Reload carrying the target; load-time seek does the rest.
-      const q = new URLSearchParams(location.search);
-      q.set('show', '1'); q.set('showt', t.toFixed(2));
-      location.search = q.toString();
-      return;
+      // the state again from zero: in place, as the rewind button does (the buffers start
+      // zeroed, the clocks at 0), so nothing on the page is lost. With sound the show runs
+      // on the audio clock, so that still reloads carrying the target.
+      if (!cfg.gate) rewindSim();
+      else {
+        const q = new URLSearchParams(location.search);
+        q.set('show', '1'); q.set('showt', t.toFixed(2));
+        location.search = q.toString();
+        return;
+      }
     }
     seekTo = Math.round(t / SIM_DT); previewT = -1;
     if (cfg.paused) { requestAnimationFrame(frame); }   // replay frames run while paused
@@ -2567,7 +2805,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     if (cfg.paused) { requestAnimationFrame(frameOnce); }
   };
   uiEl.showT.inp.onchange = () => seekShow(parseFloat(uiEl.showT.inp.value));
-  if (cfg.show) {
+  if (cfg.show || cfg.edit) {
     ui.show = true;  uiEl.show.inp.checked = true;
     ui.spin = false; uiEl.spin.inp.checked = false;
   }
@@ -2584,12 +2822,16 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // Rewind in place: the whole simulation lives in buffers that start zeroed, and in the
   // clocks below, so clearing both is exactly a fresh load - without reloading, so the
   // soundtrack is not rendered again. With sound on, the stems restart with the show.
-  document.getElementById('rewind').onclick = () => {
+  function rewindSim() {
     const enc = device.createCommandEncoder();
     for (const b of bufs.slice(1)) enc.clearBuffer(b);
     device.queue.submit([enc.finish()]);
     clockT = 0; showStep = 0; showPend = 0; showT = 0; burstSteps = 0; ffSteps = 0;
     simU = 0; frameNo = 0; frameSim = 1; last = performance.now();
+    if (ed) ed.stats.rewinds++;
+  }
+  document.getElementById('rewind').onclick = () => {
+    rewindSim();
     if (cfg.gate && tA !== undefined) {
       tA = ac.currentTime + 0.1;
       if (live.master) for (const k in STEMS) liveStart(k, tA, 0);
@@ -2617,6 +2859,620 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   window.__pause  = () => { setPaused(true);  return 'paused'; };
   window.__resume = () => { setPaused(false); return 'running'; };
   setPaused(cfg.paused);
+
+  // ── timeline editor (?edit=1) ──
+  // The shots end to end on one line at the bottom, each as wide as it is long. Click one
+  // to select it and jump to its start; ctrl- or shift-click adds to the selection. "loop"
+  // plays the selection over and over. The simulation's state at a shot's first frame is
+  // kept on the GPU (20 MB a shot, the last four), so a loop or a jump back starts there
+  // instead of replaying the show from 0 - and replays only when something before the shot
+  // that the simulation depends on has changed (ED.signature).
+  // "rec": slider moves go into the shot under the playhead instead of the global settings.
+  // The timeline's own sliders (ED.COL) shift all of that shot's keys by the move; the look
+  // sliders in ED.PER_SHOT become the shot's own values (blue / red labels). The rest are
+  // global, rec or not (yellow when not the default). The button at a marked row's end puts
+  // it back. Everything is undoable (ctrl+z, ctrl+y / ctrl+shift+z). "save" writes the shots
+  // and the changed defaults into this file through dev/serve.py, or downloads them.
+  function makeEditor() {
+    document.body.classList.add('edit');
+    const SKIP = new Set(['show', 'showT', 'spin']);
+    const KEYS = SPEC.map(x => x[0]).filter(k => !SKIP.has(k) && !AUDIO.has(k));
+    const KIND = Object.fromEntries(SPEC.map(x => [x[0], x[1]]));
+    const defaults = Object.fromEntries(SPEC.map(x => [x[0], x[2]]));
+    const FIELD = { angle: 'angle', dist: 'dist', camY: 'camY', tgtY: 'tgtY', lightEl: 'el',
+                    botTilt: 'tilt', tableY: 'tableY', envAmt: 'env' };
+    let st = { shots: ED.clone(SHOTS), globals: {}, touched: [] };
+    for (const k of KEYS) if (!(k in ED.COL)) st.globals[k] = ui[k];
+    let saved = ED.clone(SHOTS);
+    const hist = ED.history();
+    let sel = [0], cur = -1, rec = false, loop = false;
+    const stats = { restores: 0, captures: 0, wraps: 0, rewinds: 0 };
+    const snaps = new Map();          // shot index -> the simulation at its first frame
+    const SNAP_BUFS = [1, 4, 5];      // particles, atomics (volumes, waves, photons), vec4s
+    const total = () => ED.starts(st.shots)[st.shots.length];
+    const stepOf = t => Math.round(t / SIM_DT);
+
+    // ── the strip ──
+    const root = document.createElement('div'); root.id = 'tl';
+    const bar = document.createElement('div'); bar.className = 'bar';
+    const spanEl = document.createElement('div'); spanEl.className = 'span';
+    const ph = document.createElement('div'); ph.className = 'ph';
+    bar.append(spanEl, ph);
+    const tools = document.createElement('div'); tools.className = 'tools';
+    const btn = (label, title, fn, cls = '') => {
+      const b = document.createElement('button'); b.textContent = label; b.title = title;
+      b.className = cls; b.onclick = fn; tools.append(b); return b;
+    };
+    const field = (title, val) => {
+      const i = document.createElement('input'); i.type = 'number'; i.step = '0.05'; i.min = '0.05';
+      i.title = title; i.value = val; tools.append(i); return i;
+    };
+    const text = t => { const e = document.createElement('span'); e.textContent = t; tools.append(e); return e; };
+    const bU = btn('undo', 'Undo the last change (ctrl+z).', () => undo());
+    const bR = btn('redo', 'Redo (ctrl+y or ctrl+shift+z).', () => redo());
+    const bRec = btn('rec', 'Record: slider moves go into the shot under the playhead. The camera, light, table, bottle and environment sliders shift that shot\'s keys; the look sliders (light azimuth, exposure, caustics, shutter, bokeh) become the shot\'s own values. Everything else stays global.', () => setRec(!rec));
+    const bLoop = btn('loop', 'Play the selected shots over and over. Each pass starts from the simulation as it was at the first frame, kept on the GPU.', () => setLoop(!loop), 'lp');
+    text('len');
+    const lenIn = field('Length of the selected shot in seconds. Its keys stretch with it; the shots after it move.', '');
+    text('s  fade');
+    const fadeIn = field('Fade in and out of the selected shot, in seconds - the same at both ends, whatever its length. 0 cuts hard. Empty: the shot keeps the fades in its keys.', '');
+    text('s  ×');
+    const facIn = field('Factor for "scale".', '1.5');
+    btn('scale', 'Stretch every selected shot by the factor, keys and all.', () => scaleSel(parseFloat(facIn.value)));
+    btn('-10%', 'Shorten the selected shots by 10%.', () => scaleSel(1 / 1.1));
+    btn('+10%', 'Lengthen the selected shots by 10%.', () => scaleSel(1.1));
+    btn('save', 'Write the shots and the changed slider defaults into dev/champagne.html (needs python dev/serve.py as the server; otherwise downloads them as timeline.json).', () => save(false));
+    const msg = document.createElement('span'); msg.className = 'msg'; tools.append(msg);
+    const keyEl = text('blue keys · red shot · yellow global'); keyEl.className = 'key';
+    root.append(bar, tools);
+    document.body.append(root);
+    fadeIn.onchange = () => {
+      if (sel.length !== 1) return;
+      const v = fadeIn.value.trim() === '' ? null : parseFloat(fadeIn.value);
+      if (v !== null && !(v >= 0)) { note('a fade is a number of seconds, 0 or more'); draw(); return; }
+      change(() => { st.shots = ED.setFade(st.shots, sel[0], v); });
+    };
+    lenIn.onchange = () => {
+      const d = parseFloat(lenIn.value);
+      if (sel.length === 1 && d > 0) change(() => { st.shots = ED.setDur(st.shots, sel[0], d); });
+    };
+    let noteT = 0;
+    function note(t) { msg.textContent = t; msg.title = t; noteT = performance.now(); }
+
+    function draw() {
+      const T = total(), stt = ED.starts(st.shots);
+      for (const e of [...bar.querySelectorAll('.shot')]) e.remove();
+      st.shots.forEach((s, i) => {
+        const e = document.createElement('div');
+        e.className = 'shot' + (s.name === 'black' ? ' black' : '') + (sel.includes(i) ? ' sel' : '') +
+          (i === cur ? ' cur' : '') + (ED.shotChanged(st.shots, saved, i) ? ' mod' : '');
+        e.style.width = (s.dur / T * 100) + '%';
+        e.textContent = s.name + ' ' + +s.dur.toFixed(2);
+        const ov = Object.entries(s.ov || {}).map(([k, v]) => k + ' ' + v).join(', ');
+        e.title = (s.note || s.name) + '\n' + stt[i].toFixed(2) + ' - ' + stt[i + 1].toFixed(2) +
+          ' s (' + +s.dur.toFixed(3) + ' s)' + (s.fade !== undefined ? '\nfades over ' + s.fade + ' s' : '') +
+          (ov ? '\nits own: ' + ov : '');
+        e.onclick = ev => pick(i, ev.ctrlKey || ev.shiftKey || ev.metaKey);
+        e.dataset.i = i;
+        bar.insertBefore(e, spanEl);
+      });
+      lenIn.disabled = sel.length !== 1;
+      lenIn.value = sel.length === 1 ? +st.shots[sel[0]].dur.toFixed(3) : '';
+      fadeIn.disabled = sel.length !== 1;
+      fadeIn.value = sel.length === 1 && st.shots[sel[0]].fade !== undefined ? st.shots[sel[0]].fade : '';
+      const [a, b] = ED.loopSpan(st.shots, sel);
+      spanEl.style.display = loop ? 'block' : 'none';
+      spanEl.style.left = (a / T * 100) + '%'; spanEl.style.width = ((b - a) / T * 100) + '%';
+      bRec.classList.toggle('on', rec); bLoop.classList.toggle('on', loop);
+      bU.disabled = !hist.canUndo; bR.disabled = !hist.canRedo;
+      playhead();
+    }
+    const playhead = () => { ph.style.left = (Math.min(showT, total()) / total() * 100) + '%'; };
+    function marks() {
+      for (const k of KEYS) {
+        const row = uiEl[k].row;
+        const s = cur >= 0 ? ED.status(st, saved, defaults, cur, k) : '';
+        row.dataset.chg = s;
+        row.dataset.rec = rec && (k in ED.COL || ED.PER_SHOT.includes(k)) ? '1' : '';
+        uiEl[k].rst.title = s === 'key' ? 'Back to the saved keys for this shot.' :
+          s === 'shot' ? 'Drop this shot\'s own value: it takes the global one again.' :
+          s === 'global' ? 'Back to the default (' + defaults[k] + ').' : '';
+      }
+      bU.disabled = !hist.canUndo; bR.disabled = !hist.canRedo;
+    }
+
+    // ── state ──
+    function rebuild() {
+      SHOW.length = 0; SHOW.push(...ED.flatten(st.shots));
+      SHOW_END = SHOW[SHOW.length - 1][0];
+      uiEl.showT.inp.max = SHOW_END;
+    }
+    function setVal(k, v) {
+      if (KIND[k] === 'check') { ui[k] = v; uiEl[k].inp.checked = v; } else setUI(k, v);
+    }
+    function applyEffective() {
+      if (cur < 0) return;
+      for (const k in st.globals) {
+        const v = ED.effective(st.shots, cur, st.globals, k);
+        if (ui[k] !== v) setVal(k, v);
+      }
+    }
+    // after the state changed: keep the playhead on the same moment of a stretched shot,
+    // lay the shots out again, put each slider on its value for the current shot
+    function after(pre) {
+      if (pre && pre.shots.some((s, i) => s.dur !== st.shots[i].dur)) {
+        const t = ED.mapTime(pre.shots, st.shots, showT);
+        showStep = stepOf(t); showT = showStep * SIM_DT;
+      }
+      rebuild();
+      cur = ED.shotAt(st.shots, showT);
+      applyEffective(); draw(); marks();
+      if (loop) loopCheck(false);
+      if (cfg.paused) requestAnimationFrame(frameOnce);
+    }
+    function change(fn) {        // one undoable edit
+      const pre = ED.clone(st);
+      fn();
+      if (JSON.stringify(pre) === JSON.stringify(st)) return;
+      hist.push(pre);
+      after(pre);
+    }
+    function undo() { const s = hist.undo(st); if (s) { const pre = st; st = s; after(pre); note('undone'); } }
+    function redo() { const s = hist.redo(st); if (s) { const pre = st; st = s; after(pre); note('redone'); } }
+    const touch = k => { if (!st.touched.includes(k)) st.touched.push(k); };
+
+    // ── sliders ──
+    const drag = {};
+    for (const k of KEYS) {
+      const inp = uiEl[k].inp;
+      uiEl[k].row = inp.parentNode;
+      const r = document.createElement('button'); r.className = 'rst'; r.textContent = '↺';
+      r.onclick = () => change(() => {
+        if (k in ED.COL) st.shots = ED.resetColumn(st.shots, saved, cur, ED.COL[k]);
+        else if (st.shots[cur].ov && k in st.shots[cur].ov) st.shots = ED.clearOverride(st.shots, cur, k);
+        else { st.globals[k] = defaults[k]; touch(k); }
+      });
+      uiEl[k].rst = r; uiEl[k].row.append(r);
+      // the slider's own oninput has already set ui[k]; this decides where the value goes
+      inp.addEventListener('input', () => {
+        if (cur < 0) return;
+        const v = KIND[k] === 'check' ? inp.checked : parseFloat(inp.value);
+        if (!drag[k]) drag[k] = { pre: ED.clone(st), from: k in ED.COL ? evalShow(showT)[FIELD[k]] : null };
+        const d = drag[k];
+        if (k in ED.COL) {
+          if (!ui.show) return;                         // manual camera: the slider is the value
+          if (!rec) { note('rec is off - the timeline drives ' + k + '; turn rec on to move this shot'); return; }
+          st.shots = ED.shiftColumn(d.pre.shots, cur, ED.COL[k], v - d.from);
+          rebuild();
+        } else if ((st.shots[cur].ov && k in st.shots[cur].ov) || (rec && ED.PER_SHOT.includes(k))) {
+          st.shots = ED.setOverride(st.shots, cur, k, v);
+        } else {
+          if (rec) note(k + ' is global: it changes every shot');
+          st.globals[k] = v; touch(k);
+        }
+        marks();
+      });
+      inp.addEventListener('change', () => {
+        const d = drag[k]; drag[k] = null;
+        if (d && JSON.stringify(d.pre) !== JSON.stringify(st)) { hist.push(d.pre); draw(); marks(); }
+      });
+    }
+    function setRec(v) { rec = v; draw(); marks(); note(v ? 'rec: slider moves go into ' + st.shots[cur].name : 'rec off'); }
+
+    // ── selection, scaling ──
+    function pick(i, add) {
+      if (add) {
+        sel = sel.includes(i) ? sel.filter(x => x !== i) : [...sel, i].sort((a, b) => a - b);
+        if (!sel.length) sel = [i];
+      } else {
+        sel = [i];
+        jump(ED.starts(st.shots)[i]);
+      }
+      draw();
+      if (loop) loopCheck(true);
+    }
+    function scaleSel(f) {
+      if (!(f > 0)) { note('the factor must be a positive number'); return; }
+      change(() => { st.shots = ED.scale(st.shots, sel, f); });
+    }
+
+    // ── the simulation's state at a shot's first frame ──
+    function validSnap(i) {
+      const s = snaps.get(i);
+      return !!s && s.sig === ED.signature(st.shots, i, st.globals) &&
+        s.step === stepOf(ED.starts(st.shots)[i]);
+    }
+    function capture(i) {
+      let s = snaps.get(i);
+      if (s) snaps.delete(i);                       // re-inserted below: the newest is last
+      else {
+        if (snaps.size >= 4) {
+          const [oj, os] = snaps.entries().next().value;
+          os.bufs.forEach(b => b.destroy()); snaps.delete(oj);
+        }
+        s = { bufs: SNAP_BUFS.map(j => device.createBuffer({ size: bufs[j].size,
+          usage: GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST })) };
+      }
+      const enc = device.createCommandEncoder();
+      SNAP_BUFS.forEach((j, n) => enc.copyBufferToBuffer(bufs[j], 0, s.bufs[n], 0, bufs[j].size));
+      device.queue.submit([enc.finish()]);
+      Object.assign(s, { sig: ED.signature(st.shots, i, st.globals), step: showStep,
+                         js: { clockT, showStep, showT, simU, frameSim } });
+      snaps.set(i, s); stats.captures++;
+    }
+    function restore(i) {
+      const s = snaps.get(i);
+      const enc = device.createCommandEncoder();
+      SNAP_BUFS.forEach((j, n) => enc.copyBufferToBuffer(s.bufs[n], 0, bufs[j], 0, bufs[j].size));
+      device.queue.submit([enc.finish()]);
+      ({ clockT, showStep, showT, simU, frameSim } = s.js);
+      showPend = 0; burstSteps = 0; ffSteps = 0; seekTo = -1; previewT = -1;
+      last = performance.now();
+      cur = -1;                                      // re-apply the shot's sliders
+      stats.restores++;
+    }
+    // before a seek to t: start from the latest kept shot start at or before t, if that is
+    // closer than where the playhead is (or the playhead is past t)
+    function restoreBefore(t) {
+      const stt = ED.starts(st.shots);
+      let best = -1;
+      for (const i of snaps.keys())
+        if (stt[i] <= t + 1e-9 && validSnap(i) && (best < 0 || stt[i] > stt[best])) best = i;
+      if (best < 0) return false;
+      if (showT <= t + 1e-9 && showT >= stt[best] - 1e-9) return false;   // playing on is closer
+      restore(best);
+      return true;
+    }
+    function jump(t) {
+      const i = ED.shotAt(st.shots, t);
+      if (Math.abs(ED.starts(st.shots)[i] - t) < 1e-9 && validSnap(i)) { restore(i); }
+      else seekShow(t);
+      cur = -1;
+      if (cfg.paused) requestAnimationFrame(frameOnce);
+    }
+    function loopCheck(force) {
+      const [a, b] = ED.loopSpan(st.shots, sel);
+      if (force || showT < a - 1e-9 || showT >= b - 1e-9) jump(a);
+    }
+    function setLoop(v) {
+      loop = v; draw();
+      if (loop) loopCheck(false);
+      note(v ? 'looping ' + sel.map(i => st.shots[i].name).join(' + ') : 'loop off');
+    }
+
+    // ── save ──
+    async function save(dry) {
+      const payload = ED.savePayload(st, defaults);
+      let r = null;
+      try {
+        r = await fetch('/__save' + (dry ? '?dry=1' : ''), { method: 'POST',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      } catch (e) { r = null; }
+      if (r && r.ok) {
+        const j = await r.json();
+        if (dry) return j;
+        saved = ED.clone(st.shots);
+        for (const k in payload.globals) {
+          defaults[k] = payload.globals[k];
+          SPEC.find(x => x[0] === k)[2] = payload.globals[k];
+        }
+        st.touched = [];
+        draw(); marks();
+        note('saved into dev/champagne.html: ' + (j.changed.length ? j.changed.join(', ') : 'nothing had changed'));
+        return j;
+      }
+      if (r && r.status === 400) {
+        const j = await r.json().catch(() => ({ error: 'refused' }));
+        note('save refused: ' + j.error);
+        return j;
+      }
+      // no save server behind this page (python -m http.server): hand the file over instead
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 1)], { type: 'application/json' }));
+      a.download = 'timeline.json';
+      if (!dry) a.click();
+      note('no save server (start the harness with: python dev/serve.py) - downloaded timeline.json; ' +
+           'python dev/serve.py --apply timeline.json writes it in');
+      return { ok: false, downloaded: !dry };
+    }
+
+    addEventListener('keydown', e => {
+      if (e.target.matches && e.target.matches('input[type=number]')) return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.code === 'KeyZ') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+      else if (e.code === 'KeyY') { e.preventDefault(); redo(); }
+    });
+
+    rebuild(); draw();
+    note('editor: click a shot, loop it, rec to tune it, save when done');
+    return {
+      stats, KEYS, defaults,
+      get st() { return st; }, get saved() { return saved; }, get sel() { return sel; },
+      get cur() { return cur; }, get rec() { return rec; }, get loop() { return loop; },
+      snaps, pick, undo, redo, setRec, setLoop, scaleSel, save, validSnap,
+      span: () => ED.loopSpan(st.shots, sel),
+      restoreBefore,
+      onShow() {
+        if (seekTo < 0 && loop) {
+          const [, b] = ED.loopSpan(st.shots, sel);
+          if (showT >= b - 1e-9) { stats.wraps++; loopCheck(true); }
+        }
+        const i = ED.shotAt(st.shots, showT);
+        if (i !== cur) { cur = i; applyEffective(); draw(); marks(); }
+        playhead();
+        if (noteT && performance.now() - noteT > 8000) { msg.textContent = ''; noteT = 0; }
+      },
+      afterFrame() {
+        if (seekTo >= 0) return;
+        const i = ED.shotAt(st.shots, showT);
+        if (showStep === stepOf(ED.starts(st.shots)[i]) && !validSnap(i)) capture(i);
+      },
+    };
+  }
+  if (cfg.edit) { ed = makeEditor(); window.__ed = ed; }
+
+  // ── the editor's in-browser tests (?edit=1&edtest=1, best with &det=1) ──
+  // They drive the real controls - clicks, slider input/change events, ctrl+z - against a
+  // running page, and leave the result in __probe().edtest and the console (EDTEST PASS).
+  // The pane must be on screen: a hidden page gets no frames. Save runs as a dry run, so
+  // the file on disk is never touched.
+  async function runEdTests() {
+    const E = ed, R = {};
+    const sl = ms => new Promise(r => setTimeout(r, ms));
+    const frames = n => new Promise(r => { const f = () => (--n <= 0 ? r() : requestAnimationFrame(f)); requestAnimationFrame(f); });
+    const until = async (fn, ms = 20000) => { const t = performance.now(); while (!fn()) { if (performance.now() - t > ms) return false; await frames(1); } return true; };
+    const row = k => uiEl[k].row;
+    const slide = (k, v) => {
+      const i = uiEl[k].inp;
+      if (i.type === 'checkbox') i.checked = v; else i.value = v;
+      i.dispatchEvent(new Event('input')); i.dispatchEvent(new Event('change'));
+    };
+    const key = (code, o = {}) => dispatchEvent(new KeyboardEvent('keydown', { code, ctrlKey: true, ...o }));
+    const shotEl = i => document.querySelector('#tl .shot[data-i="' + i + '"]');
+    const button = t => [...document.querySelectorAll('#tl button')].find(b => b.textContent === t);
+    const near = (a, b, e = 1e-6) => Math.abs(a - b) <= e;
+    const t = async (name, fn) => {
+      try { const ok = await fn(); R[name] = ok === false ? 'FAIL' : 'PASS'; }
+      catch (e) { R[name] = 'FAIL: ' + (e && e.message || e); }
+      if (R[name] !== 'PASS') console.warn('EDTEST', name, R[name]);
+    };
+    const assert = (c, m) => { if (!c) throw new Error(m); };
+    window.__marker = 1;                 // gone if anything reloads the page
+    await until(() => probe.frames > 20);
+
+    await t('no audio: no start screen, no AudioContext, the audio column hidden', () => {
+      assert(!cfg.gate, 'gate on');
+      assert(ac === undefined, 'an AudioContext exists');
+      return getComputedStyle(document.getElementById('uia')).display === 'none';
+    });
+    await t('strip: one block per shot, each as wide as it is long', () => {
+      const els = [...document.querySelectorAll('#tl .shot')];
+      assert(els.length === E.st.shots.length, els.length + ' blocks');
+      const T = SHOW_END;
+      return els.every((e, i) => near(parseFloat(e.style.width), E.st.shots[i].dur / T * 100, 1e-3));
+    });
+    await t('click a shot: selects it and jumps to its start', async () => {
+      shotEl(1).click();
+      assert(E.sel.length === 1 && E.sel[0] === 1, 'selection ' + E.sel);
+      assert(shotEl(1).classList.contains('sel'), 'not highlighted');
+      return await until(() => seekTo < 0 && E.cur === 1);
+    });
+    await t('ctrl-click adds to the selection and removes again', () => {
+      shotEl(3).dispatchEvent(new MouseEvent('click', { ctrlKey: true, bubbles: true }));
+      assert(E.sel.join() === '1,3', 'sel ' + E.sel);
+      shotEl(3).dispatchEvent(new MouseEvent('click', { ctrlKey: true, bubbles: true }));
+      return E.sel.join() === '1';
+    });
+    await t('scale: the selected shot stretches, the ones after move, undo/redo by keys', () => {
+      const d0 = E.st.shots[1].dur, end0 = SHOW_END, s2 = ED.starts(E.st.shots)[2];
+      document.querySelector('#tl input[title^="Factor"]').value = '1.5';
+      button('scale').click();
+      assert(near(E.st.shots[1].dur, d0 * 1.5), 'dur ' + E.st.shots[1].dur);
+      assert(near(SHOW_END, end0 + d0 * 0.5), 'end ' + SHOW_END);
+      assert(near(ED.starts(E.st.shots)[2], s2 + d0 * 0.5), 'next shot did not move');
+      assert(shotEl(1).classList.contains('mod'), 'not marked as changed');
+      key('KeyZ');
+      assert(near(E.st.shots[1].dur, d0) && near(SHOW_END, end0), 'undo');
+      assert(!shotEl(1).classList.contains('mod'), 'still marked after undo');
+      key('KeyY');
+      assert(near(E.st.shots[1].dur, d0 * 1.5), 'redo (ctrl+y)');
+      key('KeyZ'); key('KeyZ', { shiftKey: true });
+      assert(near(E.st.shots[1].dur, d0 * 1.5), 'redo (ctrl+shift+z)');
+      key('KeyZ');
+      return near(E.st.shots[1].dur, d0);
+    });
+    await t('+10% / -10% buttons', () => {
+      const d0 = E.st.shots[1].dur;
+      button('+10%').click();
+      assert(near(E.st.shots[1].dur, ED.r6(d0 * 1.1)), '+10%');
+      key('KeyZ');
+      button('-10%').click();
+      assert(near(E.st.shots[1].dur, ED.r6(d0 / 1.1)), '-10%');
+      key('KeyZ');
+      return near(E.st.shots[1].dur, d0);
+    });
+    await t('len field: sets the selected shot\'s length in seconds', () => {
+      const f = document.querySelector('#tl input[title^="Length"]');
+      assert(near(parseFloat(f.value), E.st.shots[1].dur, 1e-3), 'shows ' + f.value);
+      const d0 = E.st.shots[1].dur;
+      f.value = '10'; f.dispatchEvent(new Event('change'));
+      assert(near(E.st.shots[1].dur, 10), 'dur ' + E.st.shots[1].dur);
+      key('KeyZ');
+      return near(E.st.shots[1].dur, d0);
+    });
+
+    await t('fade field: the selected shot fades in and out over that many seconds', async () => {
+      const f = document.querySelector('#tl input[title^="Fade"]');
+      assert(f.value === '' && !f.disabled, 'field ' + JSON.stringify(f.value));
+      f.value = '2'; f.dispatchEvent(new Event('change'));
+      const s = E.st.shots[1], a = ED.starts(E.st.shots)[1];
+      assert(s.fade === 2, 'fade ' + s.fade);
+      assert(shotEl(1).classList.contains('mod'), 'not marked as changed');
+      setPaused(true);
+      E.restoreBefore(a + 1);
+      seekShow(a + 1); await until(() => seekTo < 0); await frames(3);
+      assert(near(probe.fade, 0.5, 0.02), 'one second in: ' + probe.fade);
+      f.value = ''; f.dispatchEvent(new Event('change'));
+      assert(!('fade' in E.st.shots[1]), 'empty did not clear it');
+      key('KeyZ');
+      assert(E.st.shots[1].fade === 2, 'undo');
+      key('KeyZ');
+      setPaused(false);
+      return !('fade' in E.st.shots[1]) && f.value === '';
+    });
+
+    // the sliders: paused, so the playhead stays in one shot while we look
+    setPaused(true);
+    await frames(2);
+    const i = E.cur;
+    await t('rec off: a look slider is global - marked yellow, reset to the default, undoable', () => {
+      const d = E.defaults.expo;
+      slide('expo', 2.05);
+      assert(E.st.globals.expo === 2.05 && ui.expo === 2.05, 'not set');
+      assert(!E.st.shots.some(s => s.ov && 'expo' in s.ov), 'became a shot value');
+      assert(row('expo').dataset.chg === 'global', 'mark ' + row('expo').dataset.chg);
+      uiEl.expo.rst.click();
+      assert(E.st.globals.expo === d && ui.expo === d && row('expo').dataset.chg === '', 'reset');
+      key('KeyZ');
+      assert(E.st.globals.expo === 2.05, 'undo reset');
+      key('KeyZ');
+      return E.st.globals.expo === d && row('expo').dataset.chg === '';
+    });
+    await t('rec on: a look slider becomes this shot\'s own value - red, others keep the global', async () => {
+      button('rec').click();
+      assert(E.rec && button('rec').classList.contains('on'), 'rec not on');
+      assert(row('cgain').dataset.rec === '1' && row('pourRate').dataset.rec === '', 'rec marks');
+      const g = E.st.globals.cgain;
+      slide('cgain', 0.12);
+      assert(E.st.shots[i].ov.cgain === 0.12 && E.st.globals.cgain === g, 'not a shot value');
+      assert(row('cgain').dataset.chg === 'shot', 'mark ' + row('cgain').dataset.chg);
+      const other = i === 0 ? 1 : 0;
+      shotEl(other).click(); await until(() => seekTo < 0 && E.cur === other);
+      await frames(2);
+      assert(ui.cgain === g, 'another shot sees ' + ui.cgain);
+      assert(row('cgain').dataset.chg === '', 'marked in another shot');
+      shotEl(i).click(); await until(() => seekTo < 0 && E.cur === i);
+      await frames(2);
+      assert(ui.cgain === 0.12, 'back in the shot: ' + ui.cgain);
+      uiEl.cgain.rst.click();
+      assert(!('cgain' in E.st.shots[i].ov) && ui.cgain === g, 'reset did not drop it');
+      key('KeyZ');
+      assert(E.st.shots[i].ov.cgain === 0.12, 'undo');
+      key('KeyZ');
+      return !('cgain' in (E.st.shots[i].ov || {}));
+    });
+    await t('rec on: a simulation slider stays global', () => {
+      const v = E.st.globals.pourRate;
+      slide('pourRate', 60);
+      assert(E.st.globals.pourRate === 60 && !('pourRate' in E.st.shots[i].ov), 'became a shot value');
+      key('KeyZ');
+      return E.st.globals.pourRate === v;
+    });
+    await t('rec on: a timeline slider shifts all of this shot\'s keys - blue, reset, undo', async () => {
+      const before = ED.clone(E.st.shots);
+      const from = evalShow(showT).el;
+      slide('lightEl', from + 10);
+      const dv = parseFloat(uiEl.lightEl.inp.value) - from;   // the slider snaps to its step
+      assert(Math.abs(dv) > 5, 'the slider did not move');
+      assert(E.st.shots[i].keys.every((k, j) => near(k[8], before[i].keys[j][8] + dv, 1e-4)), 'keys not shifted');
+      assert(E.st.shots.every((s, j) => j === i || JSON.stringify(s) === JSON.stringify(before[j])), 'other shots moved');
+      assert(near(evalShow(showT).el, from + dv, 1e-3), 'the frame does not show it');
+      assert(row('lightEl').dataset.chg === 'key', 'mark ' + row('lightEl').dataset.chg);
+      uiEl.lightEl.rst.click();
+      assert(JSON.stringify(E.st.shots) === JSON.stringify(before), 'reset');
+      key('KeyZ');
+      assert(near(E.st.shots[i].keys[0][8], before[i].keys[0][8] + dv, 1e-4), 'undo');
+      key('KeyZ');
+      return JSON.stringify(E.st.shots) === JSON.stringify(before);
+    });
+    await t('rec off: a timeline slider leaves the keys alone', () => {
+      button('rec').click();
+      assert(!E.rec, 'rec still on');
+      const before = JSON.stringify(E.st.shots);
+      slide('lightEl', evalShow(showT).el + 7);
+      return JSON.stringify(E.st.shots) === before;
+    });
+    await t('undo / redo buttons', () => {
+      slide('expo', 1.9);
+      button('undo').click();
+      assert(E.st.globals.expo === E.defaults.expo, 'undo button');
+      button('redo').click();
+      assert(E.st.globals.expo === 1.9, 'redo button');
+      button('undo').click();
+      return button('redo').disabled === false;
+    });
+    setPaused(false);
+
+    await t('loop: plays the selection over and over from its kept start state', async () => {
+      shotEl(2).click();
+      button('loop').click();
+      assert(E.loop, 'loop not on');
+      const [a, b] = E.span(), r0 = E.stats.restores, w0 = E.stats.rewinds;
+      let out = 0;
+      const ok = await until(() => {
+        if (seekTo < 0 && (showT < a - 1e-9 || showT > b + 0.25)) out++;
+        return E.stats.wraps >= 2 && E.stats.restores >= r0 + 2;
+      }, 30000);
+      assert(ok, 'no two wraps (wraps ' + E.stats.wraps + ', restores ' + E.stats.restores + ')');
+      assert(out === 0, out + ' frames outside the loop');
+      assert(E.stats.rewinds === w0, 'replayed from 0');
+      return E.validSnap(2);
+    });
+    await t('loop: a change before the looped shot makes its kept start stale', async () => {
+      const w = E.stats.wraps;
+      E.sel.splice(0, E.sel.length, 0);          // scale the first shot, keep looping shot 3
+      E.scaleSel(1.1);
+      E.sel.splice(0, E.sel.length, 2);
+      assert(!E.validSnap(2), 'still valid after an earlier shot changed');
+      key('KeyZ');
+      assert(E.validSnap(2), 'undo did not make it valid again');
+      return await until(() => E.stats.wraps > w, 30000);
+    });
+    await t('jumping back never reloads the page', () => {
+      button('loop').click();
+      shotEl(0).click();
+      return window.__marker === 1 && !E.loop;
+    });
+
+    await t('save (dry run): the shots and the changed defaults, written into the source', async () => {
+      const d0 = E.st.shots[0].dur;
+      E.sel.splice(0, E.sel.length, 0);
+      E.scaleSel(2);
+      slide('expo', 1.85);
+      const j = await E.save(true);
+      assert(j && j.ok, 'no save server? ' + JSON.stringify(j).slice(0, 200));
+      assert(j.changed.includes('shots') && j.changed.includes('expo'), 'changed ' + j.changed);
+      assert(j.src.includes("name: '1 glass', dur: " + ED.r6(d0 * 2) + ','), 'shot not written');
+      assert(/\['expo',\s*'range', 1\.85,/.test(j.src), 'default not written');
+      const disk = await (await fetch(location.pathname, { cache: 'no-store' })).text();
+      assert(disk.includes("name: '1 glass', dur: " + d0 + ','), 'the file on disk changed');
+      key('KeyZ'); key('KeyZ');
+      return near(E.st.shots[0].dur, d0) && E.st.globals.expo === E.defaults.expo;
+    });
+    await t('save without a server: offers the file instead', async () => {
+      const f = window.fetch;
+      window.fetch = () => Promise.reject(new Error('offline'));
+      try {
+        const j = await E.save(true);
+        return j.ok === false && /serve\.py/.test(document.querySelector('#tl .msg').textContent);
+      } finally { window.fetch = f; }
+    });
+    await t('a refused save says why', async () => {
+      const f = window.fetch;
+      window.fetch = () => Promise.resolve(new Response(JSON.stringify({ ok: false, error: 'bad shots' }), { status: 400 }));
+      try {
+        const j = await E.save(true);
+        return j.ok === false && /bad shots/.test(document.querySelector('#tl .msg').textContent);
+      } finally { window.fetch = f; }
+    });
+
+    const pass = Object.values(R).every(v => v === 'PASS');
+    probe.edtest = { PASS: pass, ...R };
+    console.log('EDTEST ' + (pass ? 'PASS' : 'FAIL') + ' ' + JSON.stringify(R));
+    return probe.edtest;
+  }
+  if (cfg.edit && cfg.edtest) runEdTests();
+  window.__edTest = () => runEdTests();
   //#D}
 
   // ── music and sound ──
