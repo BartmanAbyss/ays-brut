@@ -7,7 +7,7 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (PADsynth pad, reverbs, liquid sounds, cork
-pop) work. `build/intro.cmd` is **9 369 bytes, 1 177 OVER the 8 192 budget**, so features have
+pop) work. `build/intro.cmd` is **9 379 bytes, 1 187 OVER the 8 192 budget**, so features have
 to be cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
@@ -208,20 +208,20 @@ needed): the pour, bottle and light reach the shader once per frame, and a seek 
 the whole sim in one frame poured from t = 0 with the target's values. A seek to 50 s takes
 a few seconds. It is representative, not bit-identical: spill azimuths differ by the RNG.
 
-**The shot plan, first draft (26 Oct 2026)**, 60 s:
+**The shot plan, first draft (26 Oct 2026)**, 64.25 s (shot 1 since stretched 1.5x):
 
 | show s | shot | sim |
 |---|---|---|
-| 0 - 8.5 | 1. the top glass alone on the table (0.341); fades in dark, the light rises from 25° below the table to 45.6°, its shadow sweeping in, the environment coming up with it | empty, no pour, no bottle |
-| 8.5 - 17 | 2. an orbit round it | |
-| 17 - 19.5 | 3. black; the cork pops at `popT` 17.8 | the bottle appears, tilted in |
-| 19.5 - 31.5 | 4. the pour in slow motion (0.25, easing to 1): the bottle tips in, the flow starts at 20 s, the top glass fills | top glass ~3/4 full by 29.5 |
-| 31.5 - 33 | black: the table drops to tier 2 (0.171), sim at 8x | top glass overflows, tier 2 fills |
-| 33 - 43.5 | 5. an orbit of the two tiers (sim 1.5x) | tier 2 nearly full |
-| 43.5 - 45 | black, sim at 8x | |
-| 45 - 56 | 6. tier 2 in slow motion (0.25), spilling onto the table | tier 2 full and spilling |
-| 56 - 57.5 | black: the table drops to the floor, sim at 8x | tier 3 starts to fill |
-| 57.5 - 60 | 7. to be decided; for now the whole tower, wide | tier 3 about half full |
+| 0 - 12.75 | 1. the top glass alone on the table (0.341); fades in dark, the light rises from 25° below the table to 45.6°, its shadow sweeping in, the environment coming up with it | empty, no pour, no bottle |
+| 12.75 - 21.25 | 2. an orbit round it | |
+| 21.25 - 23.75 | 3. black; the cork pops at `popT` 22.05 | the bottle appears, tilted in |
+| 23.75 - 35.75 | 4. the pour in slow motion (0.25, easing to 1): the bottle tips in, the flow starts at 24.25 s, the top glass fills | top glass ~3/4 full by 33.75 |
+| 35.75 - 37.25 | black: the table drops to tier 2 (0.171), sim at 8x | top glass overflows, tier 2 fills |
+| 37.25 - 47.75 | 5. an orbit of the two tiers (sim 1.5x) | tier 2 nearly full |
+| 47.75 - 49.25 | black, sim at 8x | |
+| 49.25 - 60.25 | 6. tier 2 in slow motion (0.25), spilling onto the table | tier 2 full and spilling |
+| 60.25 - 61.75 | black: the table drops to the floor, sim at 8x | tier 3 starts to fill |
+| 61.75 - 64.25 | 7. to be decided; for now the whole tower, wide | tier 3 about half full |
 
 The sound has not been re-timed to it yet (the drip rates still follow the old measurement).
 
@@ -784,10 +784,10 @@ from the release.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
 screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 9 369 bytes.
+`intro.cmd` is 9 379 bytes.
 
 Next:
-1. **Size** — 1 177 bytes over, before the score and any text. The puddle is cut (-362);
+1. **Size** — 1 187 bytes over, before the score and any text. The puddle is cut (-362);
    next candidates in *Feature cuts, measured*, and a packer search on the new shader.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
@@ -1010,7 +1010,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 369 bytes (26 Oct 2026), 1 177 OVER 8 192**: stratified photon emission
+**`intro.cmd` is 9 379 bytes (26 Oct 2026), 1 187 OVER 8 192**: shot 1 stretched 1.5x
+(+10, the shifted key times). Before that 9 369: stratified photon emission
 (+56 shipped, +78 with the packer's default state on both sides). The lit table's grain is
 photon noise: 65 536 photons a frame put ~5 in each blurred (5x5 texel) cell, and the
 236/256 fade averages ~25 frames. `strat` picks the emitter pattern - 0 random, 1 R2
