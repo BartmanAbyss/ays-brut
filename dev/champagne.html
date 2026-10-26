@@ -69,6 +69,7 @@ struct U {
   pour     : f32,          // share of the bottle's flow, 0..1 (0 = not pouring)
   botTilt  : f32,          // bottle tilt, rad; 0 hides the bottle
   tableY   : f32,          // table height, m: raised to a tier's base, the tiers below vanish
+  envA     : f32,          // environment brightness: 0 leaves only what the key light's photons lit
 //#D{
   view     : f32,
   fov      : f32,
@@ -1166,7 +1167,9 @@ fn env(rd: vec3f) -> vec3f {
   c += vec3f(1.00, 0.97, 0.90) * pow(kd, 420.0) * 34.0;    // hot core
   c += vec3f(1.00, 0.60, 0.26) * pow(clamp(dot(rd, normalize(vec3f(-0.75, 0.10, 0.35))), 0.0, 1.0), 26.0) * 1.3;
   c += vec3f(0.38, 0.52, 0.95) * pow(clamp(dot(rd, normalize(vec3f( 0.10,-0.20, 0.95))), 0.0, 1.0),  7.0) * 0.22;
-  return c + bokeh(rd);
+  // all of it, key lobes too: with the light below the table they would still be seen in
+  // the glass, which then looks lit while the table is dark
+  return (c + bokeh(rd)) * u.envA;
 }
 fn sky(rd: vec3f) -> vec3f { return env(rd); }
 const CN     : u32 = 768u;
@@ -1207,7 +1210,7 @@ fn tableShade(p: vec3f) -> vec3f {
   let amb = vec3f(0.013, 0.013, 0.017);
   // direct light AND caustics both come from the photon map: shadows are free
   let c = causticAt(p.xz) * u.cgain;
-  return (amb + c) * fall * vec3f(0.97, 0.94, 0.90);
+  return (amb * u.envA + c) * fall * vec3f(0.97, 0.94, 0.90);
 }
 fn tonemap(x: vec3f) -> vec3f {
   return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3f(0.0), vec3f(1.0));
@@ -1415,7 +1418,7 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
       pc[53] += pSpray; pc[54] += pGlass; pc[55] += pBulk;
 //#D}
     }
-    acc += tp * vec3f(0.055, 0.052, 0.060);
+    acc += tp * vec3f(0.055, 0.052, 0.060) * u.envA;   // the haze stands in for env()
   }
 
 //#D{
@@ -1805,16 +1808,16 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 
   function writeUniforms(time) {
     let ang, dist = ui.dist, camY = ui.camY, tgtY = ui.tgtY,
-        fade = 1, el = ui.lightEl, pour = 1, tilt = ui.botTilt, ty = ui.tableY;
+        fade = 1, el = ui.lightEl, pour = 1, tilt = ui.botTilt, ty = ui.tableY, en = ui.envAmt;
     if (ui.show) {
       const sh = evalShow(showT);
 //#D{
       if (previewT >= 0) Object.assign(sh, evalShow(previewT));   // scrubbing: the camera leads
 //#D}
       ang = sh.angle / 57.3; dist = sh.dist; camY = sh.camY; tgtY = sh.tgtY;   // deg -> rad, 0.007% off: -6 bytes
-      fade = sh.fade; el = sh.el; pour = sh.pour; tilt = sh.tilt; ty = sh.tableY;
+      fade = sh.fade; el = sh.el; pour = sh.pour; tilt = sh.tilt; ty = sh.tableY; en = sh.env;
 //#D{
-      setUI('lightEl', el.toFixed(1)); setUI('botTilt', tilt.toFixed(0)); setUI('tableY', ty.toFixed(3));
+      setUI('lightEl', el.toFixed(1)); setUI('botTilt', tilt.toFixed(0)); setUI('tableY', ty.toFixed(3)); setUI('envAmt', en.toFixed(2));
 //#D}
       // Sliders follow for readout only. Driving the camera THROUGH them would quantise it
       // to the slider step - dist steps by 0.01, visible stepping on a push-in that only
@@ -1835,7 +1838,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              Math.sin(ang) * dist, camY, Math.cos(ang) * dist, ui.shutter * SIM_DT * frameSim,
              stepDt, tgtY, (w1[0] - w0[0]) * W / 0.02, (w1[1] - w0[1]) * W / 0.02,   // bottle drift velocity
              w0[0] * W, 0.555, w0[1] * W, fade,                 // emitter; fade
-             el / 57.3, pour, tilt / 57.3, ty]);
+             el / 57.3, pour, tilt / 57.3, ty, en]);
 //#D{
     // ...then the harness controls, which the release folds into the shader
     f32.set([ui.view, 1.6, cfg.steps, Math.max(1, Math.round((cfg.npart / 6) / ui.pourRate)),
@@ -1843,7 +1846,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0], 20);
+             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0], 21);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
@@ -2104,7 +2107,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   //#D}
   // ── timeline ──
   // Keys are [t, angle deg, dist, camY, tgtY, simSpeed, ease, fade, light elevation deg,
-  // pour, bottle tilt deg, table height m]. Two keys sharing a t are a CUT: the later one wins at that
+  // pour, bottle tilt deg, table height m, environment brightness]. Two keys sharing a t are a CUT: the later one wins at that
   // instant, so the change is immediate rather than a one-frame blend. `ease` applies to
   // the segment STARTING at that key - 1 for smootherstep in and out, 0 for linear, so a
   // long drift can run through several keys without stalling at each one.
@@ -2115,7 +2118,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // - pour: the share of the bottle's flow, 0 = not pouring. Ramp it for a natural start.
   // - tilt: the bottle; 0 removes it from the scene, ~118 is the pouring angle.
   // - table: its height. 0.341 = the top glass alone on it, 0.171 = two tiers, 0 = the
-  //   whole tower. Change it only in the black. A millimetre above the tier below: its
+  //   whole tower. Change it only in the black.
+  // - env: the environment's brightness, 0..1. 0 leaves only the key light. A millimetre above the tier below: its
   //   rims are exactly at the next tier's base, and at that height they cut through the
   //   table as rings (the feet sink a millimetre instead, unseen).
   // First draft of the shot plan (26 Oct): 1 the top glass alone, dark, the light rising
@@ -2124,46 +2128,46 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // 7 to be decided.
   const SHOW = [
     // 1 - the top glass alone on the table, the light rising from below it
-    [  0.0,  20, 0.300, 0.420, 0.410, 1,    0, 0,  -25, 0,   0, 0.341],
-    [  2.0,  25, 0.290, 0.420, 0.410, 1,    0, 1,   -5, 0,   0, 0.341],
-    [  7.5,  40, 0.270, 0.430, 0.415, 1,    0, 1, 45.6, 0,   0, 0.341],
-    [  8.5,  43, 0.265, 0.430, 0.415, 1,    0, 0, 45.6, 0,   0, 0.341],
+    [  0.0,  20, 0.300, 0.420, 0.410, 1,    0, 0,  -25, 0,   0, 0.341, 0],
+    [  2.0,  25, 0.290, 0.420, 0.410, 1,    0, 1,   -5, 0,   0, 0.341, 0.1],
+    [  7.5,  40, 0.270, 0.430, 0.415, 1,    0, 1, 45.6, 0,   0, 0.341, 1],
+    [  8.5,  43, 0.265, 0.430, 0.415, 1,    0, 0, 45.6, 0,   0, 0.341, 1],
     // 2 - an orbit round it
-    [  8.5,  60, 0.320, 0.540, 0.440, 1,    0, 0, 45.6, 0,   0, 0.341],
-    [  9.5,  82, 0.320, 0.540, 0.440, 1,    0, 1, 45.6, 0,   0, 0.341],
-    [ 16.0, 225, 0.300, 0.520, 0.440, 1,    0, 1, 45.6, 0,   0, 0.341],
-    [ 17.0, 247, 0.300, 0.520, 0.440, 1,    0, 0, 45.6, 0,   0, 0.341],
+    [  8.5,  60, 0.320, 0.540, 0.440, 1,    0, 0, 45.6, 0,   0, 0.341, 1],
+    [  9.5,  82, 0.320, 0.540, 0.440, 1,    0, 1, 45.6, 0,   0, 0.341, 1],
+    [ 16.0, 225, 0.300, 0.520, 0.440, 1,    0, 1, 45.6, 0,   0, 0.341, 1],
+    [ 17.0, 247, 0.300, 0.520, 0.440, 1,    0, 0, 45.6, 0,   0, 0.341, 1],
     // 3 - black; the cork pops at popT (17.8)
-    [ 19.5,  39, 0.190, 0.530, 0.480, 0.25, 0, 0, 45.6, 0,  95, 0.341],
+    [ 19.5,  39, 0.190, 0.530, 0.480, 0.25, 0, 0, 45.6, 0,  95, 0.341, 1],
     // 4 - the pour in slow motion: the bottle tips in, the flow starts, the glass fills
-    [ 20.0,  40, 0.190, 0.530, 0.480, 0.25, 1, 1, 45.6, 0, 112, 0.341],
-    [ 20.4,  41, 0.188, 0.530, 0.480, 0.25, 0, 1, 45.6, 1, 118, 0.341],
-    [ 26.0,  52, 0.180, 0.530, 0.480, 0.25, 1, 1, 45.6, 1, 118, 0.341],
-    [ 30.5,  62, 0.180, 0.550, 0.490, 1,    0, 1, 45.6, 1, 118, 0.341],
-    [ 31.5,  65, 0.180, 0.550, 0.490, 1,    0, 0, 45.6, 1, 118, 0.341],
+    [ 20.0,  40, 0.190, 0.530, 0.480, 0.25, 1, 1, 45.6, 0, 112, 0.341, 1],
+    [ 20.4,  41, 0.188, 0.530, 0.480, 0.25, 0, 1, 45.6, 1, 118, 0.341, 1],
+    [ 26.0,  52, 0.180, 0.530, 0.480, 0.25, 1, 1, 45.6, 1, 118, 0.341, 1],
+    [ 30.5,  62, 0.180, 0.550, 0.490, 1,    0, 1, 45.6, 1, 118, 0.341, 1],
+    [ 31.5,  65, 0.180, 0.550, 0.490, 1,    0, 0, 45.6, 1, 118, 0.341, 1],
     // black: the table drops to tier 2; the sim runs 8x, the top glass overflows into it
-    [ 31.5,  65, 0.180, 0.550, 0.490, 8,    0, 0, 45.6, 1, 118, 0.171],
-    [ 33.0, 300, 0.620, 0.520, 0.330, 8,    0, 0, 45.6, 1, 118, 0.171],
+    [ 31.5,  65, 0.180, 0.550, 0.490, 8,    0, 0, 45.6, 1, 118, 0.171, 1],
+    [ 33.0, 300, 0.620, 0.520, 0.330, 8,    0, 0, 45.6, 1, 118, 0.171, 1],
     // 5 - an orbit of the two tiers
-    [ 33.0, 300, 0.620, 0.520, 0.330, 1.5,  0, 0, 45.6, 1, 118, 0.171],
-    [ 34.0, 310, 0.610, 0.520, 0.330, 1.5,  0, 1, 45.6, 1, 118, 0.171],
-    [ 42.5, 400, 0.560, 0.500, 0.330, 1.5,  0, 1, 45.6, 1, 118, 0.171],
-    [ 43.5, 412, 0.555, 0.500, 0.330, 1.5,  0, 0, 45.6, 1, 118, 0.171],
+    [ 33.0, 300, 0.620, 0.520, 0.330, 1.5,  0, 0, 45.6, 1, 118, 0.171, 1],
+    [ 34.0, 310, 0.610, 0.520, 0.330, 1.5,  0, 1, 45.6, 1, 118, 0.171, 1],
+    [ 42.5, 400, 0.560, 0.500, 0.330, 1.5,  0, 1, 45.6, 1, 118, 0.171, 1],
+    [ 43.5, 412, 0.555, 0.500, 0.330, 1.5,  0, 0, 45.6, 1, 118, 0.171, 1],
     // black: 8x again, tier 2 fills to overflowing
-    [ 43.5, 412, 0.555, 0.500, 0.330, 8,    0, 0, 45.6, 1, 118, 0.171],
-    [ 45.0,  39, 0.260, 0.400, 0.300, 8,    0, 0, 45.6, 1, 118, 0.171],
+    [ 43.5, 412, 0.555, 0.500, 0.330, 8,    0, 0, 45.6, 1, 118, 0.171, 1],
+    [ 45.0,  39, 0.260, 0.400, 0.300, 8,    0, 0, 45.6, 1, 118, 0.171, 1],
     // 6 - tier 2 in slow motion, spilling onto the table
-    [ 45.0,  39, 0.260, 0.400, 0.300, 0.25, 0, 0, 45.6, 1, 118, 0.171],
-    [ 46.0,  42, 0.258, 0.400, 0.300, 0.25, 0, 1, 45.6, 1, 118, 0.171],
-    [ 55.0,  60, 0.250, 0.390, 0.300, 0.25, 0, 1, 45.6, 1, 118, 0.171],
-    [ 56.0,  62, 0.250, 0.390, 0.300, 0.25, 0, 0, 45.6, 1, 118, 0.171],
+    [ 45.0,  39, 0.260, 0.400, 0.300, 0.25, 0, 0, 45.6, 1, 118, 0.171, 1],
+    [ 46.0,  42, 0.258, 0.400, 0.300, 0.25, 0, 1, 45.6, 1, 118, 0.171, 1],
+    [ 55.0,  60, 0.250, 0.390, 0.300, 0.25, 0, 1, 45.6, 1, 118, 0.171, 1],
+    [ 56.0,  62, 0.250, 0.390, 0.300, 0.25, 0, 0, 45.6, 1, 118, 0.171, 1],
     // black: the table drops to the floor, tier 3 starts to fill (8x)
-    [ 56.0,  62, 0.250, 0.390, 0.300, 8,    0, 0, 45.6, 1, 118, 0],
-    [ 57.5, 200, 1.000, 0.620, 0.280, 8,    0, 0, 45.6, 1, 118, 0],
+    [ 56.0,  62, 0.250, 0.390, 0.300, 8,    0, 0, 45.6, 1, 118, 0, 1],
+    [ 57.5, 200, 1.000, 0.620, 0.280, 8,    0, 0, 45.6, 1, 118, 0, 1],
     // 7 - to be decided; for now the whole tower, wide
-    [ 57.5, 200, 1.000, 0.620, 0.280, 1,    0, 0, 45.6, 1, 118, 0],
-    [ 58.5, 208, 0.980, 0.610, 0.280, 1,    0, 1, 45.6, 1, 118, 0],
-    [ 60.0, 216, 0.960, 0.600, 0.280, 1,    0, 1, 45.6, 1, 118, 0],
+    [ 57.5, 200, 1.000, 0.620, 0.280, 1,    0, 0, 45.6, 1, 118, 0, 1],
+    [ 58.5, 208, 0.980, 0.610, 0.280, 1,    0, 1, 45.6, 1, 118, 0, 1],
+    [ 60.0, 216, 0.960, 0.600, 0.280, 1,    0, 1, 45.6, 1, 118, 0, 1],
   ];
   const SHOW_END = SHOW[SHOW.length - 1][0];
   function evalShow(t) {
@@ -2176,7 +2180,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     if (a[6]) { u = u * u * u * (u * (u * 6 - 15) + 10); }   // smootherstep, as for shapes
     const m = k => a[k] + (b[k] - a[k]) * u;
     return { shot: i, angle: m(1), dist: m(2), camY: m(3), tgtY: m(4), speed: m(5),
-             fade: m(7), el: m(8), pour: m(9), tilt: m(10), tableY: m(11) };
+             fade: m(7), el: m(8), pour: m(9), tilt: m(10), tableY: m(11), env: m(12) };
   }
   //#D{
   // Sim seconds elapsed by show time t. A seek needs the same integral the frame loop
@@ -2215,6 +2219,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['lightAz',  'range', -45,  -180, 180,  1,    0],
     ['lightEl',  'range', 45.6, -30,  85,  0.5,  1],
     ['tableY',   'range', 0,    0,    0.34, 0.005,3],
+    ['envAmt',   'range', 1,    0,    1,    0.01, 2],
     ['gridEnv',  'check', false],
     ['rtrace',   'range', 1,    0,    2,    1,    0],
     ['drops',    'check', true],
@@ -2306,6 +2311,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     camY: 'Camera height above the table, in metres. The tower is 0.51 m tall.',
     tgtY: 'Height the camera aims at, in metres. 0.26 is mid-tower, 0.48 is the top glass.',
     lightAz: 'Key light azimuth in degrees: swings the light around the tower. Moves the specular, the shadows and the caustics together.',
+    envAmt: 'Environment brightness: the sky, the fill lights, the softbox seen in the glass, the haze and the table ambient. 0 leaves only what the key light lights through the photon map. A timeline column: shot 1 brings it up with the light.',
     tableY: 'Table height in m. Raised to a tier\'s base (0.17 = tier 2, 0.34 = the top glass) it hides the tiers below: the glasses stand on the table. Drops reaching it end there, so hidden tiers get no spill.',
     lightEl: 'Key light elevation in degrees above the horizon. Low is raking and dramatic, high is overhead.',
     gridEnv: 'Swap the environment for a lat-long UV test grid: green horizon, magenta poles, orange dot at the key light. Shows which direction a reflection or refraction samples.',
