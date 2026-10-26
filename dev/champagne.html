@@ -100,7 +100,9 @@ struct U {
   bkBreath : f32,
   bkSpeed  : f32,
   bkLife   : f32,
-  _w2      : f32,
+  strat    : f32,
+  stratJit : f32,
+  _w2      : f32,          // buffer is 224 bytes = 56 floats; 53 used
 //#D}
 };
 
@@ -629,7 +631,24 @@ fn causticBlur(@builtin(global_invocation_id) g: vec3u) {
 fn photons(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
   if (i >= u32(u.nPhoton)) { return; }
-  let h = rnd3(i, u32(u.frame * 64.0), 5u);   // u.frame moves < 1 per frame in slow motion
+  var h = rnd3(i, u32(u.frame * 64.0), 5u);   // u.frame moves < 1 per frame in slow motion
+  // Random emission clumps and gaps: ~5 photons per blurred table cell a frame, so the
+  // evenly lit table came out as crawling grain. The R2 low-discrepancy sequence (Roberts
+  // 2018) spreads them evenly instead. In 32-bit fixed point, because in f32 a1 * i keeps
+  // only ~6 bits of fraction at 262 144 photons; the whole set shifts by one random offset
+  // per frame (Cranley-Patterson rotation) so successive frames still average.
+  if (u.strat > 1.5) {
+    // jittered grid: the emitter split into sqrt(N) x sqrt(N) cells, one random photon in
+    // each. No lattice to beat against the texels (the jitter is fresh every frame), and
+    // no constants to ship.
+    let n = u32(sqrt(u.nPhoton));
+    h = vec3f((vec2f(vec2u(i % n, i / n)) + h.xy) / f32(n), 0.0);
+  } else if (u.strat > 0.5) {
+    let q = vec2u(i * 3242174889u, i * 2447445414u) + pcg3d(vec3u(7u, u32(u.frame * 64.0), 9u)).xy;
+    // Plain R2 sits almost on a lattice ~2 texels apart, which beats against the texel grid
+    // as faint diagonal stripes. Jitter by about a lattice spacing (1/sqrt N) breaks it.
+    h = vec3f(fract(vec2f(q >> vec2u(8u)) / 16777216.0 + (h.xy - 0.5) * u.stratJit * inverseSqrt(u.nPhoton)), 0.0);
+  }
 
   let L  = lightDir();
   let t1 = normalize(cross(L, vec3f(0.0, 1.0, 0.0)));
@@ -1634,7 +1653,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // WebGPU zero-initialises every buffer, and zero is every initial state needed here -
   // empty glasses, a dry table, no waves, and particles with life 0, which reads as dead.
   const bufs = [
-    208,                      //  0 uniforms
+    224,                      //  0 uniforms
     cfg.npart * 32,           //  1 particles
     FINE_N * 4,               //  2 narrow band, quantised (atomic)
     FINE_N * 4,               //  3 narrow band, resolved
@@ -1819,7 +1838,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // det mode always leaves exactly one step pending - and re-shot the photons, so every
   // slider drag advanced the spill and nudged the caustics. A/B on one frame was impossible.
   let redrawOnly = false;
-  const f32 = new Float32Array(52);
+  const f32 = new Float32Array(56);
   const t0 = performance.now();
   let last = t0, acc = 0, accN = 0, frameNo = 0, ffSteps = 0;
 
@@ -1863,7 +1882,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife], 21);
+             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife, ui.strat, ui.stratJit], 21);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
@@ -2241,6 +2260,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['bkSpeed',  'range', 0.5,  0,    3,    0.05, 2],
     ['bkLife',   'range', 9,    0,    30,   0.5,  1],
     ['gridEnv',  'check', false],
+    ['strat',    'range', 2,    0,    2,    1,    0],
+    ['stratJit', 'range', 1,    0,    3,    0.05, 2],
     ['rtrace',   'range', 1,    0,    2,    1,    0],
     ['drops',    'check', true],
     ['bubbles',  'check', true],
@@ -2337,6 +2358,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     envAmt: 'Environment brightness: the sky, the fill lights, the softbox seen in the glass, the haze and the table ambient. 0 leaves only what the key light lights through the photon map. A timeline column: shot 1 brings it up with the light.',
     tableY: 'Table height in m. Raised to a tier\'s base (0.17 = tier 2, 0.34 = the top glass) it hides the tiers below: the glasses stand on the table. Drops reaching it end there, so hidden tiers get no spill.',
     lightEl: 'Key light elevation in degrees above the horizon. Low is raking and dramatic, high is overhead.',
+    stratJit: 'With strat: random nudge of each photon, in lattice spacings. 0 is plain R2, which shows faint diagonal stripes on the table (the near-lattice beating against the texel grid); ~1 breaks them up. Large values approach random emission.',
+    strat: 'How the photons are spread over the light: 0 random points (the lit table comes out grainy), 1 the R2 low-discrepancy sequence shifted per frame (stratJit breaks its faint stripes), 2 a jittered grid, one random photon per cell. Same photon count and cost.',
     gridEnv: 'Swap the environment for a lat-long UV test grid: green horizon, magenta poles, orange dot at the key light. Shows which direction a reflection or refraction samples.',
     rtrace: 'Traced reflections. 0 = environment lookup only (cheapest; near-grazing champagne turns into a flat bright disc). 1 = trace where air meets the champagne surface (and the splash zone just above it) and the bottle - where reflections read. 2 = trace glass reflections too - how it used to be, and on the pour shot about 40% of the render pass.',
     drops: 'Render the particle field: pour stream, splashes and droplets. Off leaves only the bulk liquid, but the simulation keeps running so the glasses still fill.',

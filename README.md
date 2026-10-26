@@ -7,7 +7,7 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (PADsynth pad, reverbs, liquid sounds, cork
-pop) work. `build/intro.cmd` is **9 313 bytes, 1 121 OVER the 8 192 budget**, so features have
+pop) work. `build/intro.cmd` is **9 369 bytes, 1 177 OVER the 8 192 budget**, so features have
 to be cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
@@ -784,10 +784,10 @@ from the release.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
 screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 9 313 bytes.
+`intro.cmd` is 9 369 bytes.
 
 Next:
-1. **Size** — 1 121 bytes over, before the score and any text. The puddle is cut (-362);
+1. **Size** — 1 177 bytes over, before the score and any text. The puddle is cut (-362);
    next candidates in *Feature cuts, measured*, and a packer search on the new shader.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
@@ -1010,7 +1010,20 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 313 bytes (26 Oct 2026), 1 121 OVER 8 192**: the bokeh animates (+49) -
+**`intro.cmd` is 9 369 bytes (26 Oct 2026), 1 177 OVER 8 192**: stratified photon emission
+(+56 shipped, +78 with the packer's default state on both sides). The lit table's grain is
+photon noise: 65 536 photons a frame put ~5 in each blurred (5x5 texel) cell, and the
+236/256 fade averages ~25 frames. `strat` picks the emitter pattern - 0 random, 1 R2
+low-discrepancy shifted per frame (`stratJit` breaks the faint diagonal stripes plain R2
+beats into the texel grid), 2 a jittered grid, one random photon per cell (default; fewest
+bytes, no stripes). Same photon count, same paths, same cost (photon pass 1.47 vs 1.48 ms at
+1920x1080, tower at step 2400). Grain on the lit table in the shot-1 framing, mean
+|5x5 box - 25x25 box| / mean, 5 grabs: light at 45.6° random 1.32% -> grid 0.95% (41x41: 2.01
+-> 1.22); light at 20° 1.70 -> 1.36, because the photons then land ~6 texels apart along the
+light, wider than the blur, and stratification only helps where the kernel spans several
+cells. The stronger lever at low light is the fade: 248/256 instead of 236 took the grid to
+1.04 (not adopted - it lags a moving light or caustic 2.5x longer). 4x the photons measured
+2.0 -> 0.45 but costs time. Before that 9 313: the bokeh animates (+49) -
 each disc breathes at its own rate (`bkBreath`, `bkSpeed`), and every `bkLife` seconds,
 phase-shifted per cell, a cell fades its disc out and rolls a new one, or none, so the lights
 drift around the room. It runs on the show clock, so it keeps real time through slow motion,
