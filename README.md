@@ -7,7 +7,7 @@ dropper — not a native exe.
 
 **Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
 click-to-start screen and the sound engine (PADsynth pad, reverbs, liquid sounds, cork
-pop) work. `build/intro.cmd` is **9 127 bytes, 935 OVER the 8 192 budget**, so features have
+pop) work. `build/intro.cmd` is **9 208 bytes, 1 016 OVER the 8 192 budget**, so features have
 to be cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
@@ -144,6 +144,14 @@ tilt]`:
   then gets no light at all (the table is lit only by the photon map).
 - **`pour`**: the share of the bottle's flow, 0 = not pouring; ramp it for a natural start.
 - **`tilt`**: the bottle in degrees; 0 takes it out of the scene, ~118 pours.
+- **`table`**: the table's height. Raised to a tier's base it hides the tiers below - rays
+  stop at the plane, so they are never even marched: 0.341 shows the top glass alone on
+  the table, 0.171 two tiers, 0 the whole tower. A millimetre above the tier below, whose
+  rims are exactly at the next base and otherwise cut through the table as rings. Drops
+  reaching the raised table end there, so hidden tiers get no spill (it would pour visibly
+  into the table); tier 3 starts filling when the table drops. Photons that would start
+  under the table are discarded - with the light low they lit the hidden tiers, which
+  showed through as rings. Change it only in the black.
 - In the black between shots `simSpeed` runs at 8, so the tower fills while nobody watches.
 
 - **Two keys sharing a `t` are a cut.** The later one wins at that instant, so the change is
@@ -199,15 +207,16 @@ a few seconds. It is representative, not bit-identical: spill azimuths differ by
 
 | show s | shot | sim |
 |---|---|---|
-| 0 - 8.5 | 1. the top glass alone; fades in dark, the light rises from 25° below the table to 45.6° | empty, no pour, no bottle |
+| 0 - 8.5 | 1. the top glass alone on the table (0.341); fades in dark, the light rises from 25° below the table to 45.6°, its shadow sweeping in | empty, no pour, no bottle |
 | 8.5 - 17 | 2. an orbit round it | |
 | 17 - 19.5 | 3. black; the cork pops at `popT` 17.8 | the bottle appears, tilted in |
 | 19.5 - 31.5 | 4. the pour in slow motion (0.25, easing to 1): the bottle tips in, the flow starts at 20 s, the top glass fills | top glass ~3/4 full by 29.5 |
-| 31.5 - 33 | black, sim at 8x | top glass overflows, tier 2 fills |
-| 33 - 43.5 | 5. an orbit of the tower (sim 1.5x) | tier 2 nearly full |
+| 31.5 - 33 | black: the table drops to tier 2 (0.171), sim at 8x | top glass overflows, tier 2 fills |
+| 33 - 43.5 | 5. an orbit of the two tiers (sim 1.5x) | tier 2 nearly full |
 | 43.5 - 45 | black, sim at 8x | |
-| 45 - 56 | 6. tier 2 in slow motion (0.25) | tier 2 full and spilling, tier 3 half full |
-| 56 - 60 | 7. to be decided (black) | |
+| 45 - 56 | 6. tier 2 in slow motion (0.25), spilling onto the table | tier 2 full and spilling |
+| 56 - 57.5 | black: the table drops to the floor, sim at 8x | tier 3 starts to fill |
+| 57.5 - 60 | 7. to be decided; for now the whole tower, wide | tier 3 about half full |
 
 The sound has not been re-timed to it yet (the drip rates still follow the old measurement).
 
@@ -770,10 +779,10 @@ from the release.
 Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, bottle,
 lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
 screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 9 127 bytes.
+`intro.cmd` is 9 208 bytes.
 
 Next:
-1. **Size** — 935 bytes over, before the score and any text. The puddle is cut (-362);
+1. **Size** — 1 016 bytes over, before the score and any text. The puddle is cut (-362);
    next candidates in *Feature cuts, measured*, and a packer search on the new shader.
    Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
    smaller.
@@ -996,7 +1005,9 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 127 bytes (26 Oct 2026), 935 OVER 8 192**: the new timeline - four more
+**`intro.cmd` is 9 208 bytes (26 Oct 2026), 1 016 OVER 8 192**: the table height as a
+timeline column, with the photons and drops following it (+81). Before that 9 127: the new
+timeline - four more
 columns and 28 keys, light, pour and bottle tilt as live uniforms (+183). Before that
 8 944: the glugs and the bowl fix
 (+79), pourWander 20 (+23, a constant). Before that 8 842: real slow motion, the exact
