@@ -2620,10 +2620,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // [from, to, word, x, y] in show seconds
   const SHOW_TEXT = textCues(SHOTS);
   let textFade = 1;               // the picture's fade: the words go dark with it
-  // after the canvas, so the harness's panels stay on top of it
+  // after the canvas, so the harness's panels stay on top of it. Every word starts unseen:
+  // drawText only runs once frames do, after the click, and until then they all showed
   canvas.insertAdjacentHTML('afterend', '<svg viewBox="-800 -450 1600 900" style="position:fixed;left:0;' +
     'top:0;width:100%;height:100%;pointer-events:none" fill="none" stroke="#fff" stroke-width="9.7" ' +
-    'stroke-miterlimit="9">' + SHOW_TEXT.map(c => '<path transform="translate(' + c[3] + ' ' + c[4] +
+    'stroke-miterlimit="9">' + SHOW_TEXT.map(c => '<path opacity="0" transform="translate(' + c[3] + ' ' + c[4] +
     ')" d="' + TEXT[c[2]] + '"/>').join('') + '</svg>');
   const textEls = canvas.nextSibling.children;
   function drawText(t) {
