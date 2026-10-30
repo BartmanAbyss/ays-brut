@@ -29,11 +29,13 @@ NCOL = len(COLS)
 # these shifts the shot's keys.
 SLIDER_COL = {'angle': 1, 'dist': 2, 'camY': 3, 'tgtY': 4, 'speed': 5, 'lightEl': 8, 'botTilt': 10,
               'tableY': 11, 'envAmt': 12}
-# The other sliders a shot may set for itself ("ov"): looks only. Everything else is
-# global - anything that changes the simulation would make a shot's start state depend on
-# which shots came before it, and the debug switches are not looks. Same list as the
+# The other sliders a shot may set for itself ("ov"): the looks, and how the bottle wanders
+# while it pours (pourWander, wanderSpd - set per shot by the user). Everything else is
+# global; the debug switches are not looks. A shot's start state depends on the values the
+# shots before it set, which the editor's kept start states account for. Same list as the
 # editor's PER_SHOT in the harness (a test checks they agree).
-PER_SHOT = ['lightAz', 'expo', 'cgain', 'shutter', 'bkBreath', 'bkSpeed', 'bkLife']
+PER_SHOT = ['lightAz', 'expo', 'cgain', 'shutter', 'bkBreath', 'bkSpeed', 'bkLife',
+            'pourWander', 'wanderSpd']
 
 
 class TimelineError(ValueError):

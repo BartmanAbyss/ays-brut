@@ -2203,10 +2203,14 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const clone = v => JSON.parse(JSON.stringify(v));
     // the sliders the timeline drives, and their key column (build/timeline.py SLIDER_COL)
     const COL = { angle: 1, dist: 2, camY: 3, tgtY: 4, speed: 5, lightEl: 8, botTilt: 10, tableY: 11, envAmt: 12 };
-    // the other sliders a shot may set for itself (build/timeline.py PER_SHOT): looks only.
-    // Anything that changes the simulation stays global, or a shot's start would depend on
-    // what the shots before it set; the debug switches are not looks.
-    const PER_SHOT = ['lightAz', 'expo', 'cgain', 'shutter', 'bkBreath', 'bkSpeed', 'bkLife'];
+    // the other sliders a shot may set for itself (build/timeline.py PER_SHOT): the looks, and
+    // how the bottle wanders while it pours. The rest of the simulation's settings stay
+    // global; the debug switches are not looks. A wander set by one shot changes the start of
+    // the shots after it - signature() covers that, since it holds every earlier shot whole.
+    // The wander's phase follows its speed, so the bottle jumps where wanderSpd changes:
+    // change it across a cut to black.
+    const PER_SHOT = ['lightAz', 'expo', 'cgain', 'shutter', 'bkBreath', 'bkSpeed', 'bkLife',
+                      'pourWander', 'wanderSpd'];
     // the globals the simulation depends on: a loop's saved start state is stale once one moves
     const SIM = ['autofill', 'fill', 'pourRate', 'dropVol', 'dropRad', 'foam', 'glug', 'glugHz',
                  'bottle', 'botAz', 'pourWander', 'wanderSpd', 'simSpeed', 'waves'];
@@ -2409,7 +2413,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         [    0, 247,   0.3, 0.52,  0.44,    1, 0, 0, 45.6, 0,   0, 0.341,   1],
         [  2.5,  39,  0.19, 0.53,  0.48, 0.25, 0, 0, 45.6, 0,  95, 0.341,   1],
       ] },
-    { name: '4 pour', dur: 12, ov: {},
+    { name: '4 pour', dur: 12, ov: {pourWander: 30, wanderSpd: 15.1},
       note: 'the pour in slow motion: the bottle tips in, the flow starts, the glass fills',
       keys: [
         [    0,  39,  0.19, 0.53,  0.48, 0.25, 0, 0, 45.6, 0,  95, 0.341,   1],
@@ -2544,7 +2548,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['botTilt',  'range', 118,  0,    170,  1,    0],
     ['botAz',    'range', 205, -180,  180,  1,    0],
     ['pourWander','range', 20,  0,    60,   0.5,  1],
-    ['wanderSpd','range', 4.0,  0.2,  20,   0.1,  1],
+    ['wanderSpd','range', 4,  0.2,  20,   0.1,  1],
     ['shutter',  'range', 0.5,  0.0,  2.5,  0.05, 2],
     ['bounces',  'range', 10,   2,    28,   1,    0],
     ['speed',    'range', 1,    0,    8,    0.05, 2],
@@ -2942,7 +2946,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const text = t => { const e = document.createElement('span'); e.textContent = t; tools.append(e); return e; };
     const bU = btn('undo', 'Undo the last change (ctrl+z).', () => undo());
     const bR = btn('redo', 'Redo (ctrl+y or ctrl+shift+z).', () => redo());
-    const bRec = btn('rec', 'Record: slider moves go into the shot under the playhead. The camera, light, table, bottle and environment sliders shift that shot\'s keys; the look sliders (light azimuth, exposure, caustics, shutter, bokeh) become the shot\'s own values. Everything else stays global.', () => setRec(!rec));
+    const bRec = btn('rec', 'Record: slider moves go into the shot under the playhead. The camera, light, table, bottle and environment sliders shift that shot\'s keys; the look sliders (light azimuth, exposure, caustics, shutter, bokeh) and the bottle\'s wander (pourWander, wanderSpd) become the shot\'s own values. Everything else stays global.', () => setRec(!rec));
     const bLoop = btn('loop', 'Play the selected shots over and over. Each pass starts from the simulation as it was at the first frame, kept on the GPU.', () => setLoop(!loop), 'lp');
     text('len');
     const lenIn = field('Length of the selected shot in seconds. Its keys stretch with it; the shots after it move.', '');

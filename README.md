@@ -258,7 +258,8 @@ in the editor at all, and the show is on.
   (angle, dist, camY, tgtY, lightEl, botTilt, tableY, envAmt) shift all of that shot's keys
   by the move, so a camera move keeps its shape; `speed` multiplies them instead (0.25 -> 0.5
   doubles every key of the shot, a ramp keeps its shape); the look sliders a shot may set for itself
-  (lightAz, expo, cgain, shutter, bkBreath, bkSpeed, bkLife - `ED.PER_SHOT`) become the shot's
+  (lightAz, expo, cgain, shutter, bkBreath, bkSpeed, bkLife) and the bottle's wander
+  (pourWander, wanderSpd) - `ED.PER_SHOT` - become the shot's
   own values. Everything else is global, rec or not: anything that changes the simulation
   would make a shot's start depend on the shots before it, and the debug switches are not
   looks. With rec off, the timeline still drives its own sliders.
@@ -270,6 +271,8 @@ in the editor at all, and the show is on.
   URL) into `dev/champagne.html`: the shot block, and each slider's default in `SPEC`. Commit
   it like any edit. Under a server without the save (`python -m http.server`) it downloads
   `timeline.json` instead; `python dev/serve.py --apply timeline.json` writes that in.
+  The server re-reads `build/timeline.py` on every save, so a rule change there (a slider
+  made per-shot) needs no restart; a change to `dev/serve.py` itself does.
 
 **speed** is the timeline's simulation speed: during the show the slider reads it out,
 without the show it is the speed. `simSpeed` - a dev multiplier on top of it, 0 to freeze the

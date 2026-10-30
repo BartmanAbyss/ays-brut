@@ -13,6 +13,7 @@ writing it - the editor's tests use that. Only ever binds to 127.0.0.1.
 import argparse
 import functools
 import http.server
+import importlib
 import io
 import json
 import os
@@ -96,6 +97,10 @@ def write_atomic(path, text):
 
 
 def save_file(path, payload, dry=False):
+    # the server runs for hours while build/timeline.py changes under it (a slider becomes
+    # per-shot, a field is added): read the rules fresh on every save, or a server started
+    # before the change refuses the very saves the change allows
+    importlib.reload(timeline)
     with io.open(path, encoding='utf-8', newline='') as f:
         src = f.read()
     out, changed = apply_save(src, payload)

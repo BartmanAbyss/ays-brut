@@ -85,9 +85,12 @@ class Table(unittest.TestCase):
                 T.validate(b)
 
     def test_release_flattens_and_warns_about_shot_values(self):
-        js, warn = T.emit_release(SRC)
+        # on the harness's own table with its shot values taken out: the user saves into
+        # it, so its contents are not fixed
+        shots = [{k: v for k, v in s.items() if k not in ('ov', 'fade')} for s in T.read_shots(SRC)]
+        js, warn = T.emit_release(T.write_shots(SRC, shots))
         self.assertNotIn(T.FLAT_CALL, js)
-        self.assertIn('const SHOW = [[0,20,0.3,0.42,0.41,1,0,0,-25,0,0,0.341,0],', js)
+        self.assertIn('const SHOW = ' + T.js_array(T.flatten(shots)) + ';', js)
         self.assertEqual(warn, [])
         js, warn = T.emit_release(T.write_shots(SRC, mini()))
         self.assertEqual(warn, ['b: expo, fade'])
