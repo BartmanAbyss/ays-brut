@@ -242,8 +242,9 @@ in the editor at all, and the show is on.
   1 and 8) and its fade in grey, across the whole show; under them a diamond for every key -
   filled when the move from it is eased, yellow-edged at a cut. Hover a diamond for the key's
   values and what moves on the way to the next key; click it to jump there.
-- **The strip** at the bottom: every shot end to end, each as wide as it is long. Click one
-  to select it and jump to its start; ctrl- or shift-click to add to the selection. `*`
+- **The strip** at the bottom: every shot end to end, each as wide as it is long. Click in
+  one to select it and play from the point clicked; ctrl- or shift-click to add to the
+  selection. **`.`** steps one frame (and pauses if playing). `*`
   marks a shot that differs from what was last saved; hover for its times, fade and values.
 - **len** sets the selected shot's length in seconds; **scale** / **-10%** / **+10%** stretch
   every selected shot, keys and all. The shots after it move; the playhead stays on the same

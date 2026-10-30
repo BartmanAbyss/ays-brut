@@ -2963,6 +2963,16 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   btn.onclick = () => setPaused(!cfg.paused);
   const typing = e => e.target.matches && e.target.matches('input[type=text], input[type=number], textarea');
   addEventListener('keydown', e => { if (e.code === 'Space' && !typing(e)) { e.preventDefault(); setPaused(!cfg.paused); } });
+  // '.' : one frame on - pauses if playing, then simulates and draws one show step (1/60 s
+  // of show; in slow motion that is less sim time, as in playback). A paused frame() runs
+  // its steps and returns without scheduling the next, so this is one frame exactly. The
+  // clock is set a step (and a hair) back: without det it reads the wall delta.
+  function stepFrame() {
+    if (!cfg.paused) setPaused(true);
+    last = performance.now() - SIM_DT * 1000 - 0.5;
+    frame();
+  }
+  addEventListener('keydown', e => { if (e.key === '.' && !typing(e) && !e.ctrlKey && !e.metaKey) { e.preventDefault(); stepFrame(); } });
   window.__pause  = () => { setPaused(true);  return 'paused'; };
   window.__resume = () => { setPaused(false); return 'running'; };
   setPaused(cfg.paused);
@@ -3105,7 +3115,12 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         e.title = (s.note || s.name) + '\n' + stt[i].toFixed(2) + ' - ' + stt[i + 1].toFixed(2) +
           ' s (' + +s.dur.toFixed(3) + ' s)' + (s.fade !== undefined ? '\nfades over ' + s.fade + ' s' : '') +
           (ov ? '\nits own: ' + ov : '');
-        e.onclick = ev => pick(i, ev.ctrlKey || ev.shiftKey || ev.metaKey);
+        // a click plays from the point clicked in the shot (ctrl/shift only selects)
+        e.onclick = ev => {
+          const r = e.getBoundingClientRect();
+          const u = r.width > 0 ? Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) : 0;
+          pick(i, ev.ctrlKey || ev.shiftKey || ev.metaKey, ED.r6(stt[i] + u * s.dur));
+        };
         e.dataset.i = i;
         bar.insertBefore(e, spanEl);
       });
@@ -3216,16 +3231,17 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     function setRec(v) { rec = v; draw(); marks(); note(v ? 'rec: slider moves go into ' + st.shots[cur].name : 'rec off'); }
 
     // ── selection, scaling ──
-    function pick(i, add) {
+    // select shot i; without add, also go to t (default: its start) and play from there
+    function pick(i, add, t) {
       if (add) {
         sel = sel.includes(i) ? sel.filter(x => x !== i) : [...sel, i].sort((a, b) => a - b);
         if (!sel.length) sel = [i];
       } else {
         sel = [i];
-        jump(ED.starts(st.shots)[i]);
+        jump(t === undefined ? ED.starts(st.shots)[i] : t);
       }
       draw();
-      if (loop) loopCheck(true);
+      if (loop) loopCheck(false);       // only if the playhead is now outside the loop
     }
     function scaleSel(f) {
       if (!(f > 0)) { note('the factor must be a positive number'); return; }
@@ -3427,10 +3443,34 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       return els.every((e, i) => near(parseFloat(e.style.width), E.st.shots[i].dur / T * 100, 1e-3));
     });
     await t('click a shot: selects it and jumps to its start', async () => {
-      shotEl(1).click();
+      shotEl(1).click();                        // clientX 0: left of it, so its start
       assert(E.sel.length === 1 && E.sel[0] === 1, 'selection ' + E.sel);
       assert(shotEl(1).classList.contains('sel'), 'not highlighted');
       return await until(() => seekTo < 0 && E.cur === 1);
+    });
+    await t('click inside a shot: plays from the point clicked', async () => {
+      const r = shotEl(1).getBoundingClientRect(), a = ED.starts(E.st.shots)[1];
+      const want = a + 0.6 * E.st.shots[1].dur;
+      setPaused(true);
+      shotEl(1).dispatchEvent(new MouseEvent('click', { clientX: r.left + 0.6 * r.width, bubbles: true }));
+      assert(E.sel.join() === '1', 'selection ' + E.sel);
+      assert(await until(() => seekTo < 0), 'the seek never landed');
+      const ok = Math.abs(showT - want) <= E.st.shots[1].dur / r.width + SIM_DT;   // a pixel's worth
+      setPaused(false);
+      return ok || ('landed at ' + showT + ', wanted ' + want) && false;
+    });
+    await t("'.' advances exactly one frame and stays paused", async () => {
+      setPaused(true); await frames(2);
+      const s0 = showStep;
+      dispatchEvent(new KeyboardEvent('keydown', { key: '.', bubbles: true }));
+      await frames(2);
+      assert(showStep === s0 + 1, 'one press: ' + (showStep - s0) + ' steps');
+      dispatchEvent(new KeyboardEvent('keydown', { key: '.', bubbles: true }));
+      await frames(2);
+      assert(showStep === s0 + 2, 'two presses: ' + (showStep - s0) + ' steps');
+      assert(cfg.paused, 'no longer paused');
+      setPaused(false);
+      return true;
     });
     await t('ctrl-click adds to the selection and removes again', () => {
       shotEl(3).dispatchEvent(new MouseEvent('click', { ctrlKey: true, bubbles: true }));
