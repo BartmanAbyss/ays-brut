@@ -267,6 +267,9 @@ in the editor at all, and the show is on.
   red when the shot sets its own value, yellow when its global value is not the default
   (`?param=` values count). The ↺ at the end of a marked row puts it back.
 - **undo / redo**: every change, sliders included - buttons, ctrl+z, ctrl+y or ctrl+shift+z.
+- **Typing a value**: the number beside any slider is a field - click it, type, Enter (or
+  click away) applies, Esc cancels. It goes through the slider, so it snaps to the slider's
+  step and range and is recorded, undone and marked like a drag.
 - **save** writes the shots and every global you changed (not those that only came from the
   URL) into `dev/champagne.html`: the shot block, and each slider's default in `SPEC`. Commit
   it like any edit. Under a server without the save (`python -m http.server`) it downloads
