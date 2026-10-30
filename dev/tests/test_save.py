@@ -39,9 +39,10 @@ def mini():
 class Table(unittest.TestCase):
     def test_reads_the_harness(self):
         shots = T.read_shots(SRC)
-        self.assertEqual(len(shots), 10)
-        self.assertEqual(shots[0]['name'], '1 glass')
-        self.assertEqual(T.starts(shots)[-1], 64.25)
+        # the user saves into this table: check it reads and holds together, not its contents
+        self.assertGreater(len(shots), 1)
+        self.assertEqual(T.starts(shots)[-1], T.flatten(shots)[-1][0])
+        T.validate(shots)
 
     def test_flatten_offsets_and_drops_exact_repeats(self):
         f = T.flatten(mini())

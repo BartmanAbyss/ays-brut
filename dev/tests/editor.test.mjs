@@ -37,10 +37,12 @@ test('flatten: offsets keys by shot start, drops an exact repeat at a boundary',
   assert.deepEqual(f[2], key(4, 30));
 });
 
-test('flatten: the real shot table reproduces the shipped key list', () => {
+test('flatten: the real shot table lays out end to end, times going forward', () => {
+  // the user saves into this table, so nothing about its contents is fixed
   const f = ED.flatten(SHOTS);
-  assert.equal(f.length, 31);
-  assert.equal(f[f.length - 1][0], 64.25);
+  const keys = SHOTS.reduce((n, s) => n + s.keys.length, 0);
+  assert.ok(f.length <= keys && f.length >= SHOTS.length + 1);
+  assert.equal(f[f.length - 1][0], ED.starts(SHOTS)[SHOTS.length]);
   for (let i = 1; i < f.length; i++) assert.ok(f[i][0] >= f[i - 1][0], 'times go forward');
 });
 
