@@ -1256,31 +1256,19 @@ coupe, the spray lookup. The remaining exact wins are tens of bytes each - the s
 lesson as the trace loops: brotli already shares what repeats, so only work that goes away
 pays.
 
-#### Table light by shadow rays (prototype, `fakeC`)
+#### Table light without photons: tried 30 Oct, reverted
 
-Instead of splatting photons, `shadowMap` traces one ray per texel of the same 768² table
-map, once a frame, from the table toward the key light - the photons' path run backwards
-through the same `leg` / `turn` (refracting, Fresnel, absorption, four legs at most as
-theirs). A texel is lit if its ray comes out within `shLobe` degrees of the light. The
-shadows keep the real shapes - bowls, stems, feet, the bottle and its neck, the drops -
-with no grain and no lag (no fade, no blur, no atomics). Lost: a backward ray cannot
-brighten a focus, so the caustic glints go. Dev-only for now (`//#D`), so the release is
-unchanged.
+Commits 7de3f51 and d62f890, reverted. Both measured with the photon code really deleted,
+packer default state on both sides:
+- **Analytic fake** (each bowl a lens-shaped blob, the bottle a capsule): -262 bytes,
+  ~-0.9 ms, but it looked nothing like the photons.
+- **Shadow rays into the same table map** (the photons' path run backwards, one ray per
+  texel): the real shadow shapes, no grain, no caustic glints; -269 bytes, ~-0.45 ms.
+  Traced per pixel instead of per texel it cost +6.5 ms of render.
 
-Measured 30 Oct, with the photon kernels, atomic map and dispatches really deleted and the
-map kept: **-269 bytes** with the packer's default state on both sides (10 806 -> 10 537;
-10 323 with the saved state). Frozen tower frame at 1920x1080, interleaved: the pass is
-0.79-0.85 ms against the photons' 1.25-1.31, render unchanged - about **-0.45 ms**.
-
-Tried and dropped on the way:
-- An analytic fake (each bowl a lens-shaped blob, the bottle a capsule) looked nothing like
-  the photons - round blobs with a gradient - and its first version saved only 69 bytes.
-- Straight, unbent shadow rays: clear glass and champagne barely dim them, so the glasses
-  cast outlines over see-through shadows; the photons' are dark because refraction sends
-  the light elsewhere. Without the four-leg cap the bottle's shadow came out see-through
-  green, where the photons' (which die in its four walls) is dark.
-- The same rays traced per pixel in `tableShade`: render 7.4 -> 13.9 ms, since every table
-  pixel paid, including table seen through glass. The map fixes the ray count.
+The ceiling is low because the photons are cheap: they reuse the render's `leg` / `turn`,
+so only the emitter, the fade, the splat and the blur are theirs, and any replacement needs
+its own kernel and keeps the map and its lookup.
 
 #### Feature cuts, measured
 

@@ -210,7 +210,6 @@ def release_uniforms(ui):
         'botOn': on('bottle'), 'puntSoft': f('puntSoft') * 0.001,
         'bkBreath': f('bkBreath'), 'bkSpeed': f('bkSpeed'), 'bkLife': f('bkLife'),
         'strat': f('strat'), 'stratJit': f('stratJit'), 'nSmooth': f('smooth'),
-        'fakeC': on('fakeC'), 'shLobe': f('shLobe'),
     }
 
 

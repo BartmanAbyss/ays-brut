@@ -155,9 +155,7 @@ struct U {
   stratJit : f32,
   nSmooth  : f32,          // span normals are measured over, in grid cells (0 = fine)
   puntSoft : f32,          // the radius the punt's dome blends into the flat base with, m
-  fakeC    : f32,          // 1: the table lit by a shadow ray instead of the photons
-  shLobe   : f32,          // ...the light's apparent radius it must point within, degrees
-  _w2      : f32,          // buffer is 240 bytes = 60 floats; 59 used
+  _w2      : f32,          // buffer is 240 bytes = 60 floats; 57 used
 //#D}
 };
 
@@ -1357,54 +1355,6 @@ fn causticAt(xz: vec2f) -> vec3f {
   let e = min(min(n.x, n.y), min(1.0 - n.x, 1.0 - n.y));
   return mix(a0, a1, f.y) / CSCALE * smoothstep(0.0, 0.02, e);
 }
-//#D{
-// ── the table lit without photons (fakeC 1, prototype) ──
-// A shadow ray from the table point straight toward the key light, through the real scene:
-// the same march and surfaces the render uses (leg, turn), so the shadows have the glasses'
-// and the bottle's own shapes - bowl, stem, foot, neck - and the drops' too. It is the
-// photons' path run backwards: it refracts (and reflects totally) at every surface as they
-// do, loses each surface's Fresnel reflection and each medium's absorption (gold through
-// champagne, olive through the bottle), and where it comes out, the point is lit only if
-// it now points at the light - within shLobe degrees, the light's apparent size. Straight
-// rays were tried first: clear glass and champagne barely dim them, so the glasses cast
-// outlines over see-through shadows, where the photons' are dark because refraction sends
-// the light elsewhere. What a backward ray cannot do is brighten a focus: the caustic
-// glints are gone. No grain, no lag, no photon passes.
-fn fakeLight(p: vec3f) -> vec3f {
-  let L = lightDir();
-  // the photons' pool of light: their emitter disc, 0.38 m across the light, soft-edged.
-  // 3.79 L.y^2 is what the photon map settled to on an open table
-  var e = vec3f(3.79 * L.y * max(L.y, 0.0)
-                * smoothstep(0.38, 0.19, length(cross(p - vec3f(0.0, 0.17 + u.tableY * 0.5, 0.0), L))));
-  var q = p + L * 0.0005;
-  var d = L;
-  var med = 0;
-  // Four legs - three surfaces - at most, as the photons: light crossing a hollow bottle
-  // (four walls) or two glasses never reached the table in their loop either, and those
-  // shadows are dark. Unbounded, the bottle's came out a see-through green.
-  for (var b = 0; b < 4; b++) {
-    if (max(e.x, max(e.y, e.z)) < 0.003) { break; }   // dark already (or the light is below)
-    let lg = leg(q, d, med);
-    e *= exp(-sigmaOf(med) * lg.x);
-    if (lg.y == 0.0) { return e * smoothstep(cos(u.shLobe / 57.3), 1.0, dot(d, L)); }   // out
-    if (lg.y == 1.0) { break; }                        // bent down onto the table: no light
-    let sf = turn(q + d * lg.x, d, med);
-    if (!sf.tir) { e *= 1.0 - sf.F; }
-    d = sf.d; q = sf.p; med = sf.med;
-  }
-  return vec3f(0.0);
-}
-// One ray per texel of the table's light map, once a frame, instead of the photons' fade,
-// splat and blur: a fixed number of rays however much table is on screen. Traced per
-// pixel it cost 6.5 ms of render - every table pixel, also those seen through the glass.
-@compute @workgroup_size(64)
-fn shadowMap(@builtin(global_invocation_id) g: vec3u) {
-  let i = g.x;
-  if (i >= CN * CN) { return; }
-  let xz = ((vec2f(vec2u(i % CN, i / CN)) + 0.5) / f32(CN) - 0.5) * 2.0 * CEXT;
-  vecs[V_CAUSTF + i] = vec4f(fakeLight(vec3f(xz.x, u.tableY, xz.y)) * CSCALE, 0.0);
-}
-//#D}
 fn tableShade(p: vec3f) -> vec3f {
   let r = length(p.xz);
   let fall = 1.0 - 0.55 * clamp(r * 1.5, 0.0, 1.0);
@@ -1858,9 +1808,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
                    'clearFine scatterFine jfaCoarse resolveFine ' +
                    'causticDecay photons causticBlur').split(' '))
     P[n] = await device.createComputePipelineAsync({ layout, compute: { module, entryPoint: n } });
-//#D{
-  P.shadowMap = await device.createComputePipelineAsync({ layout, compute: { module, entryPoint: 'shadowMap' } });
-//#D}
   const render = await device.createRenderPipelineAsync({ layout,
     vertex:   { module, entryPoint: 'vs' },
     fragment: { module, entryPoint: 'fs', targets: [{ format }] },
@@ -2063,8 +2010,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife, ui.strat, ui.stratJit, ui.smooth, ui.puntSoft * 0.001,
-             ui.fakeC ? 1 : 0, ui.shLobe], 24);
+             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife, ui.strat, ui.stratJit, ui.smooth, ui.puntSoft * 0.001], 24);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
@@ -2266,9 +2212,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 
     // 2b — caustics: fade the photon map, shoot this frame's photons, blur. A redraw keeps
     // the photon map it already has.
-    // (fakeC traces the map instead: one shadow ray per texel, no photons)
-    pass(2, redrawOnly ? [] : ui.fakeC ? [['shadowMap', WG(CN * CN, 64)]] :
-                              [['causticDecay', WG(CN * CN * 3, 256)],
+    pass(2, redrawOnly ? [] : [['causticDecay', WG(CN * CN * 3, 256)],
                                ['photons', WG(cfg.nphoton, 64)], ['causticBlur', WG(CN * CN, 256)]]);
 
     // 3 — render
@@ -2801,8 +2745,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['simSpeed', 'range', 1,    0,    4,    0.05, 2],
     ['expo',     'range', 1.45, 0.20, 4.00, 0.05, 2],
     ['cgain',    'range', 0.05, 0.00, 0.30, 0.005,3],
-    ['fakeC',    'check', false],
-    ['shLobe',   'range', 6,    0.5,  30,   0.5,  1],
     ['padGain',  'range', 0.01, 0,    0.2,  0.001,3],
     ['master',   'range', 0.9,  0,    2,    0.01, 2],
     ['padCut',   'range', 1400, 200,  6000, 10,   0],
@@ -2907,8 +2849,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     simSpeed: 'A dev multiplier on top of speed, out of the panel: a URL parameter, shown only when the URL sets it. 0 freezes the sim while the camera keeps moving (?simSpeed=0 for A/B checks). Below 1 real slow motion, above 1 more full 1/60 s steps per frame (16 at most; ff +20s for big jumps).',
     expo: 'Exposure applied before tonemapping.',
     cgain: 'Brightness of the photon caustic map on the table. It carries the direct light too, so 0 leaves the table lit by ambient only.',
-    fakeC: 'A/B: light the table with a ray traced back toward the key light instead of the photons: it bends through the glasses, champagne and bottle as the photons do, so the shadows keep their real shapes, but it cannot brighten a focus - the caustic glints are gone. No grain, no lag, and the photon passes do not run.',
-    shLobe: 'fakeC: how big the key light looks, in degrees. A table point is lit when its ray, bent through the glass, comes out within this of the light. Small gives crisp refracted shadow patterns, large softens them and lets more light through the glasses.',
     padGain: 'Audio, heard after "hear audio": the pad\'s level. The whole mix is normalised at the end, so this sets the pad against the liquid, not the overall volume.',
     master: 'Audio: the overall level. Fixed, not normalised: watch the peak in this column\'s header - past 1 the release clips, so turn this down.',
     padCut: 'Audio: the pad\'s lowpass cutoff in Hz - lower is darker and softer, higher brighter.',
