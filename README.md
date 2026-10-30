@@ -1391,8 +1391,9 @@ keys (share 388, cut 311).
 
 Harness-only state still in the release's frame loop: the fast-forward and seek bursts
 (`ffSteps`, `burstSteps`), `redrawOnly`, and the HUD's fps counters. The release never
-changes them, but terser cannot prove that. Pinned to their constant values: **-44 bytes**
-(measured, not applied).
+changes them, but terser cannot prove that. The build now pins them to their constant
+values (`REWRITES` in `build/build.py`): **10 507 -> 10 464**. The tables above are from
+before that change.
 
 **Render core per function (share):** `fs` 409, `mapN` 188, `reflColour` 150, `marchS` 120,
 `turn` 111, `tableShade` 90, `leg` 65, `vs` 55, `iorOf` 41, `lightDir` 39, `tonemap` 36,

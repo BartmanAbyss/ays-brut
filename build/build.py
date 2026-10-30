@@ -117,6 +117,14 @@ REWRITES = [
     ("  device.lost.then(i => { if (i.reason !== 'destroyed') fail('device-lost', i.message); });", ''),
     ("  device.pushErrorScope('validation');", ''),
     ("})().catch(e => fail('main', e));", '})();'),
+    # State only the harness changes - fast-forward and seek bursts, the paused redraw, the
+    # HUD's fps average. The release never touches it, but terser cannot prove that from
+    # `let`s it sees reset every frame: as constants it folds them away. -44 bytes.
+    ('  let redrawOnly = false;', '  const redrawOnly = false;'),
+    ('    const ffNow = ffSteps; ffSteps = 0;', '    const ffNow = 0;'),
+    ('    const burst = burstSteps; burstSteps = 0;', '    const burst = 0;'),
+    ('    const dt = now - last; last = now;\n', ''),
+    ('    acc += dt; accN++;\n', ''),
 ]
 
 # Any remaining line mentioning one of these is harness-only.
