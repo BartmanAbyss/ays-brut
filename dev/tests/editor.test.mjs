@@ -238,6 +238,16 @@ test('signature: earlier shots and sim globals matter; the shot itself and looks
   assert.notEqual(ED.signature(s, 1, { ...g, pourRate: 60 }), base, 'a sim global');
 });
 
+test('clampSteps: never steps over a shot start, lands on it exactly', () => {
+  const S = [0, 765, 1275, 1425];
+  assert.equal(ED.clampSteps(S, 763, 3), 2, 'stops on 765');
+  assert.equal(ED.clampSteps(S, 764, 1), 1);
+  assert.equal(ED.clampSteps(S, 765, 3), 3, 'already on it: free to go on');
+  assert.equal(ED.clampSteps(S, 100, 15), 15, 'no start in reach');
+  assert.equal(ED.clampSteps(S, 1270, 15), 5, 'a replay stops on 1275');
+  assert.equal(ED.clampSteps(S, 763, 2), 2, 'landing exactly on it needs no clamp');
+});
+
 test('loopSpan: one shot, or first to last of a selection', () => {
   assert.deepEqual(ED.loopSpan(mini(), [1]), [4, 6]);
   assert.deepEqual(ED.loopSpan(mini(), [2, 0]), [0, 9]);

@@ -252,10 +252,13 @@ in the editor at all, and the show is on.
   moment of the shot. **fade** sets the selected shot's fade in and out, in seconds (the same
   at both ends, whatever its length; 0 cuts hard; empty: its keys' fade, as before).
 - **loop** plays the selection over and over. The simulation's state at a shot's first frame
-  is kept on the GPU (~20 MB a shot, the last four), so each pass, and each jump back to a
+  is kept on the GPU (~20 MB a shot, up to 12 - the whole show), so each pass, and each jump back to a
   shot, starts there at once instead of replaying the show from 0. It is replayed only when
   something it depends on has changed: an earlier shot, or a global that changes the
   simulation (`ED.SIM`).
+  Playback and replays stop on every shot's first frame, so every start passed is kept -
+  a frame that took two steps used to skip one, and a loop of that shot replayed from 0.
+  When a replay from 0 is unavoidable, the strip says so.
 - **rec**: slider moves go into the shot under the playhead. The timeline's own sliders
   (angle, dist, camY, tgtY, lightEl, botTilt, tableY, envAmt) shift all of that shot's keys
   by the move, so a camera move keeps its shape; `speed` multiplies them instead (0.25 -> 0.5

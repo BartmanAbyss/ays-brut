@@ -2070,6 +2070,14 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         nShow = Math.min(15, seekTo - showStep); showPend = 0;
         if (nShow <= 0) { nShow = 0; seekTo = -1; }
       }
+      // the editor keeps a shot's start state only on its exact first step, and a frame
+      // that took two steps used to skip it - then a loop of that shot replayed the whole
+      // show from 0. Stop on every shot start; playback carries the rest to the next frame
+      if (ed && !redrawOnly && nShow > 1) {
+        const k = ed.clampShow(nShow);
+        if (seekTo < 0) showPend += (nShow - k) * SIM_DT;
+        nShow = k;
+      }
 //#D}
     }
     for (let i = 0; i < nShow; i++) {
@@ -2367,6 +2375,13 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // what a shot's start state depends on: every shot before it, and the simulation's globals
     const signature = (shots, i, globals) => JSON.stringify([shots.slice(0, i), SIM.map(k => globals[k])]);
     // the span a loop plays: from the first selected shot's start to the last one's end
+    // how many of n show steps to take from `step` so as not to pass over a shot's first
+    // step: the editor keeps a shot's start state only when a frame lands exactly on it
+    function clampSteps(startSteps, step, n) {
+      let k = n;
+      for (const s of startSteps) if (s > step && s - step < k) k = s - step;
+      return k;
+    }
     function loopSpan(shots, sel) {
       const st = starts(shots);
       return [st[Math.min(...sel)], st[Math.max(...sel) + 1]];
@@ -2403,7 +2418,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     return { r6, clone, COL, COLS, PER_SHOT, SIM, starts, flatten, shotAt, scale, setDur, mapTime,
              keyChanges, keyList,
              shiftColumn, scaleColumn, resetColumn, columnChanged, setOverride, clearOverride, effective,
-             fadeAt, setFade,
+             fadeAt, setFade, clampSteps,
              status, shotChanged, signature, loopSpan, history, savePayload };
   })();
   // EDITOR-MODEL:END
@@ -2593,7 +2608,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['reflect',  'check', true],
     ['autofill', 'check', true],
     ['fill',     'range', 80,   0,    100,  1,    0],
-    ['pourRate', 'range', 120,  1,    250,  1,    0],
+    ['pourRate', 'range', 120,  1,    1000, 1,    0],
     ['dropVol',  'range', 6,    1,    60,   1,    0],
     ['dropRad',  'range', 2.0,  0.4,  6.0,  0.1,  1],
     ['foam',     'range', 1.0,  0.0,  3.0,  0.05, 2],
@@ -3003,7 +3018,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // The shots end to end on one line at the bottom, each as wide as it is long. Click one
   // to select it and jump to its start; ctrl- or shift-click adds to the selection. "loop"
   // plays the selection over and over. The simulation's state at a shot's first frame is
-  // kept on the GPU (20 MB a shot, the last four), so a loop or a jump back starts there
+  // kept on the GPU (20 MB a shot, up to 12), so a loop or a jump back starts there
   // instead of replaying the show from 0 - and replays only when something before the shot
   // that the simulation depends on has changed (ED.signature).
   // "rec": slider moves go into the shot under the playhead instead of the global settings.
@@ -3028,6 +3043,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const stats = { restores: 0, captures: 0, wraps: 0, rewinds: 0 };
     const snaps = new Map();          // shot index -> the simulation at its first frame
     const SNAP_BUFS = [1, 4, 5];      // particles, atomics (volumes, waves, photons), vec4s
+    const SNAP_MAX = 12;              // ~20 MB each: the whole show's shots
     const total = () => ED.starts(st.shots)[st.shots.length];
     const stepOf = t => Math.round(t / SIM_DT);
 
@@ -3280,7 +3296,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       let s = snaps.get(i);
       if (s) snaps.delete(i);                       // re-inserted below: the newest is last
       else {
-        if (snaps.size >= 4) {
+        if (snaps.size >= SNAP_MAX) {
           const [oj, os] = snaps.entries().next().value;
           os.bufs.forEach(b => b.destroy()); snaps.delete(oj);
         }
@@ -3320,7 +3336,12 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     function jump(t) {
       const i = ED.shotAt(st.shots, t);
       if (Math.abs(ED.starts(st.shots)[i] - t) < 1e-9 && validSnap(i)) { restore(i); }
-      else seekShow(t);
+      else {
+        const r0 = stats.rewinds;
+        seekShow(t);
+        if (stats.rewinds > r0) note('replaying the show from 0 to ' + t.toFixed(2) + ' s - an earlier ' +
+          'shot or a simulation setting changed since this shot\'s start was kept (or it never was)');
+      }
       cur = -1;
       if (cfg.paused) requestAnimationFrame(frameOnce);
     }
@@ -3396,8 +3417,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         playhead();
         if (noteT && performance.now() - noteT > 8000) { msg.textContent = ''; noteT = 0; }
       },
+      clampShow: n => ED.clampSteps(ED.starts(st.shots).map(stepOf), showStep, n),
       afterFrame() {
-        if (seekTo >= 0) return;
+        // also during a replay: its frames run the sim fully up to the clock, so a replay
+        // from 0 leaves every shot start on its way kept
         const i = ED.shotAt(st.shots, showT);
         if (showStep === stepOf(ED.starts(st.shots)[i]) && !validSnap(i)) capture(i);
       },
@@ -3494,6 +3517,32 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       f.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', bubbles: true }));
       f.blur();
       return !document.body.classList.contains('nohud');
+    });
+    await t('playing into a shot keeps its start, even when a frame would step past it', async () => {
+      setPaused(true); await frames(3);                        // let a frame already queued run
+      const n = 3, a = ED.starts(E.st.shots)[n], sa = Math.round(a / SIM_DT);
+      if (E.snaps.has(n)) { E.snaps.get(n).step = -1; }        // make sure it is not kept yet
+      seekShow(a - SIM_DT); await until(() => seekTo < 0); await frames(3);
+      assert(showStep === sa - 1, 'not one step before the start: ' + (showStep - sa));
+      showPend = 2 * SIM_DT;                                   // this frame wants 3 steps
+      frame();
+      assert(showStep === sa, 'stepped past the start: ' + (showStep - sa));
+      assert(E.validSnap(n), 'the start was not kept');
+      frame();
+      assert(showStep >= sa + 2, 'the steps held back were lost: ' + (showStep - sa));
+      setPaused(false);
+      return true;
+    });
+    await t('a replay from 0 keeps every shot start it passes', async () => {
+      setPaused(true);
+      for (const s of E.snaps.values()) s.step = -1;          // forget them all
+      const last = E.st.shots.length - 1, a = ED.starts(E.st.shots)[last];
+      rewindSim();
+      seekShow(a); await until(() => seekTo < 0, 60000);
+      await frames(2);
+      const kept = E.st.shots.map((s, i) => E.validSnap(i));
+      setPaused(false);
+      return kept.slice(-6).every(Boolean) || ('kept ' + kept) && false;
     });
     await t("'.' advances exactly one frame and stays paused", async () => {
       setPaused(true); await frames(2);
