@@ -1036,6 +1036,13 @@ fn sdBottleLocal(p: vec3f) -> f32 {
   // lip ring below the mouth
   let lip = sdCyl(p, NECK_R + 0.0019, BOT_H - 0.013, BOT_H - 0.003) - 0.0011;
   d = min(d, lip);
+  // Punt: the dome pushed up into the base, 80 mm across and 30 mm high. Cut once for 32
+  // bytes, when the base only ever faced away; standing on the table (shot 2) it is in
+  // view, and a flat 3 mm floor behind the thick round wall stacked the wall's repeated
+  // reflections of the horizon into concentric rings. Divided by the radii, not scaled
+  // inside length() - that makes the ellipsoid taller, not flatter (the old one was 72 mm).
+  let punt = (length((p - vec3f(0.0, -0.002, 0.0)) / vec3f(0.040, 0.032, 0.040)) - 1.0) * 0.032;
+  d = max(d, -punt);
   // hollow into a shell, then open the bore so the mouth is a mouth
   let sh = max(d, -(d + BOT_W));
   let bore = sdCyl(p, NECK_R - BOT_W - 0.0006, 0.22, BOT_H + 0.02);
@@ -1046,8 +1053,10 @@ fn sdBottle(p: vec3f) -> f32 {
   var v: vec3f;
   if (u.botStand > 0.5) {
     // standing upright on the table, at the centre - where the top glass stands, which a
-    // table raised over its rim hides (shot 2)
-    v = p - vec3f(0.0, u.tableY, 0.0);
+    // table raised over its rim hides (shot 2). Sunk 1 mm into it, as the glass feet are:
+    // a base exactly at the table's height is two coincident surfaces, and float rounding
+    // picking between them showed as concentric rings in the bottom of the bottle
+    v = p - vec3f(0.0, u.tableY - 0.001, 0.0);
   } else {
     if (u.botTilt < 0.01) { return 1e9; }   // tilt 0: not in the scene
     // the mouth sits at the emitter, so the bottle follows the pour's wander for free
@@ -2479,10 +2488,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     { name: '2 orbit', dur: 8.5, ov: {botStand: true},
       note: 'an orbit round it',
       keys: [
-        [        0,         60,     0.62,     0.75,  0.66,    1, 0, 0, 45.6, 0,   0, 0.511,   1],
-        [        1,         82,     0.62,     0.75,  0.66,    1, 0, 1, 45.6, 0,   0, 0.511,   1],
-        [      7.5,        225,      0.6,     0.73,  0.66,    1, 0, 1, 45.6, 0,   0, 0.511,   1],
-        [      8.5,        247,      0.6,     0.73,  0.66,    1, 0, 0, 45.6, 0,   0, 0.511,   1],
+        [        0,         60,     0.36,    0.655,  0.66,    1, 0, 0, 45.6, 0,   0, 0.511,   1],
+        [        1,         82,     0.36,    0.655,  0.66,    1, 0, 1, 45.6, 0,   0, 0.511,   1],
+        [      7.5,        225,     0.34,    0.635,  0.66,    1, 0, 1, 45.6, 0,   0, 0.511,   1],
+        [      8.5,        247,     0.34,    0.635,  0.66,    1, 0, 0, 45.6, 0,   0, 0.511,   1],
       ] },
     { name: '3 pop', dur: 2.5, ov: {},
       note: 'black; the cork pops at popT. The bottle tips in, unseen',
