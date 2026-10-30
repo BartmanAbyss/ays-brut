@@ -147,7 +147,8 @@ struct U {
   bkLife   : f32,
   strat    : f32,
   stratJit : f32,
-  _w2      : f32,          // buffer is 224 bytes = 56 floats; 53 used
+  dropNE   : f32,          // the drops' normal stencil, m
+  _w2      : f32,          // buffer is 224 bytes = 56 floats; 54 used
 //#D}
 };
 
@@ -909,6 +910,19 @@ fn liquidDist(p: vec3f) -> f32 {
   // the particle toggle must isolate ONLY the particle field - returning early here once
   // also disabled the table puddle, which made an earlier bisection point at the wrong thing
   if (u.pfield < 0.5) { return bulkSDF(p); }
+//#D{
+  if (PROF) {
+    let dsp = sprayDist(p);
+    let dbk = bulkSDF(p);
+    profSprayD = dsp; profBulkD = dbk;
+    return min(dsp, dbk);
+  }
+//#D}
+  // particle field (spray/stream) and the analytic bulk in each glass
+  return min(sprayDist(p), bulkSDF(p));
+}
+// the particle field alone: the stream, the drops, the spray
+fn sprayDist(p: vec3f) -> f32 {
   // The eight trilerp fetches are scattered reads out of a 125 MiB buffer and they were a
   // third of the whole frame, paid on every march step whether or not a particle is within
   // reach. One read of the coarse cell answers that, and an unmarked block guarantees all
@@ -963,16 +977,7 @@ fn liquidDist(p: vec3f) -> f32 {
     d = max(BAND - u.prad, dc);
     if (PROF) { pc[4] += 1u; profSpraySrc = select(2u, 1u, dc > BAND - u.prad); }
   }
-  // particle field (spray/stream) and the analytic bulk in each glass
-//#D{
-  if (PROF) {
-    let dsp = max(d, sdBoxDom(p));
-    let dbk = bulkSDF(p);
-    profSprayD = dsp; profBulkD = dbk;
-    return min(dsp, dbk);
-  }
-//#D}
-  return min(max(d, sdBoxDom(p)), bulkSDF(p));
+  return max(d, sdBoxDom(p));
 }
 
 // the table is NOT marched — it is intersected analytically (grazing rays used to burn
@@ -1098,6 +1103,20 @@ fn planeT(ro: vec3f, rd: vec3f) -> f32 {
 
 fn mapN(p: vec3f) -> vec3f {
   if (PROF) { pc[14] += 1u; }
+  // The drops' surface is the trilinear narrow band: flat facets one 1.94 mm cell across,
+  // meeting in creases. A 0.2 mm stencil reads every crease as a sharp turn, and the
+  // stream refracted the dark far table in hard-edged blocks, one per facet. On a drop the
+  // normal comes from the particle field alone over a wider stencil (dropNE, ~a cell),
+  // which averages across the facets; glass, bulk liquid and bottle keep the fine one -
+  // the glass wall is 1.4 mm thick.
+  if (u.pfield > 0.5 && u.noliq < 0.5 && u.dropNE > 0.00021) {
+    let ds = sprayDist(p);
+    if (ds < min(min(sdTower(p), sdBottle(p)), bulkSDF(p))) {
+      let w = vec2f(1.0, -1.0) * u.dropNE;
+      return normalize( w.xyy * sprayDist(p + w.xyy) + w.yyx * sprayDist(p + w.yyx)
+                      + w.yxy * sprayDist(p + w.yxy) + w.xxx * sprayDist(p + w.xxx) );
+    }
+  }
   let e = vec2f(1.0, -1.0) * 0.0002;
   return normalize( e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx)
                   + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx) );
@@ -1936,7 +1955,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife, ui.strat, ui.stratJit], 21);
+             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife, ui.strat, ui.stratJit, ui.dropSmooth * 0.001], 21);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
@@ -2537,6 +2556,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['gridEnv',  'check', false],
     ['strat',    'range', 2,    0,    2,    1,    0],
     ['stratJit', 'range', 1,    0,    3,    0.05, 2],
+    ['dropSmooth','range', 2,   0.2,  5,    0.1,  1],
     ['rtrace',   'range', 1,    0,    2,    1,    0],
     ['drops',    'check', true],
     ['bubbles',  'check', true],
@@ -2634,6 +2654,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     envAmt: 'Environment brightness: the sky, the fill lights, the softbox seen in the glass, the haze and the table ambient. 0 leaves only what the key light lights through the photon map. A timeline column: shot 1 brings it up with the light.',
     tableY: 'Table height in m. Raised to a tier\'s base (0.17 = tier 2, 0.34 = the top glass) it hides the tiers below: the glasses stand on the table. Drops reaching it end there, so hidden tiers get no spill.',
     lightEl: 'Key light elevation in degrees above the horizon. Low is raking and dramatic, high is overhead.',
+    dropSmooth: 'How smooth the drops\' surface looks, in mm: the span its normals are measured over. Their surface is built on a 1.94 mm grid with flat facets; measured finer than a cell (0.2 = as before) every crease shows, and the stream refracts the dark table behind it in hard-edged blocks. About a cell (2) smooths the creases into curvature. Glass and the liquid in the glasses keep their fine normals.',
     stratJit: 'With strat: random nudge of each photon, in lattice spacings. 0 is plain R2, which shows faint diagonal stripes on the table (the near-lattice beating against the texel grid); ~1 breaks them up. Large values approach random emission.',
     strat: 'How the photons are spread over the light: 0 random points (the lit table comes out grainy), 1 the R2 low-discrepancy sequence shifted per frame (stratJit breaks its faint stripes), 2 a jittered grid, one random photon per cell. Same photon count and cost.',
     gridEnv: 'Swap the environment for a lat-long UV test grid: green horizon, magenta poles, orange dot at the key light. Shows which direction a reflection or refraction samples.',
