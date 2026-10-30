@@ -223,7 +223,7 @@ a few seconds. It is representative, not bit-identical: spill azimuths differ by
 | 0 - 12.75 | 1. the top glass alone on the table (0.341); fades in dark, the light rises from 25° below the table to 45.6°, its shadow sweeping in, the environment coming up with it | empty, no pour, no bottle |
 | 12.75 - 21.25 | 2. an orbit round it | |
 | 21.25 - 23.75 | 3. black; the cork pops at `popT` 22.05 | the bottle appears, tilted in |
-| 23.75 - 35.75 | 4. the pour in slow motion (0.25, easing to 1): the bottle tips in, the flow starts at 24.25 s, the top glass fills | top glass ~3/4 full by 33.75 |
+| 23.75 - 35.75 | 4. the pour in slow motion (0.25 throughout): the bottle tips in, the flow starts at 24.25 s, the top glass fills | top glass a little under 3/4 full |
 | 35.75 - 37.25 | black: the table drops to tier 2 (0.171), sim at 8x | top glass overflows, tier 2 fills |
 | 37.25 - 47.75 | 5. an orbit of the two tiers (sim 1.5x) | tier 2 nearly full |
 | 47.75 - 49.25 | black, sim at 8x | |
@@ -238,6 +238,10 @@ The sound has not been re-timed to it yet (the drip rates still follow the old m
 `python dev/serve.py`, then http://localhost:8787/champagne.html?edit=1. No sound is rendered
 in the editor at all, and the show is on.
 
+- **Above the strip**: the timeline's speed as an orange curve (log scale, lines at 0.25,
+  1 and 8) and its fade in grey, across the whole show; under them a diamond for every key -
+  filled when the move from it is eased, yellow-edged at a cut. Hover a diamond for the key's
+  values and what moves on the way to the next key; click it to jump there.
 - **The strip** at the bottom: every shot end to end, each as wide as it is long. Click one
   to select it and jump to its start; ctrl- or shift-click to add to the selection. `*`
   marks a shot that differs from what was last saved; hover for its times, fade and values.
@@ -252,7 +256,8 @@ in the editor at all, and the show is on.
   simulation (`ED.SIM`).
 - **rec**: slider moves go into the shot under the playhead. The timeline's own sliders
   (angle, dist, camY, tgtY, lightEl, botTilt, tableY, envAmt) shift all of that shot's keys
-  by the move, so a camera move keeps its shape; the look sliders a shot may set for itself
+  by the move, so a camera move keeps its shape; `speed` multiplies them instead (0.25 -> 0.5
+  doubles every key of the shot, a ramp keeps its shape); the look sliders a shot may set for itself
   (lightAz, expo, cgain, shutter, bkBreath, bkSpeed, bkLife - `ED.PER_SHOT`) become the shot's
   own values. Everything else is global, rec or not: anything that changes the simulation
   would make a shot's start depend on the shots before it, and the debug switches are not
@@ -265,6 +270,11 @@ in the editor at all, and the show is on.
   URL) into `dev/champagne.html`: the shot block, and each slider's default in `SPEC`. Commit
   it like any edit. Under a server without the save (`python -m http.server`) it downloads
   `timeline.json` instead; `python dev/serve.py --apply timeline.json` writes that in.
+
+**speed** is the timeline's simulation speed: during the show the slider reads it out,
+without the show it is the speed. `simSpeed` - a dev multiplier on top of it, 0 to freeze the
+sim for A/B checks - is out of the panel: a URL parameter only, its row shown when the URL
+sets it to anything but 1.
 
 Going back in time no longer reloads the page anywhere in the harness: it rewinds in place,
 as the rewind button does (with `?gate=1` it still reloads, the show running on the audio

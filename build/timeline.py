@@ -27,7 +27,7 @@ COLS = ['t', 'angle', 'dist', 'camY', 'tgtY', 'speed', 'ease', 'fade', 'lightEl'
 NCOL = len(COLS)
 # The sliders the timeline drives, and the key column each one reads out. Recording one of
 # these shifts the shot's keys.
-SLIDER_COL = {'angle': 1, 'dist': 2, 'camY': 3, 'tgtY': 4, 'lightEl': 8, 'botTilt': 10,
+SLIDER_COL = {'angle': 1, 'dist': 2, 'camY': 3, 'tgtY': 4, 'speed': 5, 'lightEl': 8, 'botTilt': 10,
               'tableY': 11, 'envAmt': 12}
 # The other sliders a shot may set for itself ("ov"): looks only. Everything else is
 # global - anything that changes the simulation would make a shot's start state depend on

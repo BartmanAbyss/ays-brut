@@ -46,6 +46,13 @@
   #tl { position:fixed; left:8px; right:262px; bottom:8px; padding:6px 8px; background:#000c;
         border:1px solid #333; border-radius:4px; z-index:3; font:11px ui-monospace,Consolas,monospace; }
   #tl .bar { position:relative; display:flex; height:36px; }
+  #tl .curves { display:block; width:100%; height:26px; margin-bottom:2px; }
+  #tl .keys { position:relative; height:11px; margin-bottom:2px; }
+  #tl .kf { position:absolute; top:1px; width:7px; height:7px; margin-left:-4px; transform:rotate(45deg);
+        box-sizing:border-box; border:1px solid #9ab; background:transparent; cursor:pointer; }
+  #tl .kf.ease { background:#9ab; }
+  #tl .kf.cut { border-color:#ffcf6b; }
+  #tl .kf:hover { border-color:#fff; background:#fff; }
   #tl .shot { flex:none; box-sizing:border-box; height:100%; padding:3px 4px; overflow:hidden;
         white-space:nowrap; background:#1b1b26; border:1px solid #3a3a48; color:#9ab; cursor:pointer; }
   #tl .shot.black { background:#0b0b0e; color:#667; }
@@ -1894,6 +1901,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       { const f = ED.fadeAt(ed ? ed.st.shots : SHOTS, previewT >= 0 ? previewT : showT); if (f !== null) fade = f; }
       probe.fade = fade;
       setUI('lightEl', el.toFixed(1)); setUI('botTilt', tilt.toFixed(0)); setUI('tableY', ty.toFixed(3)); setUI('envAmt', en.toFixed(2));
+      setUI('speed', sh.speed.toFixed(2));
 //#D}
       // Sliders follow for readout only. Driving the camera THROUGH them would quantise it
       // to the slider step - dist steps by 0.01, visible stepping on a push-in that only
@@ -2017,7 +2025,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D}
     }
     for (let i = 0; i < nShow; i++) {
-      const sp = ui.show ? evalShow((showStep + i) * SIM_DT).speed : 1;
+      const sp = ui.show ? evalShow((showStep + i) * SIM_DT).speed : ui.speed;
       clockT += SIM_DT * sp * ui.simSpeed;
     }
     showStep += nShow; showT = showStep * SIM_DT;
@@ -2045,7 +2053,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D{
     if (seekTo >= 0) big = true;   // a replay takes full steps, as many as it needs
 //#D}
-    const hu = big ? 1 : Math.min(1, (ui.show ? evalShow(showT).speed : 1) * ui.simSpeed);
+    const hu = big ? 1 : Math.min(1, (ui.show ? evalShow(showT).speed : ui.speed) * ui.simSpeed);
     stepDt = hu * SIM_DT;
     const want = hu > 0 ? Math.floor((clockT / SIM_DT - simU) / hu + 1e-6) : 0;
     let simSteps = redrawOnly ? 0 : Math.max(0, Math.min(16 + ffNow + burst, want));
@@ -2194,7 +2202,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const r6 = x => Math.round(x * 1e6) / 1e6;   // build/timeline.py r6, bit for bit
     const clone = v => JSON.parse(JSON.stringify(v));
     // the sliders the timeline drives, and their key column (build/timeline.py SLIDER_COL)
-    const COL = { angle: 1, dist: 2, camY: 3, tgtY: 4, lightEl: 8, botTilt: 10, tableY: 11, envAmt: 12 };
+    const COL = { angle: 1, dist: 2, camY: 3, tgtY: 4, speed: 5, lightEl: 8, botTilt: 10, tableY: 11, envAmt: 12 };
     // the other sliders a shot may set for itself (build/timeline.py PER_SHOT): looks only.
     // Anything that changes the simulation stays global, or a shot's start would depend on
     // what the shots before it set; the debug switches are not looks.
@@ -2248,6 +2256,13 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     function shiftColumn(shots, i, col, delta) {
       const s = clone(shots);
       for (const k of s[i].keys) k[col] = r6(k[col] + delta);
+      return s;
+    }
+    // multiply one column of one shot: a speed is recorded as a factor, so a ramp keeps its
+    // shape (0.25 -> 1 doubled is 0.5 -> 2) and a stop stays a stop
+    function scaleColumn(shots, i, col, f) {
+      const s = clone(shots);
+      for (const k of s[i].keys) k[col] = r6(k[col] * f);
       return s;
     }
     function resetColumn(shots, saved, i, col) {
@@ -2322,8 +2337,20 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       for (const k of st.touched) if (st.globals[k] !== defaults[k]) globals[k] = st.globals[k];
       return { shots: clone(st.shots), globals };
     }
-    return { r6, clone, COL, PER_SHOT, SIM, starts, flatten, shotAt, scale, setDur, mapTime,
-             shiftColumn, resetColumn, columnChanged, setOverride, clearOverride, effective,
+    // a key's columns by name (build/timeline.py COLS), and what moves between two keys
+    const COLS = ['t', 'angle', 'dist', 'camY', 'tgtY', 'speed', 'ease', 'fade', 'lightEl', 'pour',
+                  'botTilt', 'tableY', 'envAmt'];
+    const keyChanges = (a, b) => COLS.map((n, c) => [n, a[c], b[c]])
+      .filter(([n, x, y], c) => c > 0 && n !== 'ease' && x !== y);
+    // the keys as the strip shows them: show time, shot, index in the shot
+    function keyList(shots) {
+      const st = starts(shots), out = [];
+      shots.forEach((s, i) => s.keys.forEach((k, j) => out.push({ t: r6(st[i] + k[0]), i, j, k })));
+      return out;
+    }
+    return { r6, clone, COL, COLS, PER_SHOT, SIM, starts, flatten, shotAt, scale, setDur, mapTime,
+             keyChanges, keyList,
+             shiftColumn, scaleColumn, resetColumn, columnChanged, setOverride, clearOverride, effective,
              fadeAt, setFade,
              status, shotChanged, signature, loopSpan, history, savePayload };
   })();
@@ -2389,8 +2416,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         [  0.5,  40,  0.19, 0.53,  0.48, 0.25, 1, 1, 45.6, 0, 112, 0.341,   1],
         [  0.9,  41, 0.188, 0.53,  0.48, 0.25, 0, 1, 45.6, 1, 118, 0.341,   1],
         [  6.5,  52,  0.18, 0.53,  0.48, 0.25, 1, 1, 45.6, 1, 118, 0.341,   1],
-        [   11,  62,  0.18, 0.55,  0.49,    1, 0, 1, 45.6, 1, 118, 0.341,   1],
-        [   12,  65,  0.18, 0.55,  0.49,    1, 0, 0, 45.6, 1, 118, 0.341,   1],
+        [   11,  62,  0.18, 0.55,  0.49, 0.25, 0, 1, 45.6, 1, 118, 0.341,   1],
+        [   12,  65,  0.18, 0.55,  0.49, 0.25, 0, 0, 45.6, 1, 118, 0.341,   1],
       ] },
     { name: 'black', dur: 1.5, ov: {},
       note: 'the table drops to tier 2; the sim runs 8x, the top glass overflows into it',
@@ -2516,10 +2543,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['bottle',   'check', true],
     ['botTilt',  'range', 118,  0,    170,  1,    0],
     ['botAz',    'range', 205, -180,  180,  1,    0],
-    ['pourWander','range', 20,  0,    30,   0.5,  1],
-    ['wanderSpd','range', 4.0,  0.2,  12,   0.1,  1],
+    ['pourWander','range', 20,  0,    60,   0.5,  1],
+    ['wanderSpd','range', 4.0,  0.2,  20,   0.1,  1],
     ['shutter',  'range', 0.5,  0.0,  2.5,  0.05, 2],
     ['bounces',  'range', 10,   2,    28,   1,    0],
+    ['speed',    'range', 1,    0,    8,    0.05, 2],
     ['simSpeed', 'range', 1,    0,    4,    0.05, 2],
     ['expo',     'range', 1.45, 0.20, 4.00, 0.05, 2],
     ['cgain',    'range', 0.05, 0.00, 0.30, 0.005,3],
@@ -2619,7 +2647,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     dropRad: 'Rendered radius of a droplet in mm. Below about 1.7 mm (the fine grid cell half-diagonal at 256 cubed) drops start falling between voxels, so a dense stream breaks up into scattered drops.',
     dropVol: 'Volume of one drop in microlitres. Together with pourRate this sets how fast the glasses fill: mL/s = pourRate x dropVol x 60 / 1000.',
     bounces: 'Maximum refraction/reflection interfaces per ray. Deep interior shots need 20+; the wide tower is fine around 8. Each extra bounce costs render time, and too few shatters the image into checkerboard shards where rays run out.',
-    simSpeed: 'Simulation speed multiplier, on top of the speed the timeline sets. Below 1 it is real slow motion: each step covers less sim time and the liquid moves every frame. Above 1 the sim runs more full 1/60 s steps per frame (16 at most; ff +20s for big jumps). 0 freezes it while the camera keeps moving.',
+    speed: 'Simulation speed: below 1 real slow motion (0.25 = 4x slower), above 1 faster (the black between shots runs 8 so the tower fills unseen). The show clock - camera, fades, cuts - is not affected. During the show it reads out the timeline\'s speed; with rec on, moving it multiplies all of this shot\'s speeds by the same factor. Without the show it is the speed.',
+    simSpeed: 'A dev multiplier on top of speed, out of the panel: a URL parameter, shown only when the URL sets it. 0 freezes the sim while the camera keeps moving (?simSpeed=0 for A/B checks). Below 1 real slow motion, above 1 more full 1/60 s steps per frame (16 at most; ff +20s for big jumps).',
     expo: 'Exposure applied before tonemapping.',
     cgain: 'Brightness of the photon caustic map on the table. It carries the direct light too, so 0 leaves the table lit by ambient only.',
     padGain: 'Audio, heard after "hear audio": the pad\'s level. The whole mix is normalised at the end, so this sets the pad against the liquid, not the overall volume.',
@@ -2818,6 +2847,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // Every range slider is also a URL parameter of the same name, so a framing or a look
   // travels as a link. Done last so it wins over presets.
   for (const [k, kind] of SPEC) { if (kind === 'range' && Q.has(k)) setUI(k, qf(k, ui[k])); }
+  // simSpeed is a dev multiplier on top of the timeline's speed: out of the panel, a URL
+  // parameter only - shown when the URL sets it, so a frozen sim is never invisible
+  uiEl.simSpeed.inp.parentNode.style.display = ui.simSpeed === 1 ? 'none' : '';
   document.getElementById('restart').onclick = () => location.reload();
   // Rewind in place: the whole simulation lives in buffers that start zeroed, and in the
   // clocks below, so clearing both is exactly a fresh load - without reloading, so the
@@ -2879,8 +2911,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const KEYS = SPEC.map(x => x[0]).filter(k => !SKIP.has(k) && !AUDIO.has(k));
     const KIND = Object.fromEntries(SPEC.map(x => [x[0], x[1]]));
     const defaults = Object.fromEntries(SPEC.map(x => [x[0], x[2]]));
-    const FIELD = { angle: 'angle', dist: 'dist', camY: 'camY', tgtY: 'tgtY', lightEl: 'el',
-                    botTilt: 'tilt', tableY: 'tableY', envAmt: 'env' };
+    const FIELD = { angle: 'angle', dist: 'dist', camY: 'camY', tgtY: 'tgtY', speed: 'speed',
+                    lightEl: 'el', botTilt: 'tilt', tableY: 'tableY', envAmt: 'env' };
     let st = { shots: ED.clone(SHOTS), globals: {}, touched: [] };
     for (const k of KEYS) if (!(k in ED.COL)) st.globals[k] = ui[k];
     let saved = ED.clone(SHOTS);
@@ -2924,7 +2956,53 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     btn('save', 'Write the shots and the changed slider defaults into dev/champagne.html (needs python dev/serve.py as the server; otherwise downloads them as timeline.json).', () => save(false));
     const msg = document.createElement('span'); msg.className = 'msg'; tools.append(msg);
     const keyEl = text('blue keys · red shot · yellow global'); keyEl.className = 'key';
-    root.append(bar, tools);
+    // above the shots: the timeline's speed and fade as curves, and every key as a diamond
+    const curves = document.createElement('canvas'); curves.className = 'curves';
+    curves.title = 'orange: the simulation speed (log scale; lines at 0.25, 1 and 8). grey: the fade.';
+    const keysEl = document.createElement('div'); keysEl.className = 'keys';
+    root.append(curves, keysEl, bar, tools);
+    const fmt = v => +(+v).toFixed(3);
+    function drawKeys() {
+      keysEl.textContent = '';
+      const T = total(), list = ED.keyList(st.shots);
+      list.forEach((e, n) => {
+        const d = document.createElement('div');
+        const next = list[n + 1] && list[n + 1].i === e.i ? list[n + 1] : null;
+        const prev = list[n - 1];
+        d.className = 'kf' + (e.k[6] ? ' ease' : '') + (prev && prev.t === e.t ? ' cut' : '');
+        d.style.left = (e.t / T * 100) + '%';
+        d.dataset.t = e.t;
+        const vals = ED.COLS.slice(1).map((c, m) => c + ' ' + fmt(e.k[m + 1])).join('  ');
+        const moves = next ? ED.keyChanges(e.k, next.k).map(([c, a, b]) => c + ' ' + fmt(a) + ' -> ' + fmt(b)) : [];
+        d.title = st.shots[e.i].name + ', key ' + (e.j + 1) + ' at +' + fmt(e.k[0]) + ' s (show ' + fmt(e.t) + ' s)\n' +
+          vals + (next ? '\n\nto the next key (' + fmt(next.t - e.t) + ' s, ' + (e.k[6] ? 'eased' : 'linear') + '): ' +
+          (moves.length ? moves.join(', ') : 'nothing moves') : '\n\nthe shot\'s last key');
+        d.onclick = ev => { ev.stopPropagation(); jump(e.t); };
+        keysEl.append(d);
+      });
+    }
+    function drawCurves() {
+      const w = Math.max(1, Math.round(curves.clientWidth * devicePixelRatio));
+      const h = Math.max(1, Math.round(curves.clientHeight * devicePixelRatio));
+      if (curves.width !== w) curves.width = w;
+      if (curves.height !== h) curves.height = h;
+      const g = curves.getContext('2d'), T = total();
+      g.clearRect(0, 0, w, h);
+      // log2 speed from 1/8 (bottom) to 8 (top)
+      const y = sp => h - 1 - (Math.log2(Math.max(sp, 1 / 8)) + 3) / 6 * (h - 2);
+      g.strokeStyle = '#333'; g.lineWidth = 1;
+      for (const sp of [0.25, 1, 8]) { g.beginPath(); g.moveTo(0, y(sp) + 0.5); g.lineTo(w, y(sp) + 0.5); g.stroke(); }
+      g.fillStyle = '#ffffff22'; g.beginPath(); g.moveTo(0, h);
+      for (let x = 0; x <= w; x++) {
+        const t = x / w * T, f = ED.fadeAt(st.shots, t);
+        g.lineTo(x, h - (f !== null ? f : evalShow(t).fade) * (h - 1));
+      }
+      g.lineTo(w, h); g.fill();
+      g.strokeStyle = '#ff9f43'; g.lineWidth = devicePixelRatio; g.beginPath();
+      for (let x = 0; x <= w; x++) { const v = y(evalShow(x / w * T).speed); x ? g.lineTo(x, v) : g.moveTo(x, v); }
+      g.stroke();
+    }
+    addEventListener('resize', () => drawCurves());
     document.body.append(root);
     fadeIn.onchange = () => {
       if (sel.length !== 1) return;
@@ -2965,6 +3043,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       spanEl.style.left = (a / T * 100) + '%'; spanEl.style.width = ((b - a) / T * 100) + '%';
       bRec.classList.toggle('on', rec); bLoop.classList.toggle('on', loop);
       bU.disabled = !hist.canUndo; bR.disabled = !hist.canRedo;
+      drawKeys(); drawCurves();
       playhead();
     }
     const playhead = () => { ph.style.left = (Math.min(showT, total()) / total() * 100) + '%'; };
@@ -3042,7 +3121,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         if (k in ED.COL) {
           if (!ui.show) return;                         // manual camera: the slider is the value
           if (!rec) { note('rec is off - the timeline drives ' + k + '; turn rec on to move this shot'); return; }
-          st.shots = ED.shiftColumn(d.pre.shots, cur, ED.COL[k], v - d.from);
+          st.shots = k === 'speed' && d.from > 1e-6
+            ? ED.scaleColumn(d.pre.shots, cur, ED.COL[k], v / d.from)
+            : ED.shiftColumn(d.pre.shots, cur, ED.COL[k], v - d.from);
           rebuild();
         } else if ((st.shots[cur].ov && k in st.shots[cur].ov) || (rec && ED.PER_SHOT.includes(k))) {
           st.shots = ED.setOverride(st.shots, cur, k, v);
@@ -3245,6 +3326,25 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       assert(ac === undefined, 'an AudioContext exists');
       return getComputedStyle(document.getElementById('uia')).display === 'none';
     });
+    await t('keys: a diamond per key at its time, its values and moves on hover', () => {
+      const els = [...document.querySelectorAll('#tl .kf')], list = ED.keyList(E.st.shots);
+      assert(els.length === list.length, els.length + ' diamonds for ' + list.length + ' keys');
+      assert(els.every((e, n) => near(parseFloat(e.style.left), list[n].t / SHOW_END * 100, 1e-3)), 'misplaced');
+      const n = list.findIndex(e => E.st.shots[e.i].name === '4 pour' && e.j === 3);
+      assert(n >= 0, 'no 4th key in 4 pour');
+      const [c, a, b] = ED.keyChanges(list[n].k, list[n + 1].k)[0];
+      assert(els[n].title.includes(c + ' ' + +(+a).toFixed(3) + ' -> ' + +(+b).toFixed(3)) &&
+             /eased/.test(els[n].title), 'tooltip: ' + els[n].title);
+      assert(els[n].classList.contains('ease'), 'an eased key is not filled');
+      return els.some(e => e.classList.contains('cut'));
+    });
+    await t('curves: speed and fade drawn across the show', () => {
+      const c = document.querySelector('#tl canvas.curves');
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      let orange = 0;
+      for (let p = 0; p < d.length; p += 4) if (d[p] > 200 && d[p + 1] > 120 && d[p + 1] < 190 && d[p + 2] < 110) orange++;
+      return c.width > 100 && orange > c.width / 2;
+    });
     await t('strip: one block per shot, each as wide as it is long', () => {
       const els = [...document.querySelectorAll('#tl .shot')];
       assert(els.length === E.st.shots.length, els.length + ' blocks');
@@ -3361,6 +3461,18 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       key('KeyZ');
       return !('cgain' in (E.st.shots[i].ov || {}));
     });
+    await t('rec on: speed multiplies all of this shot\'s speeds', () => {
+      const before = ED.clone(E.st.shots), from = evalShow(showT).speed;
+      slide('speed', from * 2);
+      const f = parseFloat(uiEl.speed.inp.value) / from;   // the slider snaps to its step
+      assert(E.st.shots[i].keys.every((k, j) => near(k[5], ED.r6(before[i].keys[j][5] * f), 1e-6)), 'not scaled');
+      assert(E.st.shots.every((s, j) => j === i || JSON.stringify(s) === JSON.stringify(before[j])), 'other shots changed');
+      assert(row('speed').dataset.chg === 'key', 'mark ' + row('speed').dataset.chg);
+      key('KeyZ');
+      return JSON.stringify(E.st.shots) === JSON.stringify(before);
+    });
+    await t('simSpeed is out of the panel unless the URL sets it', () =>
+      row('simSpeed').style.display === 'none' && row('speed').style.display === '');
     await t('rec on: a simulation slider stays global', () => {
       const v = E.st.globals.pourRate;
       slide('pourRate', 60);

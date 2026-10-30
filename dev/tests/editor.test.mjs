@@ -60,6 +60,27 @@ test('PER_SHOT and the column map agree with build/timeline.py', () => {
   assert.deepEqual(ED.COL, py[1]);
 });
 
+test('COLS agrees with build/timeline.py', () => {
+  const py = JSON.parse(execFileSync('python', ['-c',
+    'import sys, json; sys.path.insert(0, sys.argv[1]); import timeline as T; print(json.dumps(T.COLS))',
+    path.join(HERE, '..', '..', 'build')]).toString());
+  assert.deepEqual(ED.COLS, py);
+});
+
+test('keyChanges: the values that move between two keys, ease and time left out', () => {
+  const a = key(0, 10), b = key(2, 20, 50);
+  b[6] = 1;
+  assert.deepEqual(ED.keyChanges(a, b), [['angle', 10, 20], ['lightEl', 45, 50]]);
+  assert.deepEqual(ED.keyChanges(a, a), []);
+});
+
+test('keyList: every key with its show time, shot and index', () => {
+  const l = ED.keyList(mini());
+  assert.equal(l.length, 7);
+  assert.deepEqual(l.map(e => e.t), [0, 2, 4, 4, 6, 6, 9]);
+  assert.deepEqual(l[3], { t: 4, i: 1, j: 0, k: key(0, 30) });
+});
+
 test('shotAt: inside, on a boundary (the later shot), past the end', () => {
   const s = mini();
   assert.equal(ED.shotAt(s, 0), 0);
@@ -114,6 +135,16 @@ test('shiftColumn: moves one column of one shot, every key, nothing else', () =>
   assert.deepEqual(t[0].keys.map(k => k[1]), [15, 25, 35]);
   assert.deepEqual(t[0].keys.map(k => k[8]), [45, 45, 45]);
   assert.deepEqual(t[1], s[1]);
+});
+
+test('scaleColumn: multiplies one column of one shot, every key, nothing else', () => {
+  const s = mini();
+  s[0].keys.forEach((k, j) => { k[5] = [0.25, 0.25, 1][j]; });
+  const t = ED.scaleColumn(s, 0, 5, 2);
+  assert.deepEqual(t[0].keys.map(k => k[5]), [0.5, 0.5, 2]);
+  assert.deepEqual(t[0].keys.map(k => k[1]), [10, 20, 30]);
+  assert.deepEqual(t[1], s[1]);
+  assert.deepEqual(s[0].keys.map(k => k[5]), [0.25, 0.25, 1], 'the input is not modified');
 });
 
 test('columnChanged / resetColumn: against the saved table', () => {
