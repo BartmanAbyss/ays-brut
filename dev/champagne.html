@@ -118,11 +118,14 @@ struct U {
   botTilt  : f32,          // bottle tilt, rad; 0 hides the bottle
   tableY   : f32,          // table height, m: raised to a tier's base, the tiers below vanish
   envA     : f32,          // environment brightness: 0 leaves only what the key light's photons lit
+  // what a shot may set for itself and the release carries (SHOT_V)
+  spawnMod : f32,          // the bottle's emission cadence, from pourRate and botShare
+  botShare : f32,          // the bottle's share of the particles
+  botStand : f32,          // 1: the bottle stands upright on the table instead of pouring
 //#D{
   view     : f32,
   fov      : f32,
   maxSteps : f32,
-  spawnMod : f32,
   nPart    : f32,
   pvol     : f32,
   nPhoton  : f32,
@@ -151,8 +154,6 @@ struct U {
   strat    : f32,
   stratJit : f32,
   nSmooth  : f32,          // span normals are measured over, in grid cells (0 = fine)
-  botShare : f32,          // the bottle's share of the particles
-  botStand : f32,          // 1: the bottle stands upright on the table instead of pouring
   puntSoft : f32,          // the radius the punt's dome blends into the flat base with, m
   _w2      : f32,          // buffer is 240 bytes = 60 floats; 57 used
 //#D}
@@ -1994,20 +1995,22 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const W = ui.pourWander * 0.001;
     const w0 = wob(time), w1 = wob(time + 0.02);
     textFade = fade;
+    const V = shotVals(showT);
     // in struct U order: what the release keeps first...
     f32.set([canvas.width, canvas.height, time, simU,
-             Math.sin(ang) * dist, camY, Math.cos(ang) * dist, ui.shutter * SIM_DT * frameSim,
+             Math.sin(ang) * dist, camY, Math.cos(ang) * dist, V[1] * SIM_DT * frameSim,
              stepDt, tgtY, (w1[0] - w0[0]) * W / 0.02, (w1[1] - w0[1]) * W / 0.02,   // bottle drift velocity
              w0[0] * W, 0.555, w0[1] * W, fade,                 // emitter; fade
-             el / 57.3, pour, tilt / 57.3, ty, en]);
+             el / 57.3, pour, tilt / 57.3, ty, en,
+             Math.max(1, Math.round(cfg.npart * V[3] / V[2])), V[3], V[4]]);   // the shot's own
 //#D{
     // ...then the harness controls, which the release folds into the shader
-    f32.set([ui.view, 1.6, cfg.steps, Math.max(1, Math.round((cfg.npart * ui.botShare) / ui.pourRate)),
+    f32.set([ui.view, 1.6, cfg.steps,
              cfg.npart, ui.dropVol * 1e-9, cfg.nphoton, ui.cgain, cfg.single ? 1 : 0, cfg.noliq ? 1 : 0,
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife, ui.strat, ui.stratJit, ui.smooth, ui.botShare, ui.botStand ? 1 : 0, ui.puntSoft * 0.001], 21);
+             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife, ui.strat, ui.stratJit, ui.smooth, ui.puntSoft * 0.001], 24);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
@@ -2488,96 +2491,106 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     { name: '1 glass', dur: 12.75, ov: {},
       note: 'the top glass alone on the table, dark; the light rises from below it',
       keys: [
-        [        0,         20,      0.3,     0.42,  0.41,    1, 0, 0,  -25, 0,   0, 0.341,   0],
-        [        3,         25,     0.29,     0.42,  0.41,    1, 0, 1,   -5, 0,   0, 0.341, 0.1],
-        [    11.25,         40,     0.27,     0.43, 0.415,    1, 0, 1, 45.6, 0,   0, 0.341,   1],
-        [    12.75,         43,    0.265,     0.43, 0.415,    1, 0, 0, 45.6, 0,   0, 0.341,   1],
+        [    0,    20,   0.3,  0.42,  0.41,    1, 0, 0,  -25, 0,   0, 0.341,   0],
+        [    3,    25,  0.29,  0.42,  0.41,    1, 0, 1,   -5, 0,   0, 0.341, 0.1],
+        [11.25,    40,  0.27,  0.43, 0.415,    1, 0, 1, 45.6, 0,   0, 0.341,   1],
+        [12.75,    43, 0.265,  0.43, 0.415,    1, 0, 0, 45.6, 0,   0, 0.341,   1],
       ] },
     { name: '2 orbit', dur: 8.5, ov: {botStand: true},
       note: 'an orbit round it',
       keys: [
-        [        0,         60,     0.36,    0.655,  0.66,    1, 0, 0, 45.6, 0,   0, 0.511,   1],
-        [        1,         82,     0.36,    0.655,  0.66,    1, 0, 1, 45.6, 0,   0, 0.511,   1],
-        [      7.5,        225,     0.34,    0.635,  0.66,    1, 0, 1, 45.6, 0,   0, 0.511,   1],
-        [      8.5,        247,     0.34,    0.635,  0.66,    1, 0, 0, 45.6, 0,   0, 0.511,   1],
+        [    0,    60,  0.36, 0.655,  0.66,    1, 0, 0, 45.6, 0,   0, 0.511,   1],
+        [    1,    82,  0.36, 0.655,  0.66,    1, 0, 1, 45.6, 0,   0, 0.511,   1],
+        [  7.5,   225,  0.34, 0.635,  0.66,    1, 0, 1, 45.6, 0,   0, 0.511,   1],
+        [  8.5,   247,  0.34, 0.635,  0.66,    1, 0, 0, 45.6, 0,   0, 0.511,   1],
       ] },
     { name: '3 pop', dur: 2.5, ov: {},
       note: 'black; the cork pops at popT. The bottle tips in, unseen',
       keys: [
-        [        0,        247,      0.3,     0.52,  0.44,    1, 0, 0, 45.6, 0,   0, 0.341,   1],
-        [      2.5,         39,     0.19,     0.53,  0.48, 0.25, 0, 0, 45.6, 0,  95, 0.341,   1],
+        [    0,   247,   0.3,  0.52,  0.44,    1, 0, 0, 45.6, 0,   0, 0.341,   1],
+        [  2.5,    39,  0.19,  0.53,  0.48, 0.25, 0, 0, 45.6, 0,  95, 0.341,   1],
       ] },
-    { name: '4 pour', dur: 15, ov: {pourWander: 30, wanderSpd: 10},
+    { name: '4 pour', dur: 15, ov: {},
       note: 'the pour in slow motion: the bottle tips in, the flow starts, the glass fills',
       keys: [
-        [        0,         79, 0.128143,     0.53,   0.5,  0.5, 0, 0, 45.6, 0,  95, 0.341,   1],
-        [ 0.624998,         80, 0.128143,     0.53,   0.5,  0.5, 1, 1, 45.6, 0, 112, 0.341,   1],
-        [    1.125,         81, 0.126143,     0.53,   0.5,  0.5, 0, 1, 45.6, 1, 118, 0.341,   1],
-        [ 8.124998,         92, 0.118143,     0.53,   0.5,  0.5, 1, 1, 45.6, 1, 118, 0.341,   1],
-        [13.749998,        102, 0.118143,     0.55,  0.51,  0.5, 0, 1, 45.6, 1, 118, 0.341,   1],
-        [       15,        105, 0.118143,     0.55,  0.51,  0.5, 0, 0, 45.6, 1, 118, 0.341,   1],
+        [    0,    79, 0.128,  0.53,   0.5,  0.5, 0, 0, 45.6, 0,  95, 0.341,   1],
+        [0.625,    80, 0.128,  0.53,   0.5,  0.5, 1, 1, 45.6, 0, 112, 0.341,   1],
+        [1.125,    81, 0.126,  0.53,   0.5,  0.5, 0, 1, 45.6, 1, 118, 0.341,   1],
+        [8.125,    92, 0.118,  0.53,   0.5,  0.5, 1, 1, 45.6, 1, 118, 0.341,   1],
+        [13.75,   102, 0.118,  0.55,  0.51,  0.5, 0, 1, 45.6, 1, 118, 0.341,   1],
+        [   15,   105, 0.118,  0.55,  0.51,  0.5, 0, 0, 45.6, 1, 118, 0.341,   1],
       ] },
     { name: 'black', dur: 1.5, ov: {},
       note: 'the table drops to tier 2; the sim runs 8x, the top glass overflows into it',
       keys: [
-        [        0,         65,     0.18,     0.55,  0.49,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
-        [      1.5,        300,     0.62,     0.52,  0.33,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [    0,    65,  0.18,  0.55,  0.49,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [  1.5,   300,  0.62,  0.52,  0.33,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
       ] },
-    { name: '5 tiers', dur: 10.5, ov: {pourWander: 30, shutter: 0.75, wanderSpd: 8},
+    { name: '5 tiers', dur: 10.5, ov: {shutter: 1},
       note: 'an orbit of the two tiers',
       keys: [
-        [        0,        300, 0.487549,     0.52,  0.33,  0.5, 0, 0, 45.6, 1, 118, 0.171,   1],
-        [        1,        310, 0.477549,     0.52,  0.33,  0.5, 0, 1, 45.6, 1, 118, 0.171,   1],
-        [      9.5,        400, 0.427549,      0.5,  0.33,  0.5, 0, 1, 45.6, 1, 118, 0.171,   1],
-        [     10.5,        412, 0.422549,      0.5,  0.33,  0.5, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [    0,   300, 0.488,  0.52,  0.33,  0.5, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [    1,   310, 0.478,  0.52,  0.33,  0.5, 0, 1, 45.6, 1, 118, 0.171,   1],
+        [  9.5,   400, 0.428,   0.5,  0.33,  0.5, 0, 1, 45.6, 1, 118, 0.171,   1],
+        [ 10.5,   412, 0.423,   0.5,  0.33,  0.5, 0, 0, 45.6, 1, 118, 0.171,   1],
       ] },
     { name: 'black', dur: 1.5, ov: {},
       note: '8x again, tier 2 fills to overflowing',
       keys: [
-        [        0,        412,    0.555,      0.5,  0.33,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
-        [      1.5,         39,     0.26,      0.4,   0.3,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [    0,   412, 0.555,   0.5,  0.33,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [  1.5,    39,  0.26,   0.4,   0.3,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
       ] },
-    { name: '6 tier 2', dur: 11, ov: {pourWander: 40, shutter: 0, wanderSpd: 10},
+    { name: '6 tier 2', dur: 11, ov: {shutter: 0},
       note: 'tier 2 in slow motion, spilling onto the table',
       keys: [
-        [        0,         39,     0.26,      0.4,   0.3, 0.25, 0, 0, 45.6, 1, 118, 0.171,   1],
-        [        1,         42,    0.258,      0.4,   0.3, 0.25, 0, 1, 45.6, 1, 118, 0.171,   1],
-        [       10,         60,     0.25,     0.39,   0.3, 0.25, 0, 1, 45.6, 1, 118, 0.171,   1],
-        [       11,         62,     0.25,     0.39,   0.3, 0.25, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [    0,    39,  0.26,   0.4,   0.3, 0.25, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [    1,    42, 0.258,   0.4,   0.3, 0.25, 0, 1, 45.6, 1, 118, 0.171,   1],
+        [   10,    60,  0.25,  0.39,   0.3, 0.25, 0, 1, 45.6, 1, 118, 0.171,   1],
+        [   11,    62,  0.25,  0.39,   0.3, 0.25, 0, 0, 45.6, 1, 118, 0.171,   1],
       ] },
     { name: 'black', dur: 1.5, ov: {},
       note: 'the table drops to the floor, tier 3 starts to fill (8x)',
       keys: [
-        [        0,         62,     0.25,     0.39,   0.3,    8, 0, 0, 45.6, 1, 118,     0,   1],
-        [      1.5,        200,        1,     0.62,  0.28,    8, 0, 0, 45.6, 1, 118,     0,   1],
+        [    0,    62,  0.25,  0.39,   0.3,    8, 0, 0, 45.6, 1, 118,     0,   1],
+        [  1.5,   200,     1,  0.62,  0.28,    8, 0, 0, 45.6, 1, 118,     0,   1],
       ] },
-    { name: '7 tower', dur: 10, ov: {pourWander: 30, shutter: 1, wanderSpd: 8},
+    { name: '7 tower', dur: 10, ov: {shutter: 1},
       note: 'to be decided; for now the whole tower, wide',
       keys: [
-        [        0,        200, 0.624389,     0.62,  0.28,  0.5, 0, 0, 45.6, 1, 118,     0,   1],
-        [        4,        208, 0.604389,     0.61,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
-        [        9, 214.666667, 0.587722, 0.601667,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
-        [       10,        216, 0.584389,      0.6,  0.28,  0.5, 0, 0, 45.6, 1, 118,     0,   1],
+        [    0,   200, 0.624,  0.62,  0.28,  0.5, 0, 0, 45.6, 1, 118,     0,   1],
+        [    4,   208, 0.604,  0.61,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
+        [    9, 214.5, 0.588, 0.602,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
+        [   10,   216, 0.584,   0.6,  0.28,  0.5, 0, 0, 45.6, 1, 118,     0,   1],
       ] },
     { name: 'black', dur: 1.5, ov: {},
       note: 'between 7 and 8: the sim at 8x, the camera moves to shot 8',
       keys: [
-        [        0,        216, 0.584389,      0.6,  0.28,    8, 0, 0, 45.6, 1, 118,     0,   1],
-        [      1.5,        270,      0.4,     0.01, 0.215,    8, 0, 0, 45.6, 1, 118,     0,   1],
+        [    0,   216, 0.584,   0.6,  0.28,    8, 0, 0, 45.6, 1, 118,     0,   1],
+        [  1.5,   270,   0.4,  0.01, 0.215,    8, 0, 0, 45.6, 1, 118,     0,   1],
       ] },
-    { name: '8', dur: 20, ov: {botShare: 0.5, pourRate: 5000, pourWander: 40, shutter: 1, wanderSpd: 10},
+    { name: '8', dur: 20, ov: {botShare: 0.5, pourRate: 5000, shutter: 1},
       note: 'new: held on the last shot\'s final framing, no moves - to be designed',
       keys: [
-        [        0,        270,      0.4,     0.01, 0.215, 0.25, 0, 0, 45.6, 1, 118,     0,   1],
-        [        1,      276.5,      0.4,     0.01, 0.215, 0.25, 0, 1, 45.6, 1, 118,     0,   1],
-        [       17,      380.5,      0.4,     0.01, 0.215, 0.25, 0, 1, 45.6, 1, 118,     0,   1],
-        [       20,        400,      0.4,     0.01, 0.215, 0.25, 0, 0, 45.6, 1, 118,     0,   1],
+        [    0,   270,   0.4,  0.01, 0.215, 0.25, 0, 0, 45.6, 1, 118,     0,   1],
+        [    1, 276.5,   0.4,  0.01, 0.215, 0.25, 0, 1, 45.6, 1, 118,     0,   1],
+        [   17, 380.5,   0.4,  0.01, 0.215, 0.25, 0, 1, 45.6, 1, 118,     0,   1],
+        [   20,   400,   0.4,  0.01, 0.215, 0.25, 0, 0, 45.6, 1, 118,     0,   1],
       ] },
   ];
   // SHOTS:END
 //#D}
   const SHOW = flattenShots(SHOTS);
   let SHOW_END = SHOW[SHOW.length - 1][0];   // the editor changes it
+  // The values a shot may set for itself that the release carries: [from, shutter,
+  // pourRate, botShare, botStand], a row wherever they change. The build writes it from the
+  // shots (build/timeline.py shot_table) as it flattens them; the harness reads its sliders
+  // instead, which the editor - or showOv in the plain show - keeps on the shot's values.
+  const SHOT_V = shotTable(SHOTS);
+  let shotVals = t => { let v = SHOT_V[0]; for (const r of SHOT_V) if (t >= r[0]) v = r; return v; };
+//#D{
+  function shotTable() { return [[0]]; }
+  shotVals = () => [0, ui.shutter, ui.pourRate, ui.botShare, ui.botStand ? 1 : 0];
+//#D}
   // ── lettering ──
   // Josefin Sans SemiBold's capitals redrawn as pen strokes (dev/tools/strokefont.py: the
   // glyphs, the layout, a page comparing each with the real font). Each word is one SVG
@@ -2724,8 +2737,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['puntSoft', 'range', 6,    0.5,  15,   0.5,  1],
     ['botTilt',  'range', 118,  0,    170,  1,    0],
     ['botAz',    'range', 205, -180,  180,  1,    0],
-    ['pourWander','range', 20,  0,    60,   0.5,  1],
-    ['wanderSpd','range', 4,  0.2,  20,   0.1,  1],
+    ['pourWander','range', 35,  0,    60,   0.5,  1],
+    ['wanderSpd','range', 9,  0.2,  20,   0.1,  1],
     ['shutter',  'range', 0.5,  0.0,  2.5,  0.05, 2],
     ['bounces',  'range', 10,   2,    28,   1,    0],
     ['speed',    'range', 1,    0,    8,    0.05, 2],

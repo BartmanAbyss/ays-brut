@@ -286,19 +286,60 @@ def js_array(flat):
     return '[' + ','.join('[' + ','.join(num(x) for x in k) + ']' for k in flat) + ']'
 
 
-def emit_release(js):
+# the per-shot values the release carries, in SHOT_V's order after the start time
+SHOT_KEYS = ['shutter', 'pourRate', 'botShare', 'botStand']
+
+
+def shot_table(shots, defaults):
+    """[from, shutter, pourRate, botShare, botStand] per shot - its own value, else the
+    global default - with a row only where something changes."""
+    def val(k, v):
+        if isinstance(v, str):
+            v = v == 'true' if v in ('true', 'false') else float(v)
+        return (1.0 if v else 0.0) if isinstance(v, bool) else float(v)
+    out = []
+    for s, t in zip(shots, starts(shots)):
+        ov = s.get('ov') or {}
+        row = [t] + [val(k, ov.get(k, defaults[k])) for k in SHOT_KEYS]
+        # A shot that is black throughout shows nothing, so the values that only change the
+        # look (LOOK_KEYS) carry over from the shot before: a row fewer for each black.
+        # The ones the simulation runs on still apply - the tower fills in the black.
+        if out and all(k[7] == 0 for k in s['keys']):
+            for k in LOOK_KEYS:
+                j = 1 + SHOT_KEYS.index(k)
+                row[j] = out[-1][j]
+        if not out or out[-1][1:] != row[1:]:
+            out.append(row)
+    return out
+
+
+LOOK_KEYS = ['shutter', 'botStand']
+
+
+def emit_release(js, defaults=None):
     """Replace the harness's runtime flattening with the flat literal. Returns the JS and
     a list of warnings: per-shot slider values (ov) are harness-only for now - the release
     folds those sliders to one value each, so it ships without them, and says so."""
     shots = read_shots(js)
-    warn = ['%s: %s' % (s['name'], ', '.join(sorted(s.get('ov', {})) + (['fade'] if 'fade' in s else [])))
-            for s in shots if s.get('ov') or 'fade' in s]
+    # per-shot values the release cannot carry yet: everything but SHOT_KEYS, and fade
+    warn = []
+    for s in shots:
+        left = sorted(k for k in (s.get('ov') or {}) if k not in SHOT_KEYS) + (['fade'] if 'fade' in s else [])
+        if left:
+            warn.append('%s: %s' % (s['name'], ', '.join(left)))
     if js.count(FLAT_CALL) != 1:
         raise TimelineError('expected exactly one %s in the harness' % FLAT_CALL)
     js = js.replace(FLAT_CALL, js_array(flatten(shots)))
     if TEXT_CALL in js:
         js = js.replace(TEXT_CALL, js_array(text_cues(js, shots)))
+    if TABLE_CALL in js:
+        if defaults is None:
+            raise TimelineError('the shot table needs the sliders\' defaults')
+        js = js.replace(TABLE_CALL, js_array(shot_table(shots, defaults)))
     return js, warn
+
+
+TABLE_CALL = 'shotTable(SHOTS)'
 
 
 TEXT_CALL = 'textCues(SHOTS)'

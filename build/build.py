@@ -199,8 +199,6 @@ def release_uniforms(ui):
     npart = float(CFG['npart'])
     return {
         'view': 0.0, 'fov': 1.6, 'maxSteps': float(CFG['steps']),
-        'spawnMod': float(max(1, round((npart * f('botShare')) / f('pourRate')))),
-        'botShare': f('botShare'),
         'nPart': npart, 'pvol': f('dropVol') * 1e-9, 'nPhoton': float(CFG['nphoton']),
         'cgain': f('cgain'), 'single': 0.0, 'noliq': 0.0, 'bub': on('bubbles'),
         'expo': f('expo'), 'wav': on('waves'), 'pfield': on('drops'), 'bounces': f('bounces'),
@@ -209,7 +207,7 @@ def release_uniforms(ui):
         'ltAz': f('lightAz') * rad,
         'prad': f('dropRad') * 0.001, 'foamG': f('foam'), 'glug': f('glug'), 'glugHz': f('glugHz'),
         'botAz': f('botAz') * rad,
-        'botOn': on('bottle'), 'botStand': on('botStand'), 'puntSoft': f('puntSoft') * 0.001,
+        'botOn': on('bottle'), 'puntSoft': f('puntSoft') * 0.001,
         'bkBreath': f('bkBreath'), 'bkSpeed': f('bkSpeed'), 'bkLife': f('bkLife'),
         'strat': f('strat'), 'stratJit': f('stratJit'), 'nSmooth': f('smooth'),
     }
@@ -532,7 +530,7 @@ def prepare(verbose=False):
 
     say('source           wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
     # the shot table is harness-side; the release gets it flattened into one key list
-    js, warn = timeline.emit_release(js)
+    js, warn = timeline.emit_release(js, ui)
     for w in warn:
         print('WARNING: per-shot slider values are harness-only, not in this build - ' + w)
     wgsl, js = cut_dev(wgsl), cut_dev(js)

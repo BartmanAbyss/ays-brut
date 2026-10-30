@@ -143,8 +143,15 @@ each with a name, a length, its own keys from t = 0 to t = its length, and optio
 fade length (`fade`) and its own values for a few look sliders (`ov`). `flattenShots()` lays
 them end to end into `SHOW`, the key list the show reads; a shot whose first key repeats the
 previous shot's last one runs on from it without a cut. The build does the same flattening
-in Python (`build/timeline.py`), so the release ships the key list it always did; a shot's
-`fade` and `ov` are harness-only for now and the build says so when it leaves them out.
+in Python (`build/timeline.py`), so the release ships the same key list. The values a shot
+sets for itself that the release carries - `shutter`, `pourRate`, `botShare`, `botStand` -
+go into `SHOT_V`, `[from, shutter, pourRate, botShare, botStand]` with a row wherever they
+change (in a shot that is black throughout, the look-only ones carry over from the shot
+before: a row fewer each). The release picks the current row each frame; three of them are
+live uniforms there. Any other per-shot value, and a shot's `fade` length, is still
+harness-only, and the build warns when it leaves one out. The wander (`pourWander` 35,
+`wanderSpd` 9) is global: the shots' values were close, and a global one also stops the
+bottle jumping at a cut.
 Keys are `[t, angle, dist, camY, tgtY, simSpeed, ease, fade, light, pour, tilt, table, env]`:
 
 - **`fade`**: 0 black .. 1 full; every shot fades in and out.
