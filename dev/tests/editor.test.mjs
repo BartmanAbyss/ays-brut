@@ -205,7 +205,7 @@ test('setFade: sets, clears, refuses nonsense, leaves the input alone', () => {
 });
 
 test('setOverride refuses a global-only slider', () => {
-  assert.throws(() => ED.setOverride(mini(), 0, 'pourRate', 50), /global/);
+  assert.throws(() => ED.setOverride(mini(), 0, 'dropVol', 50), /global/);
   assert.throws(() => ED.setOverride(mini(), 0, 'angle', 50), /global/);
 });
 

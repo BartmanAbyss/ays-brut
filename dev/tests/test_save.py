@@ -75,7 +75,7 @@ class Table(unittest.TestCase):
         s = mini(); s[0]['keys'][0][0] = 0.1; bad.append(s)               # does not start at 0
         s = mini(); s[0]['keys'][0].pop(); bad.append(s)                  # 12 columns
         s = mini(); s[0]['keys'] = s[0]['keys'][:1]; s[0]['keys'][0][0] = 0; bad.append(s)
-        s = mini(); s[1]['ov'] = {'pourRate': 3.0}; bad.append(s)          # a global slider
+        s = mini(); s[1]['ov'] = {'dropVol': 3.0}; bad.append(s)           # a global slider
         s = mini(); s[1]['ov'] = {'angle': 3.0}; bad.append(s)             # a timeline column
         s = mini(); s[1]['oops'] = 1; bad.append(s)
         s = mini(); s[1]['fade'] = -1.0; bad.append(s)

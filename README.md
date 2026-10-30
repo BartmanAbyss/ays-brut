@@ -261,7 +261,7 @@ in the editor at all, and the show is on.
   by the move, so a camera move keeps its shape; `speed` multiplies them instead (0.25 -> 0.5
   doubles every key of the shot, a ramp keeps its shape); the look sliders a shot may set for itself
   (lightAz, expo, cgain, shutter, bkBreath, bkSpeed, bkLife) and the bottle's wander
-  (pourWander, wanderSpd) - `ED.PER_SHOT` - become the shot's
+  (pourWander, wanderSpd) and flow (pourRate) - `ED.PER_SHOT` - become the shot's
   own values. Everything else is global, rec or not: anything that changes the simulation
   would make a shot's start depend on the shots before it, and the debug switches are not
   looks. With rec off, the timeline still drives its own sliders.

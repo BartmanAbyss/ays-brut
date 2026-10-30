@@ -2258,7 +2258,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // The wander's phase follows its speed, so the bottle jumps where wanderSpd changes:
     // change it across a cut to black.
     const PER_SHOT = ['lightAz', 'expo', 'cgain', 'shutter', 'bkBreath', 'bkSpeed', 'bkLife',
-                      'pourWander', 'wanderSpd'];
+                      'pourWander', 'wanderSpd', 'pourRate'];
     // the globals the simulation depends on: a loop's saved start state is stale once one moves
     const SIM = ['autofill', 'fill', 'pourRate', 'dropVol', 'dropRad', 'foam', 'glug', 'glugHz',
                  'bottle', 'botAz', 'pourWander', 'wanderSpd', 'simSpeed', 'waves'];
@@ -2512,11 +2512,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         [        4, 208, 0.604389, 0.61,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
         [       10, 216, 0.584389,  0.6,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
       ] },
-    { name: '8', dur: 10, ov: {},
+    { name: '8', dur: 10, ov: {pourWander: 40, shutter: 1, wanderSpd: 10},
       note: 'new: held on the last shot\'s final framing, no moves - to be designed',
       keys: [
-        [        0, 216,     0.42, 0.01,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
-        [       10, 216,     0.42, 0.01,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
+        [        0, 216,      0.4, 0.01, 0.215, 0.25, 0, 1, 45.6, 1, 118,     0,   1],
+        [       10, 216,      0.4, 0.01, 0.215, 0.25, 0, 1, 45.6, 1, 118,     0,   1],
       ] },
   ];
   // SHOTS:END
@@ -3049,7 +3049,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const text = t => { const e = document.createElement('span'); e.textContent = t; tools.append(e); return e; };
     const bU = btn('undo', 'Undo the last change (ctrl+z).', () => undo());
     const bR = btn('redo', 'Redo (ctrl+y or ctrl+shift+z).', () => redo());
-    const bRec = btn('rec', 'Record: slider moves go into the shot under the playhead. The camera, light, table, bottle and environment sliders shift that shot\'s keys; the look sliders (light azimuth, exposure, caustics, shutter, bokeh) and the bottle\'s wander (pourWander, wanderSpd) become the shot\'s own values. Everything else stays global.', () => setRec(!rec));
+    const bRec = btn('rec', 'Record: slider moves go into the shot under the playhead. The camera, light, table, bottle and environment sliders shift that shot\'s keys; the look sliders (light azimuth, exposure, caustics, shutter, bokeh) and the bottle\'s wander and flow (pourWander, wanderSpd, pourRate) become the shot\'s own values. Everything else stays global.', () => setRec(!rec));
     const bLoop = btn('loop', 'Play the selected shots over and over. Each pass starts from the simulation as it was at the first frame, kept on the GPU.', () => setLoop(!loop), 'lp');
     text('len');
     const lenIn = field('Length of the selected shot in seconds. Its keys stretch with it; the shots after it move.', '');
@@ -3636,7 +3636,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     await t('rec on: a look slider becomes this shot\'s own value - red, others keep the global', async () => {
       button('rec').click();
       assert(E.rec && button('rec').classList.contains('on'), 'rec not on');
-      assert(row('cgain').dataset.rec === '1' && row('pourRate').dataset.rec === '', 'rec marks');
+      assert(row('cgain').dataset.rec === '1' && row('dropVol').dataset.rec === '', 'rec marks');
       const g = E.st.globals.cgain;
       slide('cgain', 0.12);
       assert(E.st.shots[i].ov.cgain === 0.12 && E.st.globals.cgain === g, 'not a shot value');
@@ -3669,11 +3669,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     await t('simSpeed is out of the panel unless the URL sets it', () =>
       row('simSpeed').style.display === 'none' && row('speed').style.display === '');
     await t('rec on: a simulation slider stays global', () => {
-      const v = E.st.globals.pourRate;
-      slide('pourRate', 60);
-      assert(E.st.globals.pourRate === 60 && !('pourRate' in E.st.shots[i].ov), 'became a shot value');
+      const v = E.st.globals.dropVol;
+      slide('dropVol', 12);
+      assert(E.st.globals.dropVol === 12 && !('dropVol' in E.st.shots[i].ov), 'became a shot value');
       key('KeyZ');
-      return E.st.globals.pourRate === v;
+      return E.st.globals.dropVol === v;
     });
     await t('rec on: a timeline slider shifts all of this shot\'s keys - blue, reset, undo', async () => {
       const before = ED.clone(E.st.shots);
