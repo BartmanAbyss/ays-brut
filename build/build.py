@@ -210,7 +210,7 @@ def release_uniforms(ui):
         'botAz': f('botAz') * rad,
         'botOn': on('bottle'),
         'bkBreath': f('bkBreath'), 'bkSpeed': f('bkSpeed'), 'bkLife': f('bkLife'),
-        'strat': f('strat'), 'stratJit': f('stratJit'), 'dropNE': f('dropSmooth') * 0.001,
+        'strat': f('strat'), 'stratJit': f('stratJit'), 'nSmooth': f('smooth'),
     }
 
 
