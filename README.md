@@ -1318,22 +1318,54 @@ repeated chunks at runtime buys much - only code that genuinely goes away does. 
 changes with the packer's DEFAULT state on both sides: the saved search state is tuned to
 the shader it was searched on and flatters it by ~100 bytes against any edit.
 
-#### The size map (compressed bytes, shader side)
+#### The size map (30 Oct, `python build/sizemap.py`)
 
-Marginal cost of removing each item, or each feature as a group (call sites left in, so
-slight underestimates):
+Measured through the real build, so it can be re-run after any change. **intro.cmd 10 507
+= dropper 310 + shader 6 203 + JS and page 3 994.**
 
-| feature | ~bytes | | function | ~bytes |
-|---|---|---|---|---|
-| puddle (sim, field, coarse grid, flood) | 620 | | `simParticles` | 750 |
-| bottle geometry | 430 | | `fs` | 430 |
-| caustics (photon pass, map) | 410+ | | `photons` | 270 |
-| spray far field (seed, flood, pack) | 330 | | `scatterFine` | 240 |
-| waves + foam | 320 | | `waveUpdate` | 220 |
-| bokeh (animated) | ~230 | | `sdCoupe` | 220 |
-| reflection trace | 100 | | `liquidDist` | 180 |
-| glass overflow | 100 | | `env` | 130 |
-| bubbles | 90 | | | |
+- **share**: the shader in shipped order, item by item, each charged what brotli adds for
+  it. Adds up exactly to 6 203, but order matters: code that echoes something earlier
+  comes cheap.
+- **cut**: remove the system, rebuild, and the difference is what cutting it would save.
+  Shader cuts leave call sites in other functions, so they slightly undercount.
+- **cut/def**: the same with the packer's default state, a check that the saved state is
+  not flattering either side.
+
+Run to run, the noise is about ±40 bytes.
+
+| shader system | share | cut | cut/def |
+|---|---|---|---|
+| render core (`fs`, march, normals, `leg`/`turn`, `reflColour`, tonemap) | 1 358 | 1 292 | 1 492 |
+| spray grids (narrow band, JFA far field: 4 kernels) | 976 | 753 | 805 |
+| particle sim (`simParticles`) | 757 | 682 | 720 |
+| photons + caustic map | 641 | 497 | 587 |
+| coupe + tower | 490 | 335 | 427 |
+| environment + bokeh (bokeh alone: cut 242) | 421 | 372 | 360 |
+| bottle | 388 | 323 | 354 |
+| plumbing (uniform struct, buffers, hashes) | 337 | 139 | 184 |
+| spray SDF in the render (`sprayDist`) | 239 | 176 | 216 |
+| bulk champagne SDF | 230 | 133 | 216 |
+| waves + foam | 218 | 255 | 297 |
+| glass volumes + overflow | 82 | 106 | 89 |
+| bubbles | 66 | 44 | 39 |
+
+| JS system | cut | cut/def |
+|---|---|---|
+| audio, all of it (synth, liquid sound, audio clock) | 1 159 | 1 188 |
+| - pad synth (plays nothing: the score is empty) | 296 | 284 |
+| - drips + splashes | 144 | 150 |
+| - cork pop | 124 | 102 |
+| - reverbs | 93 | 83 |
+| - pour glugs | 49 | 54 |
+| - fizz | 16 | 29 |
+| lettering (stroke font, SVG, fades) | 728 | 724 |
+| timeline keys (40 `SHOW` rows) | 311 | 279 |
+| shot table (`SHOT_V`) | 62 | 59 |
+| bottle wander | 38 | 39 |
+| core: WebGPU setup, frame loop and clock, uniforms, start, page (the rest) | 1 696 | |
+
+The audio's parts add up to 722 of its 1 159. The rest is what they share: the bubble
+model, the offline render and the clock that follows the audio.
 
 ### Brotli, by serving rather than decompressing
 
