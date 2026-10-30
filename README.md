@@ -1367,6 +1367,38 @@ Run to run, the noise is about ±40 bytes.
 The audio's parts add up to 722 of its 1 159. The rest is what they share: the bubble
 model, the offline render and the clock that follows the audio.
 
+**JS share by region.** Terser's source map ties each minified character to its source line;
+charged a prefix at a time like the shader, the shares add up exactly to 3 994.
+
+| JS region | share | | JS region | share |
+|---|---|---|---|---|
+| lettering | 735 | | audio: pad synth | 299 |
+| timeline keys (`SHOW` rows) | 388 | | audio: bubble model (`bub`, `pop`) | 205 |
+| frame: dispatches + render pass | 268 | | audio: context, buses | 130 |
+| uniforms (`writeUniforms`) | 221 | | audio: cork pop | 125 |
+| frame: sim stepping on the clock | 212 | | audio: mix, reverbs, offline render | 113 |
+| timeline evaluation (`evalShow`) | 172 | | audio: drip/splash timing | 99 |
+| buffers + bind group | 168 | | audio: drips + splashes | 88 |
+| start screen, audio start | 134 | | audio: pour glugs | 81 |
+| device, canvas context, shader module | 127 | | audio: fizz | 4 |
+| pipelines | 92 | | shot table (`SHOT_V`) | 67 |
+| clock state | 63 | | bottle wander | 65 |
+| constants | 49 | | page and glue | 42 |
+| frame: submit, loop | 44 | | frame: show clock, locked to the audio | 3 |
+
+Where a region has a cut figure too, the two agree within ~10 bytes, except the timeline
+keys (share 388, cut 311).
+
+Harness-only state still in the release's frame loop: the fast-forward and seek bursts
+(`ffSteps`, `burstSteps`), `redrawOnly`, and the HUD's fps counters. The release never
+changes them, but terser cannot prove that. Pinned to their constant values: **-44 bytes**
+(measured, not applied).
+
+**Render core per function (share):** `fs` 409, `mapN` 188, `reflColour` 150, `marchS` 120,
+`turn` 111, `tableShade` 90, `leg` 65, `vs` 55, `iorOf` 41, `lightDir` 39, `tonemap` 36,
+`map` 27, `sigmaOf` 16, the rest ~0. **Plumbing:** `pcg3d` 81, uniform struct 50, buffer
+declarations ~115, `rnd3` 27, the rest ~0.
+
 ### Brotli, by serving rather than decompressing
 
 Nothing on a stock Windows box can inflate brotli for us: PowerShell 5.1 runs on .NET

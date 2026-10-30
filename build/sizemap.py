@@ -88,6 +88,125 @@ JS = {
 }
 
 
+# JS regions for the share view: each runs from its anchor's line to the next region's. A
+# few small spans inside them are named on their own (JS_SPANS: from the start anchor's
+# line up to, not including, the end anchor's).
+JS_REGIONS = [
+    ('constants', 'const FINE = 320'),
+    ('device, canvas context, shader module', '(async function main() {'),
+    ('buffers + bind group', '  const bufs = ['),
+    ('pipelines', '  const P = {};'),
+    ('resize / letterbox', '  let lastVW = -1'),
+    ('clock state', '  const SIM_DT = 1 / 60;'),
+    ('uniforms (writeUniforms)', '  function writeUniforms(time) {'),
+    ('frame: sim stepping on the clock', '  const WG = (n, s) =>'),
+    ('frame: dispatches + render pass', '    const enc = device.createCommandEncoder();'),
+    ('frame: submit, loop', '    device.queue.submit('),
+    ('timeline keys (SHOW rows)', '  const SHOW = [['),
+    ('shot table (SHOT_V)', '  const SHOT_V = ['),
+    ('lettering', '  const TEXT = ['),
+    ('timeline evaluation (evalShow)', '  function evalShow(t) {'),
+    ('audio: context, buses', '  const SCORE = ['),
+    ('audio: pad synth', '    const r3 = rng(5);'),
+    ('audio: drip/splash timing', '    const lb = bus = gain(1, out);'),
+    ('audio: bubble model (bub, pop)', '    const r2 = rnd;'),
+    ('audio: drips + splashes', '    for (const [t, drip, nr, pan] of EV) {'),
+    ('audio: pour glugs', '    const glugP = t => {'),
+    ('audio: fizz', '    for (let t = 0; t < SHOW_END; t -= Math.log(1 - r2()) / 300)'),
+    ('audio: cork pop', '    for (let i = 0, ph = 0, tp = 0, lo = 0, i0 = '),
+    ('audio: mix, reverbs, offline render', '    for (const b of bx) {'),
+    ('start screen, audio start', '  let ac, tA;'),
+]
+JS_SPANS = [
+    ('bottle wander', '    const wob = tt =>', '    textFade = fade;'),
+    ('lettering', '    textFade = fade;', '    const V = shotVals(showT);'),
+    ('lettering', '    drawText(showT);', '    const enc = device.createCommandEncoder();'),
+    ('frame: show clock, locked to the audio', '    let nShow;', '    for (let i = 0; i < nShow; i++) {'),
+]
+
+
+def _vlq(s):
+    """Decode one source-map segment."""
+    B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    out, val, shift = [], 0, 0
+    for ch in s:
+        d = B64.index(ch)
+        val += (d & 31) << shift
+        if d & 32:
+            shift += 5
+        else:
+            out.append(-(val >> 1) if val & 1 else val >> 1)
+            val, shift = 0, 0
+    return out
+
+
+def js_line_map(js, jmin, ren):
+    """Terser again, with a source map: for each character of the minified JS, the line of
+    the stripped JS it came from. js is the stripped JS BEFORE the kernels were renamed
+    (build/strip.js): the build minifies first and renames after, and terser's output
+    depends on the names. The same renames are applied here, carrying the map along.
+    Checks the result is the shipped JS."""
+    import json
+    tmp, out = os.path.join(ROOT, '_sm_in.js'), os.path.join(ROOT, '_sm_out.js')
+    try:
+        open(tmp, 'wb').write(js.encode())
+        B.run_tool('terser', [tmp, '--compress', '--mangle', '--module',
+                              '--source-map', 'url=_sm_out.js.map', '-o', out])
+        code = open(out, encoding='utf-8').read()
+        smap = json.load(open(out + '.map', encoding='utf-8'))
+    finally:
+        for f in (tmp, out, out + '.map'):
+            if os.path.exists(f):
+                os.remove(f)
+    code = re.sub(r'\n?//# sourceMappingURL=\S*\s*$', '', code)
+    starts = [0]
+    for ln in code.split('\n'):
+        starts.append(starts[-1] + len(ln) + 1)
+    owner = [None] * len(code)
+    segs = []
+    src_line = 0
+    for gl, line in enumerate(smap['mappings'].split(';')):
+        col = 0
+        for seg in filter(None, line.split(',')):
+            v = _vlq(seg)
+            col += v[0]
+            if len(v) >= 4:
+                src_line += v[2]
+                segs.append((starts[gl] + col, src_line))
+    segs.sort()
+    for (a, ln), nxt in zip(segs, segs[1:] + [(len(code), None)]):
+        for i in range(a, min(nxt[0], len(code))):
+            owner[i] = ln
+    # the kernel renames, as short_entries does them; a new name takes the old one's line
+    for old, new in ren.items():
+        out_c, out_o, last = [], [], 0
+        for m in re.finditer(r'\b%s\b' % old, code):
+            out_c.append(code[last:m.start()]); out_o.extend(owner[last:m.start()])
+            out_c.append(new); out_o.extend([owner[m.start()]] * len(new))
+            last = m.end()
+        out_c.append(code[last:]); out_o.extend(owner[last:])
+        code, owner = ''.join(out_c), out_o
+    assert code.strip() == jmin.strip(), 'sizemap: terser with a source map built different JS'
+    return code, owner
+
+
+def js_regions(js):
+    """Source line -> region name."""
+    lines = js.split('\n')
+    def line_of(anchor):
+        assert js.count(anchor) == 1, 'sizemap: JS anchor gone: %r' % anchor[:60]
+        return js[:js.index(anchor)].count('\n')
+    reg = ['page and glue'] * len(lines)
+    marks = sorted((line_of(a), n) for n, a in JS_REGIONS)
+    for (l0, n), nxt in zip(marks, marks[1:] + [(len(lines), None)]):
+        for i in range(l0, nxt[0]):
+            reg[i] = n
+    for n, a, b in JS_SPANS:
+        for i in range(line_of(a), line_of(b)):
+            reg[i] = n
+    return reg
+
+
 def br(b):
     return len(brotli.compress(b, quality=11, lgwin=24))
 
@@ -140,12 +259,14 @@ def main():
     for s, names in SHADER.items():
         for n in names.split():
             sysof[ren.get(n, n)] = s
-    share, prev = {}, size('', jmin)
+    share, item_share, prev = {}, {}, size('', jmin)
     for n in range(1, len(st['items']) + 1):
         part = prog.render(dict(st, items=st['items'][:n]))
         cur = size(part, jmin)
-        s = sysof.get(name[st['items'][n - 1]], 'other')
+        k = st['items'][n - 1]
+        s = sysof.get(name[k], 'other')
         share[s] = share.get(s, 0) + cur - prev
+        item_share[k] = cur - prev
         prev = cur
 
     print('\nSHADER %d   %-46s %6s %6s %8s' % (shader_total, '', 'share', 'cut', 'cut/def'))
@@ -155,6 +276,37 @@ def main():
         print('       %-46s %6d %6d %8d' % (s, share.get(s, 0), cut_['saved'], cut_['default']))
     if 'other' in share:
         print('       %-46s %6d' % ('(items in no system)', share['other']))
+    for s in ('render core (fs, march, normals, light path)', 'plumbing (uniforms, buffers, hashes)'):
+        print('\n  %s, per item (share):' % s)
+        back = {v: k for k, v in ren.items()}
+        rows = sorted(((v, name[k]) for k, v in item_share.items() if sysof.get(name[k]) == s), reverse=True)
+        print('   ' + ', '.join('%s %d' % (back.get(n, n), v) for v, n in rows))
+
+    # SHARE for the JS: the minified JS charged region by region (terser's source map says
+    # which source line each character came from), a prefix at a time
+    pre = B.read(os.path.join(ROOT, 'strip.js'))   # prepare() wrote it: the JS before renaming
+    code, owner = js_line_map(pre, jmin, ren)
+    reg = js_regions(pre)
+    ps = pack.assemble(full['saved'], jmin).decode()
+    v = pack._shader_var[jmin]
+    li = jmin.index(pack.SHADER_LOOKUP) + len(pack.SHADER_LOOKUP)
+    st0 = ps.index('<script>') + len('<script>')
+    def off(i):   # end of jmin char i in the payload (the shader lookup became a short name)
+        return st0 + i + 1 + (len(v) - len(pack.SHADER_LOOKUP) if i >= li else 0)
+    names = [reg[o] if o is not None else 'page and glue' for o in owner]
+    jshare = {'page and glue': br(ps[:st0].encode())}
+    prev, i = jshare['page and glue'], 0
+    while i < len(names):
+        j = i
+        while j < len(names) and names[j] == names[i]:
+            j += 1
+        cur = br(ps[:off(j - 1)].encode())
+        jshare[names[i]] = jshare.get(names[i], 0) + cur - prev
+        prev, i = cur, j
+    jshare['page and glue'] += js_total - sum(jshare.values())
+    print('\nJS AND PAGE %d, share by region (exact sum, in shipped order):' % js_total)
+    for n, c in sorted(jshare.items(), key=lambda x: -x[1]):
+        print('       %-46s %6d' % (n, c))
 
     print('\nJS AND PAGE %d   %-38s %6s %8s' % (js_total, '', 'cut', 'cut/def'))
     top = 0
