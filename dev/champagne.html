@@ -2967,8 +2967,14 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // of show; in slow motion that is less sim time, as in playback). A paused frame() runs
   // its steps and returns without scheduling the next, so this is one frame exactly. The
   // clock is set a step (and a hair) back: without det it reads the wall delta.
+  // It starts clean. Playback keeps a deficit - leftover clock time, and sim steps owed
+  // when frames ran long - and works it off later, which is right for playback; here it
+  // made a press simulate 2-3 steps (the HUD's x2, x3). Both are dropped: one press is one
+  // show step and the sim time that step stands for.
   function stepFrame() {
     if (!cfg.paused) setPaused(true);
+    showPend = 0;
+    simU = clockT / SIM_DT;
     last = performance.now() - SIM_DT * 1000 - 0.5;
     frame();
   }
@@ -3469,6 +3475,20 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       await frames(2);
       assert(showStep === s0 + 2, 'two presses: ' + (showStep - s0) + ' steps');
       assert(cfg.paused, 'no longer paused');
+      setPaused(false);
+      return true;
+    });
+    await t("'.' simulates one step's worth even when playback left a backlog", async () => {
+      setPaused(true); await frames(2);
+      // what playback can leave behind: part of a frame of clock time, and steps owed
+      showPend = SIM_DT * 0.9; simU -= 3;
+      const s0 = showStep;
+      dispatchEvent(new KeyboardEvent('keydown', { key: '.', bubbles: true }));
+      await frames(2);
+      const sp = evalShow((s0) * SIM_DT).speed * ui.simSpeed;
+      const want = sp < 1 ? sp : Math.min(Math.floor(sp), 4);   // the HUD's x for one show step
+      assert(showStep === s0 + 1, (showStep - s0) + ' show steps');
+      assert(Math.abs(probe.frameSteps - want) < 1e-3, 'x' + probe.frameSteps + ', want x' + want);
       setPaused(false);
       return true;
     });
