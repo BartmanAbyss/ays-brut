@@ -151,7 +151,8 @@ struct U {
   strat    : f32,
   stratJit : f32,
   nSmooth  : f32,          // span normals are measured over, in grid cells (0 = fine)
-  _w2      : f32,          // buffer is 224 bytes = 56 floats; 55 used
+  botShare : f32,          // the bottle's share of the particles
+  _w2      : f32,          // buffer is 224 bytes = 56 floats; all used
 //#D}
 };
 
@@ -452,7 +453,11 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
   // The bottle owns a RESERVED slice of the pool. Sharing one pool starves it: spill
   // particles live ~6 s and occupy nearly every index once the tower cascades, so a
   // bottle slot almost always lands on an index that is still alive.
-  let POOL = max(u32(u.nPart) / 6u, 1u);
+  // The bottle's own slice of the particles (spill starved it when they shared). A drop
+  // holds its particle from the bottle until it lands, ~15-20 steps, so the slice caps the
+  // stream at about slice / 17 drops a step. botShare can change from shot to shot: a
+  // particle changes role only once it is free, so nothing in the air pops.
+  let POOL = max(u32(u.nPart * u.botShare), 1u);
 
   // The emission cadence counts SIM TIME in 1/60 s units, not steps: a slow-motion step
   // covers less time, and counting steps would pour faster per sim second the slower the
@@ -1973,12 +1978,12 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              el / 57.3, pour, tilt / 57.3, ty, en]);
 //#D{
     // ...then the harness controls, which the release folds into the shader
-    f32.set([ui.view, 1.6, cfg.steps, Math.max(1, Math.round((cfg.npart / 6) / ui.pourRate)),
+    f32.set([ui.view, 1.6, cfg.steps, Math.max(1, Math.round((cfg.npart * ui.botShare) / ui.pourRate)),
              cfg.npart, ui.dropVol * 1e-9, cfg.nphoton, ui.cgain, cfg.single ? 1 : 0, cfg.noliq ? 1 : 0,
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife, ui.strat, ui.stratJit, ui.smooth], 21);
+             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife, ui.strat, ui.stratJit, ui.smooth, ui.botShare], 21);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
@@ -2009,7 +2014,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       await partRd.mapAsync(GPUMapMode.READ);
       const a = new Float32Array(partRd.getMappedRange().slice(0));
       partRd.unmap();
-      const POOL = Math.max(Math.floor(cfg.npart / 6), 1);
+      const POOL = Math.max(Math.floor(cfg.npart * ui.botShare), 1);
       let alive = 0, aliveBottle = 0, ymin = 1e9, ymax = -1e9;
       for (let k = 0; k < PSAMP; k++) {
         const life = a[k * 8 + 3];
@@ -2266,9 +2271,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // The wander's phase follows its speed, so the bottle jumps where wanderSpd changes:
     // change it across a cut to black.
     const PER_SHOT = ['lightAz', 'expo', 'cgain', 'shutter', 'bkBreath', 'bkSpeed', 'bkLife',
-                      'pourWander', 'wanderSpd', 'pourRate'];
+                      'pourWander', 'wanderSpd', 'pourRate', 'botShare'];
     // the globals the simulation depends on: a loop's saved start state is stale once one moves
-    const SIM = ['autofill', 'fill', 'pourRate', 'dropVol', 'dropRad', 'foam', 'glug', 'glugHz',
+    const SIM = ['autofill', 'fill', 'pourRate', 'botShare', 'dropVol', 'dropRad', 'foam', 'glug', 'glugHz',
                  'bottle', 'botAz', 'pourWander', 'wanderSpd', 'simSpeed', 'waves'];
     // shot start times, plus the end of the show: n + 1 entries
     const starts = shots => { const a = [0]; for (const s of shots) a.push(r6(a[a.length - 1] + s.dur)); return a; };
@@ -2527,7 +2532,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         [        4, 208, 0.604389, 0.61,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
         [       10, 216, 0.584389,  0.6,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
       ] },
-    { name: '8', dur: 10, ov: {pourWander: 40, shutter: 1, wanderSpd: 10},
+    { name: '8', dur: 10, ov: {botShare: 0.5, pourRate: 3000, pourWander: 40, shutter: 1, wanderSpd: 10},
       note: 'new: held on the last shot\'s final framing, no moves - to be designed',
       keys: [
         [        0, 216,      0.4, 0.01, 0.215, 0.25, 0, 1, 45.6, 1, 118,     0,   1],
@@ -2608,7 +2613,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['reflect',  'check', true],
     ['autofill', 'check', true],
     ['fill',     'range', 80,   0,    100,  1,    0],
-    ['pourRate', 'range', 120,  1,    1000, 1,    0],
+    ['pourRate', 'range', 120,  1,    5000, 1,    0],
+    ['botShare', 'range', 0.17, 0.05, 0.9,  0.01, 2],
     ['dropVol',  'range', 6,    1,    60,   1,    0],
     ['dropRad',  'range', 2.0,  0.4,  6.0,  0.1,  1],
     ['foam',     'range', 1.0,  0.0,  3.0,  0.05, 2],
@@ -2709,6 +2715,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     reflect: 'The Fresnel reflection lobe at every interface. Off removes all reflections. Diagnostic only, not physical.',
     autofill: 'Let the simulation decide the liquid levels. Uncheck to force every glass to the fill slider instead.',
     fill: 'Forced liquid level, as a percent of the spill level. Only used when autofill is off.',
+    botShare: 'The bottle\'s share of the 65536 particles; the rest are for the spill between the glasses. A drop holds its particle from the bottle until it lands (~17 steps), so the share caps the stream at about share x 65536 / 17 drops a step - 0.17 is ~650. Raise it with pourRate for a heavier pour, at the cost of the spill cascade. Per shot.',
     pourRate: 'Drops leaving the bottle per frame. Raise it for a dense continuous stream, lower it for separate falling drops.',
     wanderSpd: 'How quickly the bottle drifts around. Higher makes the pour restless and the stream whip about; lower is a slow lazy sway.',
     bottle: 'Show the magnum. It is an analytic shape only - there is no fluid simulated inside it yet.',
@@ -3065,7 +3072,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const text = t => { const e = document.createElement('span'); e.textContent = t; tools.append(e); return e; };
     const bU = btn('undo', 'Undo the last change (ctrl+z).', () => undo());
     const bR = btn('redo', 'Redo (ctrl+y or ctrl+shift+z).', () => redo());
-    const bRec = btn('rec', 'Record: slider moves go into the shot under the playhead. The camera, light, table, bottle and environment sliders shift that shot\'s keys; the look sliders (light azimuth, exposure, caustics, shutter, bokeh) and the bottle\'s wander and flow (pourWander, wanderSpd, pourRate) become the shot\'s own values. Everything else stays global.', () => setRec(!rec));
+    const bRec = btn('rec', 'Record: slider moves go into the shot under the playhead. The camera, light, table, bottle and environment sliders shift that shot\'s keys; the look sliders (light azimuth, exposure, caustics, shutter, bokeh) and the bottle\'s wander and flow (pourWander, wanderSpd, pourRate, botShare) become the shot\'s own values. Everything else stays global.', () => setRec(!rec));
     const bLoop = btn('loop', 'Play the selected shots over and over. Each pass starts from the simulation as it was at the first frame, kept on the GPU.', () => setLoop(!loop), 'lp');
     text('len');
     const lenIn = field('Length of the selected shot in seconds. Its keys stretch with it; the shots after it move.', '');

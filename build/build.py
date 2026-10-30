@@ -199,7 +199,8 @@ def release_uniforms(ui):
     npart = float(CFG['npart'])
     return {
         'view': 0.0, 'fov': 1.6, 'maxSteps': float(CFG['steps']),
-        'spawnMod': float(max(1, round((npart / 6) / f('pourRate')))),
+        'spawnMod': float(max(1, round((npart * f('botShare')) / f('pourRate')))),
+        'botShare': f('botShare'),
         'nPart': npart, 'pvol': f('dropVol') * 1e-9, 'nPhoton': float(CFG['nphoton']),
         'cgain': f('cgain'), 'single': 0.0, 'noliq': 0.0, 'bub': on('bubbles'),
         'expo': f('expo'), 'wav': on('waves'), 'pfield': on('drops'), 'bounces': f('bounces'),
