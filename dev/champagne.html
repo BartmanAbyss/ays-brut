@@ -78,6 +78,9 @@
         font:11px ui-monospace,Consolas,monospace; padding:2px 3px; }
   #tl .msg { flex:1; min-width:120px; color:#ffcf6b; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
   #tl .key { color:#667; }
+  /* 'h' hides every overlay for a clean look at the picture; errors stay */
+  body.nohud #hud, body.nohud #ui, body.nohud #uia, body.nohud #tl, body.nohud #pause,
+  body.nohud #ff, body.nohud #restart, body.nohud #rewind { display:none !important; }
   #err { position:fixed; left:8px; bottom:8px; right:8px; max-height:45vh; overflow:auto;
          padding:8px 10px; background:#2a0b0bdd; border:1px solid #833; border-radius:4px;
          white-space:pre-wrap; display:none; }
@@ -2512,8 +2515,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     { name: '8', dur: 10, ov: {},
       note: 'new: held on the last shot\'s final framing, no moves - to be designed',
       keys: [
-        [        0, 216, 0.584389,  0.6,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
-        [       10, 216, 0.584389,  0.6,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
+        [        0, 216,     0.42, 0.01,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
+        [       10, 216,     0.42, 0.01,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
       ] },
   ];
   // SHOTS:END
@@ -2985,6 +2988,13 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     frame();
   }
   addEventListener('keydown', e => { if (e.key === '.' && !typing(e) && !e.ctrlKey && !e.metaKey) { e.preventDefault(); stepFrame(); } });
+  // 'h': every overlay off and on again - HUD, both panels, the timeline, the buttons.
+  // Errors stay: a broken shader must not hide behind it.
+  addEventListener('keydown', e => {
+    if ((e.key === 'h' || e.key === 'H') && !typing(e) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault(); document.body.classList.toggle('nohud');
+    }
+  });
   window.__pause  = () => { setPaused(true);  return 'paused'; };
   window.__resume = () => { setPaused(false); return 'running'; };
   setPaused(cfg.paused);
@@ -3470,6 +3480,20 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       const ok = Math.abs(showT - want) <= E.st.shots[1].dur / r.width + SIM_DT;   // a pixel's worth
       setPaused(false);
       return ok || ('landed at ' + showT + ', wanted ' + want) && false;
+    });
+    await t("'h' hides every overlay and brings them back; typing an h does not", () => {
+      const ids = ['hud', 'ui', 'tl', 'pause', 'ff', 'restart', 'rewind'];
+      const shown = () => ids.map(i => getComputedStyle(document.getElementById(i)).display !== 'none');
+      assert(shown().every(Boolean), 'not all shown to start with: ' + shown());
+      dispatchEvent(new KeyboardEvent('keydown', { key: 'h', bubbles: true }));
+      assert(shown().every(v => !v), 'not all hidden: ' + shown());
+      dispatchEvent(new KeyboardEvent('keydown', { key: 'h', bubbles: true }));
+      assert(shown().every(Boolean), 'not all back: ' + shown());
+      const f = uiEl.expo.out;
+      f.focus();
+      f.dispatchEvent(new KeyboardEvent('keydown', { key: 'h', bubbles: true }));
+      f.blur();
+      return !document.body.classList.contains('nohud');
     });
     await t("'.' advances exactly one frame and stays paused", async () => {
       setPaused(true); await frames(2);

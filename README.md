@@ -244,7 +244,8 @@ in the editor at all, and the show is on.
   values and what moves on the way to the next key; click it to jump there.
 - **The strip** at the bottom: every shot end to end, each as wide as it is long. Click in
   one to select it and play from the point clicked; ctrl- or shift-click to add to the
-  selection. **`.`** steps one frame (and pauses if playing). `*`
+  selection. **`.`** steps one frame (and pauses if playing); **`h`** hides every overlay
+  (HUD, panels, timeline, buttons; errors stay) and brings them back. `*`
   marks a shot that differs from what was last saved; hover for its times, fade and values.
 - **len** sets the selected shot's length in seconds; **scale** / **-10%** / **+10%** stretch
   every selected shot, keys and all. The shots after it move; the playhead stays on the same
