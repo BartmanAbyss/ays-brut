@@ -1256,6 +1256,24 @@ coupe, the spray lookup. The remaining exact wins are tens of bytes each - the s
 lesson as the trace loops: brotli already shares what repeats, so only work that goes away
 pays.
 
+#### Table light without photons (prototype, `fakeC`)
+
+`fakeLight` lights the table analytically: per table point, each of the 14 bowls (a sphere
+round its middle, tapering down the stem) and the bottle (body narrowing to the neck) is a
+soft-edged capsule shadow along the light, and a filled bowl is also a plano-convex lens
+(f ~ 17 cm) that gathers the light through the champagne into a gold glow - `cFoc`,
+`cBlur`, `cLens`. No grain, no lag behind a moving light, no photon passes. Not modelled:
+light bent by one glass into another, the drops' shadows, the waves' moving caustics (a
+wave-curvature term worked but cost too much), the rim glints.
+
+Measured with the photon code really deleted (kernels, map, buffers, dispatches), 30 Oct:
+**-272 bytes** with the packer's default state on both sides (10 796 -> 10 524), -156 with
+the saved state (searched on the photon shader, so it flatters that side). A first,
+fuller version (rim outline, separate stem capsules, wave Laplacian) saved only 69: the
+fake has to be small to pay. Time on the frozen tower frame at 1920x1080: the 1.25 ms
+photon pass goes, the render pass gains ~0.35 ms - about **-0.9 ms** a frame. The photon
+code stays in until the look is chosen.
+
 #### Feature cuts, measured
 
 Each measured as the real edit - shader code, call sites, kernels and dispatches removed -

@@ -155,7 +155,11 @@ struct U {
   stratJit : f32,
   nSmooth  : f32,          // span normals are measured over, in grid cells (0 = fine)
   puntSoft : f32,          // the radius the punt's dome blends into the flat base with, m
-  _w2      : f32,          // buffer is 240 bytes = 60 floats; 57 used
+  fakeC    : f32,          // 1: the table lit analytically through the glasses, no photons
+  cFoc     : f32,          // ...the bowls' focal length, as a multiple of the thin-lens one
+  cBlur    : f32,          // ...how far from a point the focus stays (spreads the hot spot)
+  cLens    : f32,          // ...the share of the light through the champagne that gets out below
+  _w2      : f32,          // buffer is 256 bytes = 64 floats; 61 used
 //#D}
 };
 
@@ -1355,12 +1359,75 @@ fn causticAt(xz: vec2f) -> vec3f {
   let e = min(min(n.x, n.y), min(1.0 - n.x, 1.0 - n.y));
   return mix(a0, a1, f.y) / CSCALE * smoothstep(0.0, 0.02, e);
 }
+// ── the table lit without photons (fakeC 1, prototype) ──
+// What reaches a table point p from the key light, worked out per occluder along the line
+// from p toward the light: no tracing, so no grain, no lag and no passes of its own.
+// Every occluder is a capsule a..b of radius r that lets T through: the 14 bowls as
+// spheres round their middles (seen from the light a coupe's bowl is about a disc of the
+// rim's radius, so its shadow stretches along the light as a sphere's does), and the
+// bottle, its body narrowing to the neck. A filled bowl is also a plano-convex lens - flat
+// champagne on top, the round bowl beneath, R 57 mm and n 1.34, so f = R / (n - 1) ~ 17 cm:
+// about the table for the bottom tier. At s past it the champagne's disc (radius c) lands
+// m = 1 - s/f times as wide and 1/m^2 as bright; a lens this wide is nowhere near ideal,
+// so the focus never gets smaller than cBlur and its glow peaks in the middle,
+// (1 - x^2)^2 (x3 keeps the energy).
+fn fakeLight(p: vec3f) -> vec3f {
+  let L = lightDir();
+  // the photons' pool of light: their emitter disc, 0.38 m across the light, soft-edged.
+  // 3.79 L.y^2 is what the photon map settled to on an open table
+  var e = vec3f(3.79 * L.y * max(L.y, 0.0)
+                * smoothstep(0.38, 0.19, length(cross(p - vec3f(0.0, 0.17 + u.tableY * 0.5, 0.0), L))));
+  var b0 = vec3f(0.0, u.tableY, 0.0);
+  var bx = vec3f(0.0, 1.0, 0.0);
+  if (u.botStand < 0.5) {
+    bx = rotY(rotX(bx, u.botTilt), u.botAz);
+    // its mouth is at the emitter; at tilt 0 it is out of the scene, so put it under the table
+    b0 = u.emitPos - bx * select(BOT_H, 9.0, u.botTilt < 0.01);
+  }
+  for (var g = 0; g <= NG; g++) {
+    // The bottle: dark glass, from its base up, narrowing from the body to the neck between
+    // r.z and r.w of the way. A glass: from the bowl's middle DOWN to the foot, narrowing from
+    // the rim's radius to the stem's as the bowl curves in, so the stem casts its line too.
+    var a  = b0 + bx * BODY_R;
+    var b  = b0 + bx * (BOT_H - NECK_R);
+    var r  = vec4f(BODY_R, NECK_R, 0.45, 0.7);
+    var T  = vec3f(0.06);
+    var lv = 0.0;
+    if (g < NG) {
+      a = glassOff(g) + vec3f(0.0, 0.15, 0.0);
+      b = a - vec3f(0.0, 0.15, 0.0);
+      r = vec4f(RIM_R, STEM_R, 0.0, 0.2);
+      T = vec3f(0.85);                        // the walls' reflections
+      lv = vecs[V_GLASS + g].x;
+    }
+    let pa = a - p;
+    let s  = dot(pa, L);                      // how far toward the light it is
+    if (a.y < u.tableY || s < 0.0) { continue; }   // hidden under a raised table, or behind p
+    let w  = L * s - pa;                      // across the light, from a
+    let v  = b - a - L * dot(b - a, L);
+    let h  = clamp(dot(w, v) / max(dot(v, v), 1e-9), 0.0, 1.0);
+    let t  = smoothstep(r.z, r.w, h);
+    let k  = 0.001 + s * 0.02;                // edges soften with distance, as under any real light
+    let c  = sqrt(max(lv * (2.0 * R_IN - lv), 0.0));   // the champagne's radius
+    let m  = 1.0 - s / (0.18 * u.cFoc);
+    let m2 = m * m + u.cBlur * u.cBlur;
+    let q  = clamp(1.0 - dot(w, w) / (m2 * c * c + 1e-9), 0.0, 1.0);
+    // straight past (T inside the outline - less through the solid stem and the neck -
+    // nothing where the champagne bends the light away), plus what the champagne gathers here
+    let ro = mix(r.x, r.y, t);
+    e *= mix(T * (1.0 - 0.5 * t), vec3f(1.0), smoothstep(ro - k, ro + k, length(w - v * h)))
+         * smoothstep(c - k, c, length(w))
+       + exp(-sigmaOf(2) * lv) * 3.0 * q * q * sign(lv) * u.cLens / m2;
+  }
+  return e;
+}
 fn tableShade(p: vec3f) -> vec3f {
   let r = length(p.xz);
   let fall = 1.0 - 0.55 * clamp(r * 1.5, 0.0, 1.0);
   let amb = vec3f(0.013, 0.013, 0.017);
   // direct light AND caustics both come from the photon map: shadows are free
-  let c = causticAt(p.xz) * u.cgain;
+  var c = causticAt(p.xz) * u.cgain;
+  if (u.fakeC > 0.5) { c = fakeLight(p) * u.cgain; }
   return (amb * u.envA + c) * fall * vec3f(0.97, 0.94, 0.90);
 }
 fn tonemap(x: vec3f) -> vec3f {
@@ -1773,7 +1840,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // WebGPU zero-initialises every buffer, and zero is every initial state needed here -
   // empty glasses, a dry table, no waves, and particles with life 0, which reads as dead.
   const bufs = [
-    240,                      //  0 uniforms
+    256,                      //  0 uniforms
     cfg.npart * 32,           //  1 particles
     FINE_N * 4,               //  2 narrow band, quantised (atomic)
     FINE_N * 4,               //  3 narrow band, resolved
@@ -1959,7 +2026,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // det mode always leaves exactly one step pending - and re-shot the photons, so every
   // slider drag advanced the spill and nudged the caustics. A/B on one frame was impossible.
   let redrawOnly = false;
-  const f32 = new Float32Array(60);
+  const f32 = new Float32Array(64);
   const t0 = performance.now();
   let last = t0, acc = 0, accN = 0, frameNo = 0, ffSteps = 0;
 
@@ -2010,7 +2077,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife, ui.strat, ui.stratJit, ui.smooth, ui.puntSoft * 0.001], 24);
+             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife, ui.strat, ui.stratJit, ui.smooth, ui.puntSoft * 0.001,
+             ui.fakeC ? 1 : 0, ui.cFoc, ui.cBlur, ui.cLens], 24);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
@@ -2212,7 +2280,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 
     // 2b — caustics: fade the photon map, shoot this frame's photons, blur. A redraw keeps
     // the photon map it already has.
-    pass(2, redrawOnly ? [] : [['causticDecay', WG(CN * CN * 3, 256)],
+    // (fakeC lights the table without them: no photon work at all)
+    pass(2, redrawOnly || ui.fakeC ? [] : [['causticDecay', WG(CN * CN * 3, 256)],
                                ['photons', WG(cfg.nphoton, 64)], ['causticBlur', WG(CN * CN, 256)]]);
 
     // 3 — render
@@ -2745,6 +2814,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['simSpeed', 'range', 1,    0,    4,    0.05, 2],
     ['expo',     'range', 1.45, 0.20, 4.00, 0.05, 2],
     ['cgain',    'range', 0.05, 0.00, 0.30, 0.005,3],
+    ['fakeC',    'check', false],
+    ['cFoc',     'range', 1,    0.3,  3,    0.01, 2],
+    ['cBlur',    'range', 0.4,  0,    1,    0.01, 2],
+    ['cLens',    'range', 0.5,  0,    1,    0.01, 2],
     ['padGain',  'range', 0.01, 0,    0.2,  0.001,3],
     ['master',   'range', 0.9,  0,    2,    0.01, 2],
     ['padCut',   'range', 1400, 200,  6000, 10,   0],
@@ -2849,6 +2922,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     simSpeed: 'A dev multiplier on top of speed, out of the panel: a URL parameter, shown only when the URL sets it. 0 freezes the sim while the camera keeps moving (?simSpeed=0 for A/B checks). Below 1 real slow motion, above 1 more full 1/60 s steps per frame (16 at most; ff +20s for big jumps).',
     expo: 'Exposure applied before tonemapping.',
     cgain: 'Brightness of the photon caustic map on the table. It carries the direct light too, so 0 leaves the table lit by ambient only.',
+    fakeC: 'A/B: light the table analytically instead of with photons. Each coupe is a lens (flat champagne over the round bowl) with a soft shadow of its rim and stem, plus the bottle\'s shadow. No grain, no lag, and the photon passes do not run.',
+    cFoc: 'fakeC: the bowls\' focal length, as a multiple of the thin-lens value (~17 cm under the champagne). Shorter focuses the gold spot higher, so it spreads again by the time it reaches the table.',
+    cBlur: 'fakeC: how much the focus stays spread - 0 is a perfect lens (a hard, very bright point where the focus meets the table), more softens and dims the hot spot.',
+    cLens: 'fakeC: how much of the light entering the champagne gets out through the bottom of the bowl - the rest is lost to reflections at the surfaces and to light trapped in the glass. Lower darkens the shadows and dims the gold spots together.',
     padGain: 'Audio, heard after "hear audio": the pad\'s level. The whole mix is normalised at the end, so this sets the pad against the liquid, not the overall volume.',
     master: 'Audio: the overall level. Fixed, not normalised: watch the peak in this column\'s header - past 1 the release clips, so turn this down.',
     padCut: 'Audio: the pad\'s lowpass cutoff in Hz - lower is darker and softer, higher brighter.',
