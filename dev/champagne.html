@@ -152,6 +152,7 @@ struct U {
   stratJit : f32,
   nSmooth  : f32,          // span normals are measured over, in grid cells (0 = fine)
   botShare : f32,          // the bottle's share of the particles
+  botStand : f32,          // 1: the bottle stands upright on the table instead of pouring
   _w2      : f32,          // buffer is 224 bytes = 56 floats; all used
 //#D}
 };
@@ -1041,12 +1042,20 @@ fn sdBottleLocal(p: vec3f) -> f32 {
   return max(sh, -bore);
 }
 fn sdBottle(p: vec3f) -> f32 {
-  if (u.botOn < 0.5 || u.botTilt < 0.01) { return 1e9; }   // tilt 0: not in the scene
-  // the mouth sits at the emitter, so the bottle follows the pour's wander for free
-  var v = p - u.emitPos;
-  v = rotY(v, -u.botAz);
-  v = rotX(v, -u.botTilt);
-  v.y += BOT_H;
+  if (u.botOn < 0.5) { return 1e9; }
+  var v: vec3f;
+  if (u.botStand > 0.5) {
+    // standing upright on the table, at the centre - where the top glass stands, which a
+    // table raised over its rim hides (shot 2)
+    v = p - vec3f(0.0, u.tableY, 0.0);
+  } else {
+    if (u.botTilt < 0.01) { return 1e9; }   // tilt 0: not in the scene
+    // the mouth sits at the emitter, so the bottle follows the pour's wander for free
+    v = p - u.emitPos;
+    v = rotY(v, -u.botAz);
+    v = rotX(v, -u.botTilt);
+    v.y += BOT_H;
+  }
   // cheap bounding sphere first: the full profile is a dozen primitives and this runs on
   // every raymarch step, but the bottle occupies a small part of the scene
   let b = length(v - vec3f(0.0, BOT_H * 0.50, 0.0)) - 0.186;
@@ -1749,7 +1758,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // WebGPU zero-initialises every buffer, and zero is every initial state needed here -
   // empty glasses, a dry table, no waves, and particles with life 0, which reads as dead.
   const bufs = [
-    224,                      //  0 uniforms
+    240,                      //  0 uniforms
     cfg.npart * 32,           //  1 particles
     FINE_N * 4,               //  2 narrow band, quantised (atomic)
     FINE_N * 4,               //  3 narrow band, resolved
@@ -1935,7 +1944,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // det mode always leaves exactly one step pending - and re-shot the photons, so every
   // slider drag advanced the spill and nudged the caustics. A/B on one frame was impossible.
   let redrawOnly = false;
-  const f32 = new Float32Array(56);
+  const f32 = new Float32Array(60);
   const t0 = performance.now();
   let last = t0, acc = 0, accN = 0, frameNo = 0, ffSteps = 0;
 
@@ -1983,7 +1992,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife, ui.strat, ui.stratJit, ui.smooth, ui.botShare], 21);
+             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife, ui.strat, ui.stratJit, ui.smooth, ui.botShare, ui.botStand ? 1 : 0], 21);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
@@ -2271,7 +2280,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // The wander's phase follows its speed, so the bottle jumps where wanderSpd changes:
     // change it across a cut to black.
     const PER_SHOT = ['lightAz', 'expo', 'cgain', 'shutter', 'bkBreath', 'bkSpeed', 'bkLife',
-                      'pourWander', 'wanderSpd', 'pourRate', 'botShare'];
+                      'pourWander', 'wanderSpd', 'pourRate', 'botShare', 'botStand'];
     // the globals the simulation depends on: a loop's saved start state is stale once one moves
     const SIM = ['autofill', 'fill', 'pourRate', 'botShare', 'dropVol', 'dropRad', 'foam', 'glug', 'glugHz',
                  'bottle', 'botAz', 'pourWander', 'wanderSpd', 'simSpeed', 'waves'];
@@ -2467,13 +2476,13 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         [    11.25,         40,     0.27,     0.43, 0.415,    1, 0, 1, 45.6, 0,   0, 0.341,   1],
         [    12.75,         43,    0.265,     0.43, 0.415,    1, 0, 0, 45.6, 0,   0, 0.341,   1],
       ] },
-    { name: '2 orbit', dur: 8.5, ov: {},
+    { name: '2 orbit', dur: 8.5, ov: {botStand: true},
       note: 'an orbit round it',
       keys: [
-        [        0,         60,     0.32,     0.54,  0.44,    1, 0, 0, 45.6, 0,   0, 0.341,   1],
-        [        1,         82,     0.32,     0.54,  0.44,    1, 0, 1, 45.6, 0,   0, 0.341,   1],
-        [      7.5,        225,      0.3,     0.52,  0.44,    1, 0, 1, 45.6, 0,   0, 0.341,   1],
-        [      8.5,        247,      0.3,     0.52,  0.44,    1, 0, 0, 45.6, 0,   0, 0.341,   1],
+        [        0,         60,     0.62,     0.75,  0.66,    1, 0, 0, 45.6, 0,   0, 0.511,   1],
+        [        1,         82,     0.62,     0.75,  0.66,    1, 0, 1, 45.6, 0,   0, 0.511,   1],
+        [      7.5,        225,      0.6,     0.73,  0.66,    1, 0, 1, 45.6, 0,   0, 0.511,   1],
+        [      8.5,        247,      0.6,     0.73,  0.66,    1, 0, 0, 45.6, 0,   0, 0.511,   1],
       ] },
     { name: '3 pop', dur: 2.5, ov: {},
       note: 'black; the cork pops at popT. The bottle tips in, unseen',
@@ -2606,7 +2615,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['tgtY',     'range', 0.26, 0.00, 0.62, 0.005,2],
     ['lightAz',  'range', -45,  -180, 180,  1,    0],
     ['lightEl',  'range', 45.6, -30,  85,  0.5,  1],
-    ['tableY',   'range', 0,    0,    0.34, 0.005,3],
+    ['tableY',   'range', 0,    0,    0.52, 0.001,3],
     ['envAmt',   'range', 1,    0,    1,    0.01, 2],
     ['bkBreath', 'range', 0.25, 0,    1,    0.01, 2],
     ['bkSpeed',  'range', 0.5,  0,    3,    0.05, 2],
@@ -2630,6 +2639,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['glug',     'range', 0.7,  0.0,  1.0,  0.05, 2],
     ['glugHz',   'range', 3.5,  0.5,  10,   0.1,  1],
     ['bottle',   'check', true],
+    ['botStand', 'check', false],
     ['botTilt',  'range', 118,  0,    170,  1,    0],
     ['botAz',    'range', 205, -180,  180,  1,    0],
     ['pourWander','range', 20,  0,    60,   0.5,  1],
@@ -2727,6 +2737,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     botShare: 'The bottle\'s share of the 65536 particles; the rest are for the spill between the glasses. A drop holds its particle from the bottle until it lands (~17 steps), so the share caps the stream at about share x 65536 / 17 drops a step - 0.17 is ~650. Raise it with pourRate for a heavier pour, at the cost of the spill cascade. Per shot.',
     pourRate: 'Drops leaving the bottle per frame. Raise it for a dense continuous stream, lower it for separate falling drops.',
     wanderSpd: 'How quickly the bottle drifts around. Higher makes the pour restless and the stream whip about; lower is a slow lazy sway.',
+    botStand: 'The bottle stands upright on the table at the centre instead of pouring - where the top glass stands; raise the table over the glass\'s rim (tableY 0.511) to show the bottle alone. Per shot (shot 2).',
     bottle: 'Show the magnum. It is an analytic shape only - there is no fluid simulated inside it yet.',
     botTilt: 'Tilt from upright, in degrees. 0 is standing up; pouring needs to go past horizontal, so 110-130 is the useful range. The mouth stays at the pour point and the body swings around it.',
     botAz: 'Which direction the magnum is held from, in degrees.',
