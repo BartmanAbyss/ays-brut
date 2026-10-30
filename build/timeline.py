@@ -295,4 +295,28 @@ def emit_release(js):
             for s in shots if s.get('ov') or 'fade' in s]
     if js.count(FLAT_CALL) != 1:
         raise TimelineError('expected exactly one %s in the harness' % FLAT_CALL)
-    return js.replace(FLAT_CALL, js_array(flatten(shots))), warn
+    js = js.replace(FLAT_CALL, js_array(flatten(shots)))
+    if TEXT_CALL in js:
+        js = js.replace(TEXT_CALL, js_array(text_cues(js, shots)))
+    return js, warn
+
+
+TEXT_CALL = 'textCues(SHOTS)'
+
+
+def text_cues(js, shots):
+    """The lettering's cues - [shot name, from, to, word, x, y], seconds from the shot's
+    start - as the release needs them: [from, to, word, x, y] in show seconds. Mirrors the
+    harness's textCues(): `to` stops at the shot's end, a cue for a missing shot drops."""
+    m = re.search(r'const TEXT_CUES = (\[.*?\n  \]);', js, re.S)
+    if not m:
+        raise TimelineError('TEXT_CUES not found in the harness')
+    cues = parse_literal(m.group(1))
+    st, names = starts(shots), [s['name'] for s in shots]
+    out = []
+    for c in cues:
+        if c[0] not in names:
+            continue
+        i = names.index(c[0])
+        out.append([r6(st[i] + c[1]), r6(min(st[i] + c[2], st[i + 1]))] + list(c[3:]))
+    return out

@@ -307,23 +307,31 @@ to be on screen.
 
 ### Lettering
 
-Three lines - MAISON ABYSSE, 2026, CHAMPAGNE POUR LES MASSES - in the capitals of Josefin
-Sans SemiBold, which no PC at the party will have installed and which cannot ship inside
-8 KB. Josefin is geometric and monoline, so each capital is redrawn as a pen path: a few
-lines, ellipse arcs and curves, drawn with a pen as wide as the font's stem (116 of 1000
-units), butt ends, mitred corners. Each line is one SVG path over the picture (a 1600 x 900
-box, centred, caps ~7% of the screen's height); the browser draws it, so there is no font
-and no glyph code. `SHOW_TEXT` says when each line shows, in show seconds, fading in and
-out over 1 s; `?text=N` holds line N for judging the layout.
+MAISON ABYSSE and 2026 over the standing bottle in shot 2; CHAMPAGNE / POUR / LES / MASSES
+stacked over the tower in shot 8, a line a second from 10 s in. Josefin Sans SemiBold
+capitals, which no PC at the party will have installed and which cannot ship inside 8 KB.
+Josefin is geometric and monoline, so each capital is redrawn as a pen path: a few lines,
+ellipse arcs and curves, drawn with a pen as wide as the font's stem (116 of 1000 units),
+butt ends, mitred corners, and set wide (150 units between letters) for a luxury feel.
+Each word is one SVG path over the picture, placed in a 1600 x 900 box (0 0 the centre;
+caps ~7% of the screen's height); the browser draws it, so there is no font and no glyph
+code.
+
+`TEXT_CUES` places and times the words: `[shot, from, to, word, x, y]`, seconds from the
+shot's start, so a word stays with its shot when shots are stretched or moved (`to` past
+the shot's end means to its end). A word fades in and out over 1 s, and with the picture's
+own fades. The build resolves the cues to show times for the release, as it flattens the
+shots; the editor re-resolves them whenever the shots change. `?text=1` holds every word.
 
 `python dev/tools/strokefont.py` holds the glyphs (in the font's units, read off its
-outlines), lays the lines out, writes them into the harness's `TEXT` block, and writes
+outlines), lays the words out, writes them into the harness's `TEXT` block, and writes
 `dev/tools/strokefont.html`, every glyph over the real outline to compare.
 `python dev/tools/glyphs.py` cuts the 600 weight out of the variable font in `dev/fonts`
 (from Google Fonts' repository, with its OFL) and dumps the reference outlines. A new
 letter needs its strokes added there.
 
-Cost: ~670 bytes - ~450 for the three paths, the rest the overlay and its fades. Baked
+Cost: ~725 bytes (intro.cmd 10 413) - ~450 for the paths, the rest the overlay, its
+fades and the cues. Baked
 lines beat a glyph table laid out at runtime (~620 for the table alone), and a coarser grid
 saves ~20. Each letter's origin snaps to the grid before its own coordinates round, so
 every copy of a letter is the same string and brotli stores it once.

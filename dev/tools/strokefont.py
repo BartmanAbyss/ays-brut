@@ -25,7 +25,10 @@ REF = os.path.join(HERE, 'glyphs_ref.json')
 
 CAP = 728
 PEN = 116            # the stem width
-LINES = ['MAISON ABYSSE', '2026', 'CHAMPAGNE POUR LES MASSES']
+# the words, each laid out on its own (the harness places them): TEXT[0], TEXT[1], ...
+LINES = ['MAISON', 'ABYSSE', '2026', 'CHAMPAGNE', 'POUR', 'LES', 'MASSES']
+# tracking: extra space between letters, in font units - wide-set capitals read as luxury
+TRACK = 150
 # output grid: font units per path unit. The overlay's viewBox is 1600 x 900, and a cap
 # height of CAP / Q units; 12 makes caps ~61 of 900 - about 7% of the screen's height
 Q = 12.0
@@ -117,7 +120,7 @@ def path_for(text, q=Q):
     """One relative SVG path for a line, centred on x = 0 with the caps centred on y = 0.
     Coordinates are rounded as ABSOLUTE positions and then differenced, so rounding
     never drifts along a line."""
-    width = sum(G[c][0] for c in text)
+    width = sum(G[c][0] for c in text) + TRACK * (len(text) - 1)
     x0 = -width / 2
     d, last = [], (0, 0)
     # to output units, y down. Each glyph's origin snaps to the grid FIRST and its own
@@ -163,7 +166,7 @@ def path_for(text, q=Q):
                     else:
                         d.append('l%s %s' % (num(dx), num(dy)))
                     last = p
-        x0 += adv
+        x0 += adv + TRACK
     s = ''.join(d)
     s = re.sub(r' -', '-', s)       # SVG needs no space before a minus
     return s

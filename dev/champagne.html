@@ -1697,7 +1697,7 @@ const cfg = {
   det:      Q.get('det') === '1' || Q.get('still') === '1',   // frame N is always step N
   show:     Q.get('show') === '1',     // run the timeline instead of the manual camera
   showt:    qf('showt', 0),            // seek here on load (how a backward scrub works)
-  text:     qf('text', -1),            // show lettering line N, held (layout checks)
+  text:     qf('text', 0),             // ?text=1: every word of the lettering, held (layout)
   edit:     Q.get('edit') === '1',     // the timeline editor: no sound, the show on, a shot strip
   edtest:   Q.get('edtest') === '1',   // with edit: run the editor's in-browser tests
   // the release's start screen: click, fullscreen, audio clock. Never in the editor: it
@@ -1993,6 +1993,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
                        Math.cos(tt * 0.29 * K + 2.1) * 0.62 + Math.sin(tt * 0.73 * K + 0.7) * 0.38];
     const W = ui.pourWander * 0.001;
     const w0 = wob(time), w1 = wob(time + 0.02);
+    textFade = fade;
     // in struct U order: what the release keeps first...
     f32.set([canvas.width, canvas.height, time, simU,
              Math.sin(ang) * dist, camY, Math.cos(ang) * dist, ui.shutter * SIM_DT * frameSim,
@@ -2115,6 +2116,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     showStep += nShow; showT = showStep * SIM_DT;
 //#D{
     if (ed) ed.onShow();         // loop wrap, the shot's own slider values, the playhead
+    else if (ui.show) showOv();  // the plain show applies a shot's own values too
 //#D}
     if (ui.show && nShow) { setUI('showT', Math.min(showT, SHOW_END).toFixed(2)); }
     // Fast-forward is a deliberate burst, not a hitch: it has to actually simulate its
@@ -2453,37 +2455,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // EDITOR-MODEL:END
   function flattenShots(shots) { return ED.flatten(shots); }
   //#D}
-  // ── lettering ──
-  // Josefin Sans SemiBold's capitals redrawn as pen strokes (dev/tools/strokefont.py: the
-  // glyphs, the layout, a page comparing each with the real font). Each line is one SVG
-  // path, centred in a 1600 x 900 box over the picture and drawn with a pen as wide as
-  // the font's stem. No font ships - Josefin Sans is OFL, credited in the NFO.
-  // TEXT:BEGIN - written by python dev/tools/strokefont.py; edit the glyphs there
-  const TEXT = [
-    'm-337 30v-48l26 36l26-36v48m20 0l22-51l22 51m-36-18h28m28 18v-60m55 8q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m105-21a26 26 0 0 0-26-26a26 26 0 0 0-27 26a26 26 0 0 0 27 26a26 26 0 0 0 26-26zm22 30v-51l44 43v-52m47 60l22-51l22 51m-36-18h28m28 14v-52h14a13 13 0 0 1 13 13a13 13 0 0 1-13 13h3a13 13 0 0 1 13 13a13 13 0 0 1-13 13h-17zm0-26h17m31-30l21 36l22-36m-22 36v24m71-52q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m85-43q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m91-47h-36v52h37m-37-26h32',
-    'm-83 3a14 14 0 0 1 4-23a14 14 0 0 1 20 14q-2 15-25 32h31m48-23a18 23 0 0 0-18-23a18 23 0 0 0-18 23a18 23 0 0 0 18 23a18 23 0 0 0 18-23zm21 0a14 14 0 0 1 4-23a14 14 0 0 1 20 14q-2 15-25 32h31m42-13a15 14 0 0 0-15-14a15 14 0 0 0-15 14a15 14 0 0 0 15 14a15 14 0 0 0 15-14zm-30-3q3-19 23-32',
-    'm-634-21a26 26 0 0 0-42 21a26 26 0 0 0 42 21m20 9v-60m40 60v-60m-40 30h40m20 30l22-51l22 51m-36-18h28m28 18v-48l26 36l26-36v48m26 0v-56h15a15 15 0 0 1 15 16a15 15 0 0 1-15 15h-15m45 25l22-51l22 51m-36-18h28m66-33a26 26 0 0 0-42 21a26 26 0 0 0 43 21v-17h-17m42 26v-51l44 43v-52m62 4h-36v52h37m-37-26h32m49 30v-56h15a15 15 0 0 1 15 16a15 15 0 0 1-15 15h-15m100-5a26 26 0 0 0-26-26a26 26 0 0 0-27 26a26 26 0 0 0 27 26a26 26 0 0 0 26-26zm22-30v38a19 18 0 0 0 19 18a19 18 0 0 0 19-17v-39m24 60v-56h15a15 15 0 0 1 15 16a15 15 0 0 1-15 15h-15m19 0l15 25m49-60v56h35m53-52h-36v52h37m-37-26h32m52-22q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m82 9v-48l26 36l26-36v48m20 0l22-51l22 51m-36-18h28m57-34q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m85-43q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m91-47h-36v52h37m-37-26h32m52-22q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6',
-  ];
-  // TEXT:END
-  // When each line shows, in show seconds: [from, to, line], fading in and out over 1 s
-  const SHOW_TEXT = [
-    [3, 8, 0],
-    [14, 20, 2],
-  ];
-  // after the canvas, so the harness's panels stay on top of it
-  canvas.insertAdjacentHTML('afterend', '<svg viewBox="-800 -450 1600 900" style="position:fixed;left:0;top:0;' +
-    'width:100%;height:100%;pointer-events:none"><path fill="none" stroke="#fff" stroke-width="9.7" ' +
-    'stroke-miterlimit="9"/></svg>');
-  const textEl = canvas.nextSibling.firstChild;
-  function drawText(t) {
-    let o = 0, k = 0;
-    for (const [a, b, i] of SHOW_TEXT) if (t > a && t < b) { o = Math.min(1, t - a, b - t); k = i; }
-//#D{
-    if (cfg.text >= 0) { o = 1; k = cfg.text; }          // ?text=N: line N, held, for layout
-//#D}
-    textEl.setAttribute('d', TEXT[k]);
-    textEl.style.opacity = o;
-  }
   // ── timeline ──
   // The timeline is a list of SHOTS, each owning its keys from t = 0 to t = dur (times
   // within the shot). flattenShots() lays them end to end into SHOW, the key list evalShow
@@ -2607,6 +2578,69 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D}
   const SHOW = flattenShots(SHOTS);
   let SHOW_END = SHOW[SHOW.length - 1][0];   // the editor changes it
+  // ── lettering ──
+  // Josefin Sans SemiBold's capitals redrawn as pen strokes (dev/tools/strokefont.py: the
+  // glyphs, the layout, a page comparing each with the real font). Each word is one SVG
+  // path, centred on its own origin, placed in a 1600 x 900 box over the picture and drawn
+  // with a pen as wide as the font's stem. No font ships - Josefin Sans is OFL (NFO).
+  // TEXT:BEGIN - written by python dev/tools/strokefont.py; edit the glyphs there
+  const TEXT = [
+    'm-195 30v-48l26 36l26-36v48m33 0l22-51l22 51m-36-18h28m41 18v-60m67 8q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m118-21a26 26 0 0 0-26-26a26 26 0 0 0-27 26a26 26 0 0 0 27 26a26 26 0 0 0 26-26zm34 30v-51l44 43v-52',
+    'm-185 30l22-51l22 51m-36-18h28m41 14v-52h14a13 13 0 0 1 13 13a13 13 0 0 1-13 13h3a13 13 0 0 1 13 13a13 13 0 0 1-13 13h-17zm0-26h17m43-30l21 36l22-36m-22 36v24m84-52q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m97-43q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m104-47h-36v52h37m-37-26h32',
+    'm-101 3a14 14 0 0 1 4-23a14 14 0 0 1 20 14q-2 15-25 32h31m60-23a18 23 0 0 0-18-23a18 23 0 0 0-18 23a18 23 0 0 0 18 23a18 23 0 0 0 18-23zm33 0a14 14 0 0 1 4-23a14 14 0 0 1 20 14q-2 15-25 32h31m54-13a15 14 0 0 0-15-14a15 14 0 0 0-15 14a15 14 0 0 0 15 14a15 14 0 0 0 15-14zm-30-3q3-19 23-32',
+    'm-278-21a26 26 0 0 0-42 21a26 26 0 0 0 42 21m33 9v-60m40 60v-60m-40 30h40m32 30l22-51l22 51m-36-18h28m41 18v-48l26 36l26-36v48m38 0v-56h15a15 15 0 0 1 15 16a15 15 0 0 1-15 15h-15m58 25l22-51l22 51m-36-18h28m79-33a26 26 0 0 0-42 21a26 26 0 0 0 43 21v-17h-17m53 26v-51l44 43v-52m75 4h-36v52h37m-37-26h32',
+    'm-126 30v-56h15a15 15 0 0 1 15 16a15 15 0 0 1-15 15h-15m113-5a26 26 0 0 0-26-26a26 26 0 0 0-27 26a26 26 0 0 0 27 26a26 26 0 0 0 26-26zm34-30v38a19 18 0 0 0 19 18a19 18 0 0 0 19-17v-39m37 60v-56h15a15 15 0 0 1 15 16a15 15 0 0 1-15 15h-15m19 0l15 25',
+    'm-77-30v56h35m66-52h-36v52h37m-37-26h32m64-22q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6',
+    'm-187 30v-48l26 36l26-36v48m33 0l22-51l22 51m-36-18h28m70-34q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m97-43q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m104-47h-36v52h37m-37-26h32m64-22q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6',
+  ];
+  // TEXT:END
+//#D{
+  // Where and when each word shows: [shot, from, to, word, x, y]. Seconds from the shot's
+  // start, so a word stays with its shot when shots are stretched or moved (`to` past the
+  // shot's end means to its end); x, y in the 1600 x 900 box, 0 0 the centre. A word
+  // fades in and out over 1 s, and with the picture's own fades. The release gets them as
+  // show times: the build resolves textCues() as it does flattenShots().
+  const TEXT_CUES = [
+    ['2 orbit', 1, 99, 0, -400, 0],      // MAISON, left of the bottle
+    ['2 orbit', 1, 99, 1, 400, 0],       // ABYSSE, right of it
+    ['2 orbit', 1, 99, 2, 0, -110],      // 2026, centred above
+    ['8', 10, 99, 3, 0, -165],           // CHAMPAGNE
+    ['8', 11, 99, 4, 0, -55],            // POUR
+    ['8', 12, 99, 5, 0, 55],             // LES
+    ['8', 13, 99, 6, 0, 165],            // MASSES
+  ];
+  function textCues(shots) {
+    const st = ED.starts(shots), names = shots.map(s => s.name);
+    return TEXT_CUES.filter(c => names.includes(c[0])).map(([n, a, b, ...r]) => {
+      const i = names.indexOf(n);
+      return [ED.r6(st[i] + a), ED.r6(Math.min(st[i] + b, st[i + 1])), ...r];
+    });
+  }
+//#D}
+  // [from, to, word, x, y] in show seconds
+  const SHOW_TEXT = textCues(SHOTS);
+  let textFade = 1;               // the picture's fade: the words go dark with it
+  // after the canvas, so the harness's panels stay on top of it
+  canvas.insertAdjacentHTML('afterend', '<svg viewBox="-800 -450 1600 900" style="position:fixed;left:0;' +
+    'top:0;width:100%;height:100%;pointer-events:none" fill="none" stroke="#fff" stroke-width="9.7" ' +
+    'stroke-miterlimit="9">' + SHOW_TEXT.map(c => '<path transform="translate(' + c[3] + ' ' + c[4] +
+    ')" d="' + TEXT[c[2]] + '"/>').join('') + '</svg>');
+  const textEls = canvas.nextSibling.children;
+  function drawText(t) {
+//#D{
+    // the harness letterboxes a fixed w x h inside the window: lay the words over the
+    // picture, not the window (the release's canvas is the screen, so they agree there)
+    const r = canvas.getBoundingClientRect(), sv = canvas.nextSibling.style;
+    sv.left = r.left + 'px'; sv.top = r.top + 'px'; sv.width = r.width + 'px'; sv.height = r.height + 'px';
+//#D}
+    SHOW_TEXT.forEach(([a, b], k) => {
+      let o = Math.max(0, Math.min(1, t - a, b - t)) * textFade;
+//#D{
+      if (cfg.text > 0) o = 1;           // ?text=1: every word, held, for the layout
+//#D}
+      textEls[k].style.opacity = o;
+    });
+  }
   function evalShow(t) {
     t = Math.max(0, Math.min(t, SHOW_END));
     let i = 0;
@@ -3266,6 +3300,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // ── state ──
     function rebuild() {
       SHOW.length = 0; SHOW.push(...ED.flatten(st.shots));
+      SHOW_TEXT.splice(0, SHOW_TEXT.length, ...textCues(st.shots));
       SHOW_END = SHOW[SHOW.length - 1][0];
       uiEl.showT.inp.max = SHOW_END;
     }
@@ -3502,6 +3537,20 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     };
   }
   if (cfg.edit) { ed = makeEditor(); window.__ed = ed; }
+  // Without the editor the show still applies each shot's own slider values (ov) - shot 2's
+  // standing bottle, a shot's wander - over the globals as they were at load.
+  const ovBase = Object.fromEntries(ED.PER_SHOT.map(k => [k, ui[k]]));
+  let ovShot = -1;
+  function showOv() {
+    const i = ED.shotAt(SHOTS, showT);
+    if (i === ovShot) return;
+    ovShot = i;
+    for (const k of ED.PER_SHOT) {
+      const v = ED.effective(SHOTS, i, ovBase, k);
+      if (ui[k] === v) continue;
+      if (typeof v === 'boolean') { ui[k] = v; uiEl[k].inp.checked = v; } else setUI(k, v);
+    }
+  }
 
   // ── the editor's in-browser tests (?edit=1&edtest=1, best with &det=1) ──
   // They drive the real controls - clicks, slider input/change events, ctrl+z - against a

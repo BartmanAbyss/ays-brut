@@ -96,6 +96,17 @@ class Table(unittest.TestCase):
         js, warn = T.emit_release(T.write_shots(SRC, mini()))
         self.assertEqual(warn, ['b: expo, fade'])
 
+    def test_text_cues_become_show_times(self):
+        js = ("const TEXT_CUES = [\n    ['a', 1, 99, 0, -400, 0],   // to past the end: to the end\n"
+              "    ['b', 0.5, 1.5, 1, 0, 20],\n    ['gone', 1, 2, 2, 0, 0],\n  ];")
+        self.assertEqual(T.text_cues(js, mini()),
+                         [[1.0, 4.0, 0.0, -400.0, 0.0], [4.5, 5.5, 1.0, 0.0, 20.0]])
+        # the harness's own cues resolve against its own shots, inside the show
+        cues = T.text_cues(SRC, T.read_shots(SRC))
+        self.assertTrue(cues)
+        end = T.starts(T.read_shots(SRC))[-1]
+        self.assertTrue(all(0 <= c[0] <= c[1] <= end for c in cues))
+
     def test_numbers_are_written_shortest(self):
         self.assertEqual([T.num(x) for x in (20.0, 0.3, -25.0, 45.6, 1e-7)], ['20', '0.3', '-25', '45.6', '1e-07'])
 
