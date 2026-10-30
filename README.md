@@ -305,6 +305,29 @@ the page: `?edit=1&edtest=1&det=1` clicks, drags, loops and saves (a dry run - t
 never written) and leaves `EDTEST PASS` in the console and `__probe().edtest`; the pane has
 to be on screen.
 
+### Lettering
+
+Three lines - MAISON ABYSSE, 2026, CHAMPAGNE POUR LES MASSES - in the capitals of Josefin
+Sans SemiBold, which no PC at the party will have installed and which cannot ship inside
+8 KB. Josefin is geometric and monoline, so each capital is redrawn as a pen path: a few
+lines, ellipse arcs and curves, drawn with a pen as wide as the font's stem (116 of 1000
+units), butt ends, mitred corners. Each line is one SVG path over the picture (a 1600 x 900
+box, centred, caps ~7% of the screen's height); the browser draws it, so there is no font
+and no glyph code. `SHOW_TEXT` says when each line shows, in show seconds, fading in and
+out over 1 s; `?text=N` holds line N for judging the layout.
+
+`python dev/tools/strokefont.py` holds the glyphs (in the font's units, read off its
+outlines), lays the lines out, writes them into the harness's `TEXT` block, and writes
+`dev/tools/strokefont.html`, every glyph over the real outline to compare.
+`python dev/tools/glyphs.py` cuts the 600 weight out of the variable font in `dev/fonts`
+(from Google Fonts' repository, with its OFL) and dumps the reference outlines. A new
+letter needs its strokes added there.
+
+Cost: ~670 bytes - ~450 for the three paths, the rest the overlay and its fades. Baked
+lines beat a glyph table laid out at runtime (~620 for the table alone), and a coarser grid
+saves ~20. Each letter's origin snaps to the grid before its own coordinates round, so
+every copy of a letter is the same string and brotli stores it once.
+
 ### Sound
 
 `song()` renders the whole soundtrack once, before "click" appears, with an
@@ -1404,6 +1427,13 @@ build tools in `build/vendor` are third-party code and keep their licences (belo
   Acceptance Hill-Climbing Heuristic", *European Journal of Operational Research* 258(1),
   2017 (Bykov's 2008 report first).
 - Evaluated, not used: **Roadroller** (Kang Seonghoon, MIT) - see *Minifying* in CLAUDE.md.
+
+### Lettering
+
+- **Josefin Sans** by Santiago Orozco, SIL Open Font License 1.1
+  (https://github.com/ThomasJockin/JosefinSansFont-master; `dev/fonts/OFL.txt`). The
+  intro's capitals are our own pen strokes after its SemiBold shapes; no font file ships,
+  and the strokes do not use its Reserved Font Name.
 
 ### Disclosure
 

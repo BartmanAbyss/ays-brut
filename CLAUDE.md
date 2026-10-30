@@ -302,6 +302,12 @@ held the old document in its back-cache. Commit before structural edits.
 When patching with a script, anchor on unique strings and assert the match count. Replacing
 between two `str.index` results will happily swallow everything in between.
 
+**`open(path, 'w').write(f())` empties the file before `f()` reads it.** Python opens -
+and truncates - first, then evaluates the argument. A generator that spliced its block into
+`dev/champagne.html` that way read back an empty file, failed, and left the harness at 0
+bytes; it came back only from git. Read, build the new text, check it, then write through a
+temporary file and `os.replace`.
+
 **Write regex-bearing patches as script FILES, not heredocs or `python -c`.** Twice a
 `\b` or `\1` came through a shell layer as a literal backspace or \x01 byte: the pattern
 silently matched nothing, and in one case a replacement wrote control bytes into the
