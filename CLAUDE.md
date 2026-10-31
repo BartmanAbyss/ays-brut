@@ -518,7 +518,7 @@ chain - brotli alone ranked `unsafe` second, Roadroller ranked it last.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 226 bytes. `intro.cmd` is **9 344** (31 Oct 2026), 1 152
+  stale. Our dropper header is 218 bytes. `intro.cmd` is **9 336** (31 Oct 2026), 1 144
   OVER, with the start screen, the sound engine and the lettering in but the score empty;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The

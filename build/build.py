@@ -683,11 +683,12 @@ def main():
     # - LF alone ends the line; cmd does not need the CR
     # - port: a 4-digit one is needed - below ~5000 binding localhost is "Access is denied"
     #   without admin (1024 failed, 5000 worked; there is no URL reservation for 8044)
-    # Kept: -nop (a user profile could print or slow the start), `@` (or cmd echoes the
-    # whole line), exit/b rather than exit (exit closes a console the user ran it from).
-    head = ("@powershell -nop \"($l=[Net.HttpListener]@{}).Prefixes.Add(($u='http://localhost:@PORT@/'));"
+    # - no -nop (a user profile could print or slow the start), no `@` (cmd echoes the
+    #   whole line), exit rather than exit/b (it closes a console the user ran it from):
+    #   8 bytes, trade-offs accepted for the compo machine
+    head = ("powershell \"($l=[Net.HttpListener]@{}).Prefixes.Add(($u='http://localhost:@PORT@/'));"
             "$l.Start();start $u;($r=$l.GetContext().Response).AddHeader('Content-Encoding','br');"
-            "$r.Close((gc -li '%~f0' -en 3)[@@..1e5],1)\"&exit/b\n")
+            "$r.Close((gc -li '%~f0' -en 3)[@@..1e5],1)\"&exit\n")
     head = head.replace('@PORT@', str(PORT))   # not %-formatting: the header contains %~f0
     # The offset is written into the header itself; find the length that is consistent
     # with its own digit count (3 digits for any plausible header).
