@@ -103,9 +103,9 @@ class Table(unittest.TestCase):
               "    ['b', 0.5, 1.5, 1],\n    ['gone', 1, 2, 1],\n  ];")
         # a line a second after the one above; a cue for a missing shot drops
         self.assertEqual(T.text_cues(js, mini()), [[1.0, 4.0], [2.0, 4.0], [4.5, 5.5]])
-        # ...and the page gets their paths in the same order, each unseen to start with
-        self.assertEqual(T.text_overlay(js, mini()), '<svg x=1><path opacity=0 d="p0"/>'
-                         '<path opacity=0 d="p1"/><path opacity=0 d="p2"/></svg>')
+        # ...and the page gets their paths in the same order
+        self.assertEqual(T.text_overlay(js, mini()), '<svg x=1><path d="p0"/>'
+                         '<path d="p1"/><path d="p2"/></svg>')
         # the harness's own cues resolve against its own shots, inside the show
         cues = T.text_cues(SRC, T.read_shots(SRC))
         self.assertTrue(cues)

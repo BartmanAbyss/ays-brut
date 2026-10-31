@@ -2653,7 +2653,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D}
     SHOW_TEXT.forEach(([a, b], j) => {
       // CSS clamps opacity to 0..1, and the picture's fade is the overlay's own opacity
-      // (writeUniforms). Every path starts at opacity 0: drawText only runs once frames do.
+      // (writeUniforms). drawText only runs once frames do: until then the release's words
+      // are white on its white page, the harness's at opacity 0 on its dark one.
       let o = Math.min(t - a, b - t);
 //#D{
       if (cfg.text > 0) o = 1;           // ?text=1: every word, held, for the layout
