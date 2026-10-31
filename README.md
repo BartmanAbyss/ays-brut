@@ -1197,13 +1197,13 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 044 bytes (31 Oct 2026), 852 OVER 8 192**, lettering in, score
+**`intro.cmd` is 9 065 bytes (31 Oct 2026), 873 OVER 8 192**, lettering in, score
 empty. The last steps, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
 Roadroller searches (-> 9 319); sloppy literals in the WGSL (-> 9 213): 520 places where
 an abstract literal takes its type from context - `x * 2` for `x * 2.0`, `n * 4` for
 `n * 4u` - each found by the compiler, checked against integer division by a scan and
-against the picture by a pixel-exact A/B (CLAUDE.md has the rules); the timeline read as a function of the column, `showAt(t)(1)` for `evalShow(t).angle`, so the release carries no field names (-> 9 141); the key table trimmed - the `ease` column gone (two keys used it), camera values to a degree and a centimetre, black shots copying the camera either side (-> 9 080); the release frame loop without its leftovers (-> 9 053) and a simpler sim clock - steps straight from the audio clock each frame, capped at 16, nothing owed (-> 9 022); the camera rise at the end of 4 pour taken out, a key fewer (-> 9 016). Then the table, 9 032 -> 9 042: it mirrors the room (`env`, Schlick Fresnel for lacquer), glossy rather than sharp - the reflection's bokeh discs drawn at twice the radius - for +0.5 ms render on the tower shot; paid for by trimming the bokeh (one hash per disc, elevation as `rd.y`, no breathing). Tried and dropped on
+against the picture by a pixel-exact A/B (CLAUDE.md has the rules); the timeline read as a function of the column, `showAt(t)(1)` for `evalShow(t).angle`, so the release carries no field names (-> 9 141); the key table trimmed - the `ease` column gone (two keys used it), camera values to a degree and a centimetre, black shots copying the camera either side (-> 9 080); the release frame loop without its leftovers (-> 9 053) and a simpler sim clock - steps straight from the audio clock each frame, capped at 16, nothing owed (-> 9 022); the camera rise at the end of 4 pour taken out, a key fewer (-> 9 016). Then the table, 9 032 -> 9 042: it mirrors the room (`env`, Schlick Fresnel for lacquer), glossy rather than sharp - the reflection's bokeh discs drawn at twice the radius - for +0.5 ms render on the tower shot; paid for by trimming the bokeh (one hash per disc, elevation as `rd.y`, no breathing). Then the bottle: solid glass, and marches no longer stop on the surface they just left (CLAUDE.md) - its shadow now carries a green caustic line, it reads as a full bottle, -17 bytes with the packer's default state on both sides (+21 shipped until the packer is searched again), +0.8 ms in shot 8. Tried and dropped on
 the way: float constants packed into vectors (+35 shipped, -25 fair - the packer already
 names repeated literals), local floats packed into a `vec3f` (-2), the page markup moved
 inside the Roadroller-packed script (-4), mgnauck's wgslminify (does nothing ours does not).

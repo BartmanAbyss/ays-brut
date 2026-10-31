@@ -995,7 +995,6 @@ fn sprayDist(p: vec3f) -> f32 {
 const BOT_H   = 0.345;
 const BODY_R  = 0.060;                   // height/width 2.87, matching the reference
 const NECK_R  = 0.0150;
-const BOT_W   = 0.0030;                  // wall thickness
 fn rotX(v: vec3f, a: f32) -> vec3f {
   let c = cos(a); let s = sin(a);
   return vec3f(v.x, c * v.y - s * v.z, s * v.y + c * v.z);
@@ -1045,10 +1044,11 @@ fn sdBottleLocal(p: vec3f) -> f32 {
   // meet near a right angle, so a smooth max rounds the corner without the bulge it gives
   // surfaces that already run alongside each other
   d = -smin(-d, punt, u.puntSoft);
-  // hollow into a shell, then open the bore so the mouth is a mouth
-  let sh = max(d, -(d + BOT_W));
-  let bore = sdCyl(p, NECK_R - BOT_W - 0.0006, 0.22, BOT_H + 0.02);
-  return max(sh, -bore);
+  // Solid glass, not a hollow shell: a photon crosses two surfaces instead of four and
+  // reaches the table within its 4 legs (hollow, the fifth leg was always one too many - a
+  // black shadow), rays through it take two bounces fewer, and dark solid glass reads as a
+  // full bottle. Its absorption is scaled to the ~7 cm a ray crosses (sigmaOf).
+  return d;
 }
 fn sdBottle(p: vec3f) -> f32 {
   if (u.botOn < 0.5) { return 1e9; }
@@ -1213,7 +1213,12 @@ fn marchS(ro: vec3f, rd: vec3f, s: f32, tmax: f32) -> vec3f {
       i = i + 1;
       continue;
     }
-    if (d < HIT_EPS) { return vec3f(t, i, 1); }
+    // A hit only while closing in (d below the last step's). A leg starts SURF_EPS past the
+    // surface it turned at, and leaving it at a shallow angle that is still inside HIT_EPS -
+    // wider still on the bottle, whose field is scaled by 0.7 - so the march stopped at once
+    // on the surface it had just left: a turn with the same medium both sides, a leg lost.
+    // (rPrev starts at 0: the first step never stops.)
+    if (d < HIT_EPS && d < rPrev) { return vec3f(t, i, 1); }
     tPrev = t; rPrev = d;
     // Past the table plane nothing can win - every caller replaces a farther hit with the
     // analytic table. Stop once the last PROVEN-empty sphere reaches it, not merely when t
@@ -1247,8 +1252,10 @@ fn iorOf(m: i32) -> f32 {
   return array(1, 1.50, 1.34, 1, 1.52)[m];
 }
 fn sigmaOf(m: i32) -> vec3f {           // absorption: faint green glass, Beer-Lambert gold, olive bottle
+  // (the bottle is solid glass: its 31, 10, 37 per metre over ~7 cm pass what 260, 85, 310
+  // passed through the two 4 mm walls of the hollow one)
   return array(vec3f(0), vec3f(0.6, 0.35, 0.6), vec3f(2.2, 5.5, 16), vec3f(0),
-               vec3f(260, 85, 310))[m];
+               vec3f(31, 10, 37))[m];
 }
 
 fn turbo(x: f32) -> vec3f {

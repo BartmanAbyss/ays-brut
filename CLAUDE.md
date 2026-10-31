@@ -274,6 +274,17 @@ dropped. With the cap at 16 that only happens in the 8x blacks below ~30 fps (or
 16 (shared slot, shared RNG stream), and uncapped, a hitch asks the next frame for hundreds
 of steps and the intro never recovers.
 
+**A march must not stop on the surface it just left.** A leg starts SURF_EPS past the
+surface it turned at; leaving at a shallow angle, that is still inside HIT_EPS (wider on
+the bottle, whose field is scaled by 0.7), and the march "hit" it again at once - a turn
+with the same medium both sides, a leg or a bounce spent for nothing. Over half the
+turns of photons crossing the bottle were these, and with 4 legs not one reached the
+table: a black shadow, blamed first on the bottle being empty, then on its wall. Found by
+counting turns by (medium before, medium after) in the profiler buffer's spare slots.
+Now a hit counts only while the distance is falling (`d < rPrev`). It costs ~0.8 ms in
+shot 8 - light that used to die now arrives - and moves 2.6% of a frame's pixels a few
+levels. The bottle is solid glass since (two surfaces, not four: 3 legs to the table).
+
 **A debug toggle must isolate exactly one thing.** `parts=0` also disabled the puddle, which
 sent a bisection at the wrong subsystem for several rounds. When a toggle's result is
 surprising, check the toggle before believing it.
@@ -551,7 +562,7 @@ chain - brotli alone ranked `unsafe` second, Roadroller ranked it last.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 218 bytes. `intro.cmd` is **9 044** (31 Oct 2026), 852
+  stale. Our dropper header is 218 bytes. `intro.cmd` is **9 065** (31 Oct 2026), 873
   OVER, with the start screen, the sound engine and the lettering in but the score empty;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
