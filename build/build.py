@@ -258,6 +258,46 @@ def fold_uniforms(w, ui):
     return w, n[0]
 
 
+_LAYOUT = {'f32': (4, 4), 'vec2f': (8, 8), 'vec3f': (16, 12), 'vec4f': (16, 16)}   # align, size
+
+
+def nameless_uniforms(w):
+    """The uniform struct as `array<vec4f,N>`: no struct, no field names, `u.time` becomes
+    `u[0].z`. Fields keep their byte offsets (WGSL's own layout rules, computed here), so
+    the JS - which fills the buffer positionally - is unchanged. The harness keeps its
+    names; only the release loses them. -32 bytes with the packer's default state on both
+    sides (31 Oct), where a packed struct of vec4f slots gained only -8: the names are what
+    cost, not the declaration."""
+    m = re.search(r'struct U\s*\{([^}]*)\}\s*', w)
+    if not m:
+        raise BuildError('nameless_uniforms: no `struct U` in the shader')
+    off, slots = 0, {}
+    for name, ty in re.findall(r'(\w+)\s*:\s*(\w+)', m.group(1)):
+        if ty not in _LAYOUT:
+            raise BuildError('nameless_uniforms: field %s is %s; only f32 and vecNf map onto '
+                             'vec4f slots' % (name, ty))
+        align, size = _LAYOUT[ty]
+        off = -(-off // align) * align
+        if off // 16 != (off + size - 1) // 16:
+            raise BuildError('nameless_uniforms: field %s straddles a 16-byte slot' % name)
+        slots[name] = (off // 16, 'xyzw'[off % 16 // 4:][:size // 4])
+        off += size
+    w = w[:m.start()] + w[m.end():]
+    w, k = re.subn(r'(var<uniform>\s*u\s*:\s*)U\b', r'\1array<vec4f,%d>' % -(-off // 16), w)
+    if k != 1 or re.search(r'\bU\b', w):
+        raise BuildError('nameless_uniforms: `U` is used other than as the type of `u`')
+
+    def rep(mm):
+        slot, sw = slots[mm.group(1)]
+        if mm.group(2):              # u.res.x: pick the component directly, u[0].x
+            sw = ''.join(sw['xyzwrgba'.index(c) % 4] for c in mm.group(2)[1:])
+        return 'u[%d]' % slot + ('' if sw == 'xyzw' else '.' + sw)
+    w, n = re.subn(r'(?<![.\w])u\.(\w+)(\.[xyzwrgba]{1,4}(?!\w))?', rep, w)
+    if re.search(r'(?<![.\w])u\b(?!\s*\[)(?!\s*:\s*array)', w):
+        raise BuildError('nameless_uniforms: `u` is used whole somewhere, not field by field')
+    return w, n
+
+
 _NUM = r'(?:\(-?\d[\d.]*(?:e[+-]?\d+)?\)|-?\d[\d.]*(?:e[+-]?\d+)?)'
 _CMP = re.compile(r'(?<=[(&|])(\s*)(' + _NUM + r')\s*(<=|>=|==|!=|<|>)\s*(' + _NUM +
                   r')(?=\s*(?:\)|&&|\|\|))')
@@ -579,6 +619,10 @@ def prepare(verbose=False):
     say('peephole         %d folded leftovers simplified' % tidied)
     wgsl, shaken = tree_shake(wgsl)
     say('tree-shaken      wgsl %7d   (wgslender 1.5.1, vendored: dead code + syntax)' % len(wgsl.encode()))
+    # after wgslender: the array form is fine WGSL, but there is no reason to make its
+    # parser see it, and its tree-shaking has nothing to remove from the struct anyway
+    wgsl, nu = nameless_uniforms(wgsl)
+    say('uniforms         struct U -> array<vec4f>, %d accesses by slot' % nu)
     jmin, how = minify_js(js)
     say('js minified with %s' % how)
     wgsl, js, jmin, n = short_entries(wgsl, js, jmin)
