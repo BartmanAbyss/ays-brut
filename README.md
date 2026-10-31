@@ -393,12 +393,20 @@ sounds the same every run. Three parts:
   with `padAtk`/`padRel` swells and the notes of a chord up to `padStagger` apart.
 - **The liquid**: the bubble model (*The bubble model*, below) - drips, splash clouds, the
   pour and the fizz, written sample by sample (as audio nodes, ~1300 drips took 9.5 s to
-  render; as plain loops, milliseconds). The drip and splash moments are a Poisson process
-  whose rate follows what the simulation does, measured over a det run of the show: the
-  pour runs throughout, the top glass is already overflowing at t = 0 (the show starts
-  from a warmed-up state), and the second tier reaches its spill level between 19 and
-  26 s, which doubles the spray - so `drips` per second doubles there. Loudness follows the
-  camera's distance from the timeline: 1 on the macro shot, quieter on the wide ones.
+  render; as plain loops, milliseconds). Every track follows the timeline. The bubbles of
+  each are a Poisson process whose rate is per SIM second, so a show second holds `speed`
+  of them and slow motion thins them out with the picture. Re-done for the shot plan on
+  31 Oct from a run of the show on the audio clock (glass levels, and particles alive in
+  the spill pool): nothing is poured before the bottle tips in (the pour column, 24.9 s),
+  so shots 1-2 have only the pad and the cork; the top glass reaches its spill level at
+  ~35 s (spray ~1600 drops), tier 2 at ~52 s (~3500), and shot 8, with its own
+  `pourRate`/`botShare`, sends 28x the stream and ~21 000 drops. The drips and splashes
+  follow that spray as 1.5 s ramps (x1, x2, x13), the pour the pour column (x28 in shot
+  8), the fizz one share per tier on the table once the pour has begun. Loudness follows
+  the camera's distance (1 on the macro shot, quieter on the wide ones) and the fade, so
+  the liquid drops out in the blacks, where the sim runs at 8x. +45 bytes with the
+  packer's default state on both sides (+43 shipped). Re-measure the ramp times when the
+  shots change what the tower does when.
 - **The reverbs**: convolution, each impulse two channels of noise decaying to -60 dB.
   The pad goes into a hall (`verbLen` 4 s, `verbMix`), the liquid into a short room
   (`fxVerbLen` 0.6 s, `fxVerbMix` 0.25): one 4 s hall for everything made the drips sound
@@ -1198,8 +1206,9 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 992 bytes (31 Oct 2026), 800 OVER 8 192**, lettering in, score
-empty. The last steps, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
+**`intro.cmd` is 9 035 bytes (31 Oct 2026), 843 OVER 8 192**, lettering in, score
+empty; the last change was the liquid's sound re-done for the shot plan (+43, *Sound*).
+Before it, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
 Roadroller searches (-> 9 319); sloppy literals in the WGSL (-> 9 213): 520 places where
 an abstract literal takes its type from context - `x * 2` for `x * 2.0`, `n * 4` for
