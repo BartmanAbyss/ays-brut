@@ -135,6 +135,8 @@ def handler(ex):
                     with open(ex.wav, 'wb') as f:
                         f.write(body)
                     print('  soundtrack received (%.1f MB), encoding to %s' % (len(body) / 1e6, ex.a.out))
+                    if not ex.total:   # the show plus its last second: 16-bit stereo 48 kHz
+                        ex.total = int(round((len(body) - 44) / 4 / 48000 * FPS))
                     ex.start_ffmpeg()
                 elif path == '/done':
                     ex.finish()
@@ -172,7 +174,8 @@ def main():
 
     ex = Export(a)
     # the frame count, for progress only: the page decides when to stop
-    ex.total = int(round((a.seconds or 97.25) * FPS))
+    # (without --seconds, set from the soundtrack's length when it arrives)
+    ex.total = int(round(a.seconds * FPS))
     srv = http.server.ThreadingHTTPServer(('127.0.0.1', a.port),
                                           functools.partial(handler(ex), directory=HERE))
     threading.Thread(target=srv.serve_forever, daemon=True).start()

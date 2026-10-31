@@ -1241,9 +1241,9 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 035 bytes (31 Oct 2026), 843 OVER 8 192**, lettering in, score
-empty; the last change was the liquid's sound re-done for the shot plan (+43, *Sound*).
-Before it, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
+**`intro.cmd` is 9 046 bytes (31 Oct 2026), 854 OVER 8 192**, lettering in, score
+empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11).
+Before them, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
 Roadroller searches (-> 9 319); sloppy literals in the WGSL (-> 9 213): 520 places where
 an abstract literal takes its type from context - `x * 2` for `x * 2.0`, `n * 4` for
