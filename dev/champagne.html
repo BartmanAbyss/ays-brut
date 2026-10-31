@@ -147,14 +147,12 @@ struct U {
   glugHz   : f32,
   botAz    : f32,
   botOn    : f32,
-  bkBreath : f32,
-  bkSpeed  : f32,
   bkLife   : f32,
   strat    : f32,
   stratJit : f32,
   nSmooth  : f32,          // span normals are measured over, in grid cells (0 = fine)
   puntSoft : f32,          // the radius the punt's dome blends into the flat base with, m
-  _w2      : f32,          // buffer is 240 bytes = 60 floats; 57 used
+  _w2      : f32,          // buffer is 240 bytes = 60 floats; 55 used
 //#D}
 };
 
@@ -1259,9 +1257,9 @@ fn turbo(x: f32) -> vec3f {
                vec3f(0), vec3f(1));
 }
 // out-of-focus party lights: what makes refraction through glass worth looking at
+var<private> gl: f32;   // 1 while tableShade looks up its glossy reflection, else 0
 fn bokeh(rd: vec3f) -> vec3f {
-  let el = asin(clamp(rd.y, -1, 1));
-  let g  = vec2f(atan2(rd.z, rd.x), el) / 0.20;
+  let g  = vec2f(atan2(rd.z, rd.x), rd.y) / 0.20;   // rd.y, not asin: ~5% off at 30 deg
   let b  = floor(g);
   var acc = vec3f(0);
   for (var i = -1; i <= 1; i++) {
@@ -1269,27 +1267,29 @@ fn bokeh(rd: vec3f) -> vec3f {
       let id = b + vec2f(f32(i), f32(k));
       let cx = u32(id.x + 2048);
       let cy = u32(id.y + 2048);
-      var r  = rnd3(cx, cy, 17);
-      var lf = 1.0;
       // Each cell lives through cycles of bkLife seconds, phase-shifted per cell, and every
       // cycle rolls it a new disc - or none - so discs fade out and come back elsewhere.
       // Brightness fades over the first and last ~21% of a cycle (6f(1-f) reaches 1 there).
-      if (u.bkLife > 0) {
-        let lt = u.time / u.bkLife + rnd3(cx, cy, 5).x;
-        r  = rnd3(cx, cy, 17 + u32(lt));
-        let f = fract(lt);
-        lf = min(6 * f * (1 - f), 1);
-      }
+      var lt = u.time / u.bkLife + rnd3(cx, cy, 5).x;
+//#D{
+      if (u.bkLife <= 0) { lt = 0.5; }   // static discs: cycle 0, full brightness
+//#D}
+      let r  = rnd3(cx, cy, 17 + u32(lt));
+      let f  = fract(lt);
+      let lf = min(6 * f * (1 - f), 1);
       if (r.z > 0.46) { continue; }
       let ctr = id + 0.5 + (r.xy - 0.5) * 0.7;
-      // breathing: each disc at its own rate and phase. The 3x3 neighbourhood holds a disc
-      // up to ~1.1 cells across, so the radius (0.26 at most) has room to grow 4x.
-      let rad = (0.11 + r.x * 0.15) * (1 + u.bkBreath * sin(u.time * u.bkSpeed * (0.7 + r.y * 0.6) + r.z * 13.7));
-      let m   = smoothstep(rad, rad * 0.5, length(g - ctr));
+      // A fixed size: the discs used to breathe as well (bkBreath, bkSpeed), dropped on 31 Oct
+      // for 17 bytes - the faster lifecycle keeps them lively. The 3x3 neighbourhood holds a
+      // disc up to ~1.1 cells across; the radius is 0.26 at most, 0.52 in the table's gloss.
+      let rad = 0.11 + r.x * 0.15;
+      // gl (the table's glossy reflection): 1.6x wider, soft to the centre, 1.6x taller and
+      // as much dimmer. Kept within the 3x3 cells this loop looks at, or discs would clip.
+      let m   = smoothstep(rad * (1 + gl), rad * 0.5, length(g - ctr));
       acc += mix(vec3f(1, 0.66, 0.28), vec3f(0.50, 0.70, 1), r.y) * m * (0.45 + r.x * 2.2) * lf;
     }
   }
-  return acc * exp(-abs(el) * 1.9);
+  return acc * exp(-abs(rd.y) * 1.9);
 }
 // lat-long test grid: makes it obvious WHICH direction a reflection or refraction samples
 fn envGrid(rd: vec3f) -> vec3f {
@@ -1358,13 +1358,22 @@ fn causticAt(xz: vec2f) -> vec3f {
   let e = min(min(n.x, n.y), min(1 - n.x, 1 - n.y));
   return mix(a0, a1, f.y) / CSCALE * smoothstep(0, 0.02, e);
 }
-fn tableShade(p: vec3f) -> vec3f {
+fn tableShade(p: vec3f, d: vec3f) -> vec3f {
   let r = length(p.xz);
   let fall = 1 - 0.55 * clamp(r * 1.5, 0, 1);
   let amb = vec3f(0.013, 0.013, 0.017);
   // direct light AND caustics both come from the photon map: shadows are free
   let c = causticAt(p.xz) * u.cgain;
-  return (amb * u.envA + c) * fall * vec3f(0.97, 0.94, 0.90);
+  // a lacquered top: the room mirrored in it (the bokeh, the blue, the key light's glow),
+  // Schlick Fresnel for lacquer, 4% looking down and rising towards grazing. env() knows
+  // nothing of the glasses, so they are not mirrored - the room is. Glossy rather than a
+  // mirror: with gl set, bokeh() draws its discs wider, soft to the centre and stretched
+  // upright, as lights streak in a polished floor. (Jittering the normal per pixel instead
+  // turned the small bright discs into sparse glitter.)
+  gl = 1;
+  let e = env(reflect(d, vec3f(0, 1, 0)));
+  gl = 0;
+  return (amb * u.envA + c) * fall * vec3f(0.97, 0.94, 0.90) + e * (0.04 + 0.96 * pow(1 + d.y, 5));
 }
 fn tonemap(x: vec3f) -> vec3f {
   return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3f(0), vec3f(1));
@@ -1428,7 +1437,7 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
     var tab = lg.y == 1;
     var sf: Turn;
     if (!tab) { sf = turn(hp, d, med); tab = sf.medA == 3; }
-    if (tab) { return acc + tp * tableShade(hp); }
+    if (tab) { return acc + tp * tableShade(hp, d); }
     d = sf.d; p = sf.p; med = sf.med;
   }
   return acc + tp * env(d);
@@ -1499,7 +1508,7 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
     }
     if (tab) {
       if (PROF) { pc[16 + min(u32(b), 10)] += 1; pc[28] += 1; }
-      acc += tp * tableShade(hp); fin = true; break;
+      acc += tp * tableShade(hp, d); fin = true; break;
     }
     let n = sf.n;
     let medA = sf.medA;
@@ -2017,7 +2026,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkBreath, ui.bkSpeed, ui.bkLife, ui.strat, ui.stratJit, ui.smooth, ui.puntSoft * 0.001], 24);
+             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkLife, ui.strat, ui.stratJit, ui.smooth, ui.puntSoft * 0.001], 24);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
@@ -2300,7 +2309,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // the shots after it - signature() covers that, since it holds every earlier shot whole.
     // The wander's phase follows its speed, so the bottle jumps where wanderSpd changes:
     // change it across a cut to black.
-    const PER_SHOT = ['lightAz', 'expo', 'cgain', 'shutter', 'bkBreath', 'bkSpeed', 'bkLife',
+    const PER_SHOT = ['lightAz', 'expo', 'cgain', 'shutter', 'bkLife',
                       'pourWander', 'wanderSpd', 'pourRate', 'botShare', 'botStand'];
     // the globals the simulation depends on: a loop's saved start state is stale once one moves
     const SIM = ['autofill', 'fill', 'pourRate', 'botShare', 'dropVol', 'dropRad', 'foam', 'glug', 'glugHz',
@@ -2728,9 +2737,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['lightEl',  'range', 45.6, -30,  85,  0.5,  1],
     ['tableY',   'range', 0,    0,    0.52, 0.001,3],
     ['envAmt',   'range', 1,    0,    1,    0.01, 2],
-    ['bkBreath', 'range', 0.25, 0,    1,    0.01, 2],
-    ['bkSpeed',  'range', 0.5,  0,    3,    0.05, 2],
-    ['bkLife',   'range', 9,    0,    30,   0.5,  1],
+    ['bkLife',   'range', 4,    0,    30,   0.5,  1],
     ['gridEnv',  'check', false],
     ['strat',    'range', 2,    0,    2,    1,    0],
     ['stratJit', 'range', 1,    0,    3,    0.05, 2],
@@ -2829,8 +2836,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     camY: 'Camera height above the table, in metres. The tower is 0.51 m tall.',
     tgtY: 'Height the camera aims at, in metres. 0.26 is mid-tower, 0.48 is the top glass.',
     lightAz: 'Key light azimuth in degrees: swings the light around the tower. Moves the specular, the shadows and the caustics together.',
-    bkBreath: 'How much the background bokeh discs breathe: their radius swings by this share. 0 = fixed size.',
-    bkSpeed: 'Breathing rate in rad/s (each disc 0.7-1.3x of it, with its own phase). 0.5 is a ~12 s breath.',
     bkLife: 'Seconds each bokeh disc lives: it fades in, holds, fades out, and its cell rolls a new disc elsewhere (or none). 0 = static discs, as before.',
     envAmt: 'Environment brightness: the sky, the fill lights, the softbox seen in the glass, the haze and the table ambient. 0 leaves only what the key light lights through the photon map. A timeline column: shot 1 brings it up with the light.',
     tableY: 'Table height in m. Raised to a tier\'s base (0.17 = tier 2, 0.34 = the top glass) it hides the tiers below: the glasses stand on the table. Drops reaching it end there, so hidden tiers get no spill.',

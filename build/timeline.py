@@ -34,7 +34,7 @@ SLIDER_COL = {'angle': 1, 'dist': 2, 'camY': 3, 'tgtY': 4, 'speed': 5, 'lightEl'
 # global; the debug switches are not looks. A shot's start state depends on the values the
 # shots before it set, which the editor's kept start states account for. Same list as the
 # editor's PER_SHOT in the harness (a test checks they agree).
-PER_SHOT = ['lightAz', 'expo', 'cgain', 'shutter', 'bkBreath', 'bkSpeed', 'bkLife',
+PER_SHOT = ['lightAz', 'expo', 'cgain', 'shutter', 'bkLife',
             'pourWander', 'wanderSpd', 'pourRate', 'botShare', 'botStand']
 
 

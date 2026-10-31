@@ -270,7 +270,7 @@ in the editor at all, and the show is on.
   (angle, dist, camY, tgtY, lightEl, botTilt, tableY, envAmt) shift all of that shot's keys
   by the move, so a camera move keeps its shape; `speed` multiplies them instead (0.25 -> 0.5
   doubles every key of the shot, a ramp keeps its shape); the look sliders a shot may set for itself
-  (lightAz, expo, cgain, shutter, bkBreath, bkSpeed, bkLife) and the bottle's wander
+  (lightAz, expo, cgain, shutter, bkLife) and the bottle's wander
   (pourWander, wanderSpd) and flow (pourRate, botShare) - `ED.PER_SHOT` - become the shot's
   own values. Everything else is global, rec or not: anything that changes the simulation
   would make a shot's start depend on the shots before it, and the debug switches are not
@@ -1197,13 +1197,13 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 016 bytes (31 Oct 2026), 824 OVER 8 192**, lettering in, score
+**`intro.cmd` is 9 042 bytes (31 Oct 2026), 850 OVER 8 192**, lettering in, score
 empty. The last steps, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
 Roadroller searches (-> 9 319); sloppy literals in the WGSL (-> 9 213): 520 places where
 an abstract literal takes its type from context - `x * 2` for `x * 2.0`, `n * 4` for
 `n * 4u` - each found by the compiler, checked against integer division by a scan and
-against the picture by a pixel-exact A/B (CLAUDE.md has the rules); the timeline read as a function of the column, `showAt(t)(1)` for `evalShow(t).angle`, so the release carries no field names (-> 9 141); the key table trimmed - the `ease` column gone (two keys used it), camera values to a degree and a centimetre, black shots copying the camera either side (-> 9 080); the release frame loop without its leftovers (-> 9 053) and a simpler sim clock - steps straight from the audio clock each frame, capped at 16, nothing owed (-> 9 022); the camera rise at the end of 4 pour taken out, a key fewer (-> 9 016). Tried and dropped on
+against the picture by a pixel-exact A/B (CLAUDE.md has the rules); the timeline read as a function of the column, `showAt(t)(1)` for `evalShow(t).angle`, so the release carries no field names (-> 9 141); the key table trimmed - the `ease` column gone (two keys used it), camera values to a degree and a centimetre, black shots copying the camera either side (-> 9 080); the release frame loop without its leftovers (-> 9 053) and a simpler sim clock - steps straight from the audio clock each frame, capped at 16, nothing owed (-> 9 022); the camera rise at the end of 4 pour taken out, a key fewer (-> 9 016). Then the table, 9 032 -> 9 042: it mirrors the room (`env`, Schlick Fresnel for lacquer), glossy rather than sharp - the reflection's bokeh discs drawn at twice the radius - for +0.5 ms render on the tower shot; paid for by trimming the bokeh (one hash per disc, elevation as `rd.y`, no breathing). Tried and dropped on
 the way: float constants packed into vectors (+35 shipped, -25 fair - the packer already
 names repeated literals), local floats packed into a `vec3f` (-2), the page markup moved
 inside the Roadroller-packed script (-4), mgnauck's wgslminify (does nothing ours does not).
@@ -1223,7 +1223,8 @@ light, wider than the blur, and stratification only helps where the kernel spans
 cells. The stronger lever at low light is the fade: 248/256 instead of 236 took the grid to
 1.04 (not adopted - it lags a moving light or caustic 2.5x longer). 4x the photons measured
 2.0 -> 0.45 but costs time. Before that 9 313: the bokeh animates (+49) -
-each disc breathes at its own rate (`bkBreath`, `bkSpeed`), and every `bkLife` seconds,
+each disc breathed at its own rate (`bkBreath`, `bkSpeed`; dropped on 31 Oct for 17 bytes, with
+`bkLife` cut from 9 s to 4 so the room stays lively), and every `bkLife` seconds,
 phase-shifted per cell, a cell fades its disc out and rolls a new one, or none, so the lights
 drift around the room. It runs on the show clock, so it keeps real time through slow motion,
 and costs nothing measurable: the environment is only sampled where rays leave the scene.
