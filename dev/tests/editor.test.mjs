@@ -20,7 +20,7 @@ const ED = new Function(block('// EDITOR-MODEL:BEGIN', '// EDITOR-MODEL:END') + 
 const SHOTS = new Function(block('// SHOTS:BEGIN', '// SHOTS:END').replace(/^\s*\/\/.*$/mg, '') + '\nreturn SHOTS;')();
 
 // a small timeline to test on: two shots, keys [t, 12 values]
-const key = (t, angle, el = 45) => [t, angle, 0.3, 0.4, 0.4, 1, 0, 1, el, 0, 0, 0, 1];
+const key = (t, angle, el = 45) => [t, angle, 0.3, 0.4, 0.4, 1, 1, el, 0, 0, 0, 1];
 const mini = () => [
   { name: 'a', dur: 4, ov: {}, keys: [key(0, 10), key(2, 20), key(4, 30)] },
   { name: 'b', dur: 2, ov: {}, keys: [key(0, 30), key(2, 50)] },
@@ -69,9 +69,8 @@ test('COLS agrees with build/timeline.py', () => {
   assert.deepEqual(ED.COLS, py);
 });
 
-test('keyChanges: the values that move between two keys, ease and time left out', () => {
+test('keyChanges: the values that move between two keys, time left out', () => {
   const a = key(0, 10), b = key(2, 20, 50);
-  b[6] = 1;
   assert.deepEqual(ED.keyChanges(a, b), [['angle', 10, 20], ['lightEl', 45, 50]]);
   assert.deepEqual(ED.keyChanges(a, a), []);
 });
@@ -135,7 +134,7 @@ test('mapTime: the playhead keeps its place in a stretched shot and after it', (
 test('shiftColumn: moves one column of one shot, every key, nothing else', () => {
   const s = mini(), t = ED.shiftColumn(s, 0, 1, 5);
   assert.deepEqual(t[0].keys.map(k => k[1]), [15, 25, 35]);
-  assert.deepEqual(t[0].keys.map(k => k[8]), [45, 45, 45]);
+  assert.deepEqual(t[0].keys.map(k => k[7]), [45, 45, 45]);
   assert.deepEqual(t[1], s[1]);
 });
 
@@ -150,12 +149,12 @@ test('scaleColumn: multiplies one column of one shot, every key, nothing else', 
 });
 
 test('columnChanged / resetColumn: against the saved table', () => {
-  const saved = mini(), t = ED.shiftColumn(saved, 1, 8, -10);
-  assert.equal(ED.columnChanged(t, saved, 1, 8), true);
+  const saved = mini(), t = ED.shiftColumn(saved, 1, ED.COL.lightEl, -10);
+  assert.equal(ED.columnChanged(t, saved, 1, ED.COL.lightEl), true);
   assert.equal(ED.columnChanged(t, saved, 1, 1), false);
-  assert.equal(ED.columnChanged(t, saved, 0, 8), false);
-  const r = ED.resetColumn(t, saved, 1, 8);
-  assert.equal(ED.columnChanged(r, saved, 1, 8), false);
+  assert.equal(ED.columnChanged(t, saved, 0, ED.COL.lightEl), false);
+  const r = ED.resetColumn(t, saved, 1, ED.COL.lightEl);
+  assert.equal(ED.columnChanged(r, saved, 1, ED.COL.lightEl), false);
   assert.deepEqual(r, saved);
 });
 
@@ -212,7 +211,7 @@ test('setOverride refuses a global-only slider', () => {
 test('status: key / shot / global / none', () => {
   const saved = mini();
   const defaults = { expo: 1.45, cgain: 0.05, lightAz: -45 };
-  const st = { shots: ED.shiftColumn(saved, 0, 8, 3), globals: { expo: 1.45, cgain: 0.07, lightAz: -45 }, touched: [] };
+  const st = { shots: ED.shiftColumn(saved, 0, ED.COL.lightEl, 3), globals: { expo: 1.45, cgain: 0.07, lightAz: -45 }, touched: [] };
   assert.equal(ED.status(st, saved, defaults, 0, 'lightEl'), 'key');
   assert.equal(ED.status(st, saved, defaults, 1, 'lightEl'), '');
   assert.equal(ED.status(st, saved, defaults, 2, 'expo'), 'shot');

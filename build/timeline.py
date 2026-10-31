@@ -22,13 +22,13 @@ import re
 
 BEGIN = '// SHOTS:BEGIN'
 END = '// SHOTS:END'
-COLS = ['t', 'angle', 'dist', 'camY', 'tgtY', 'speed', 'ease', 'fade', 'lightEl', 'pour',
+COLS = ['t', 'angle', 'dist', 'camY', 'tgtY', 'speed', 'fade', 'lightEl', 'pour',
         'botTilt', 'tableY', 'envAmt']
 NCOL = len(COLS)
 # The sliders the timeline drives, and the key column each one reads out. Recording one of
 # these shifts the shot's keys.
-SLIDER_COL = {'angle': 1, 'dist': 2, 'camY': 3, 'tgtY': 4, 'speed': 5, 'lightEl': 8, 'botTilt': 10,
-              'tableY': 11, 'envAmt': 12}
+SLIDER_COL = {'angle': 1, 'dist': 2, 'camY': 3, 'tgtY': 4, 'speed': 5, 'lightEl': 7, 'botTilt': 9,
+              'tableY': 10, 'envAmt': 11}
 # The other sliders a shot may set for itself ("ov"): the looks, and how the bottle wanders
 # while it pours (pourWander, wanderSpd - set per shot by the user). Everything else is
 # global; the debug switches are not looks. A shot's start state depends on the values the
@@ -304,7 +304,7 @@ def shot_table(shots, defaults):
         # A shot that is black throughout shows nothing, so the values that only change the
         # look (LOOK_KEYS) carry over from the shot before: a row fewer for each black.
         # The ones the simulation runs on still apply - the tower fills in the black.
-        if out and all(k[7] == 0 for k in s['keys']):
+        if out and all(k[6] == 0 for k in s['keys']):   # fade
             for k in LOOK_KEYS:
                 j = 1 + SHOT_KEYS.index(k)
                 row[j] = out[-1][j]

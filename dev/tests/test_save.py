@@ -26,7 +26,7 @@ with io.open(os.path.join(DEV, "champagne.html"), encoding="utf-8", newline="") 
 
 
 def key(t, angle=10.0, el=45.0):
-    return [t, angle, 0.3, 0.4, 0.4, 1.0, 0.0, 1.0, el, 0.0, 0.0, 0.0, 1.0]
+    return [t, angle, 0.3, 0.4, 0.4, 1.0, 1.0, el, 0.0, 0.0, 0.0, 1.0]
 
 
 def mini():
@@ -73,7 +73,7 @@ class Table(unittest.TestCase):
         s = mini(); s[0]['keys'][1][0] = 5; bad.append(s)                 # out of order
         s = mini(); s[0]['keys'][-1][0] = 3.9; bad.append(s)              # does not end at dur
         s = mini(); s[0]['keys'][0][0] = 0.1; bad.append(s)               # does not start at 0
-        s = mini(); s[0]['keys'][0].pop(); bad.append(s)                  # 12 columns
+        s = mini(); s[0]['keys'][0].pop(); bad.append(s)                  # 11 columns
         s = mini(); s[0]['keys'] = s[0]['keys'][:1]; s[0]['keys'][0][0] = 0; bad.append(s)
         s = mini(); s[1]['ov'] = {'dropVol': 3.0}; bad.append(s)           # a global slider
         s = mini(); s[1]['ov'] = {'angle': 3.0}; bad.append(s)             # a timeline column
@@ -114,7 +114,7 @@ class Table(unittest.TestCase):
 
     def test_shot_table_rows_where_values_change(self):
         d = {'shutter': '0.5', 'pourRate': '120', 'botShare': '0.17', 'botStand': 'false'}
-        black = lambda t: [t] + key(0)[1:7] + [0.0] + key(0)[8:]
+        black = lambda t: [t] + key(0)[1:6] + [0.0] + key(0)[7:]   # fade 0
         shots = [
             {'name': 'a', 'dur': 4.0, 'ov': {'botStand': True}, 'keys': [key(0), key(4)]},
             {'name': 'b', 'dur': 2.0, 'ov': {}, 'keys': [black(0), black(2)]},       # black

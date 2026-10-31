@@ -56,7 +56,6 @@
   #tl .keys { position:relative; height:11px; margin-bottom:2px; }
   #tl .kf { position:absolute; top:1px; width:7px; height:7px; margin-left:-4px; transform:rotate(45deg);
         box-sizing:border-box; border:1px solid #9ab; background:transparent; cursor:pointer; }
-  #tl .kf.ease { background:#9ab; }
   #tl .kf.cut { border-color:#ffcf6b; }
   #tl .kf:hover { border-color:#fff; background:#fff; }
   #tl .shot { flex:none; box-sizing:border-box; height:100%; padding:3px 4px; overflow:hidden;
@@ -1972,7 +1971,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       if (previewT >= 0) sh = showAt(previewT);   // scrubbing: the camera leads
 //#D}
       ang = sh(1) / 57.3; dist = sh(2); camY = sh(3); tgtY = sh(4);   // deg -> rad, 0.007% off: -6 bytes
-      fade = sh(7); el = sh(8); pour = sh(9); tilt = sh(10); ty = sh(11); en = sh(12);
+      fade = sh(6); el = sh(7); pour = sh(8); tilt = sh(9); ty = sh(10); en = sh(11);
 //#D{
       // a shot's own fade length (harness-only for now) replaces its keyed fade
       { const f = ED.fadeAt(ed ? ed.st.shots : SHOTS, previewT >= 0 ? previewT : showT); if (f !== null) fade = f; }
@@ -2292,7 +2291,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const r6 = x => Math.round(x * 1e6) / 1e6;   // build/timeline.py r6, bit for bit
     const clone = v => JSON.parse(JSON.stringify(v));
     // the sliders the timeline drives, and their key column (build/timeline.py SLIDER_COL)
-    const COL = { angle: 1, dist: 2, camY: 3, tgtY: 4, speed: 5, lightEl: 8, botTilt: 10, tableY: 11, envAmt: 12 };
+    const COL = { angle: 1, dist: 2, camY: 3, tgtY: 4, speed: 5, lightEl: 7, botTilt: 9, tableY: 10, envAmt: 11 };
     // the other sliders a shot may set for itself (build/timeline.py PER_SHOT): the looks, and
     // how the bottle wanders while it pours. The rest of the simulation's settings stay
     // global; the debug switches are not looks. A wander set by one shot changes the start of
@@ -2439,10 +2438,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       return { shots: clone(st.shots), globals };
     }
     // a key's columns by name (build/timeline.py COLS), and what moves between two keys
-    const COLS = ['t', 'angle', 'dist', 'camY', 'tgtY', 'speed', 'ease', 'fade', 'lightEl', 'pour',
+    const COLS = ['t', 'angle', 'dist', 'camY', 'tgtY', 'speed', 'fade', 'lightEl', 'pour',
                   'botTilt', 'tableY', 'envAmt'];
     const keyChanges = (a, b) => COLS.map((n, c) => [n, a[c], b[c]])
-      .filter(([n, x, y], c) => c > 0 && n !== 'ease' && x !== y);
+      .filter(([n, x, y], c) => c > 0 && x !== y);
     // the keys as the strip shows them: show time, shot, index in the shot
     function keyList(shots) {
       const st = starts(shots), out = [];
@@ -2460,15 +2459,17 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   //#D}
   // ── timeline ──
   // The timeline is a list of SHOTS, each owning its keys from t = 0 to t = dur (times
-  // within the shot). flattenShots() lays them end to end into SHOW, the key list evalShow
+  // within the shot). flattenShots() lays them end to end into SHOW, the key list showAt
   // reads; a shot whose first key repeats the previous shot's last one runs on from it
   // without a cut. ov: the shot's own values for the few look sliders a shot may set
   // (the editor's PER_SHOT) - harness-only for now.
-  // Keys are [t, angle deg, dist, camY, tgtY, simSpeed, ease, fade, light elevation deg,
+  // Keys are [t, angle deg, dist, camY, tgtY, simSpeed, fade, light elevation deg,
   // pour, bottle tilt deg, table height m, environment brightness]. Two keys sharing a t are a CUT: the later one wins at that
-  // instant, so the change is immediate rather than a one-frame blend. `ease` applies to
-  // the segment STARTING at that key - 1 for smootherstep in and out, 0 for linear, so a
-  // long drift can run through several keys without stalling at each one.
+  // instant, so the change is immediate rather than a one-frame blend. Between keys every
+  // value moves linearly: a soft start is a short key a second in, as the shots do. (An
+  // `ease` column for smootherstep segments went on 31 Oct: two keys used it.)
+  // Camera values are kept to a degree and a centimetre, and a black shot's camera copies
+  // the shots either side of it: nobody sees it, and copies compress to nothing.
   // - simSpeed: below 1 real slow motion. In the black between shots it runs FAST, so the
   //   tower fills while nobody watches (the sim takes at most 16 steps a frame: 8 is safe).
   // - fade: 0 black .. 1 full. Every shot fades in and out.
@@ -2491,90 +2492,90 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     { name: '1 glass', dur: 12.75, ov: {},
       note: 'the top glass alone on the table, dark; the light rises from below it',
       keys: [
-        [    0,    20,   0.3,  0.42,  0.41,    1, 0, 0,  -25, 0,   0, 0.341,   0],
-        [    3,    25,  0.29,  0.42,  0.41,    1, 0, 1,   -5, 0,   0, 0.341, 0.1],
-        [11.25,    40,  0.27,  0.43, 0.415,    1, 0, 1, 45.6, 0,   0, 0.341,   1],
-        [12.75,    43, 0.265,  0.43, 0.415,    1, 0, 0, 45.6, 0,   0, 0.341,   1],
+        [    0,  20,  0.3, 0.42, 0.41,    1, 0,  -25, 0,   0, 0.341,   0],
+        [    3,  25, 0.29, 0.42, 0.41,    1, 1,   -5, 0,   0, 0.341, 0.1],
+        [11.25,  40, 0.27, 0.43, 0.41,    1, 1, 45.6, 0,   0, 0.341,   1],
+        [12.75,  43, 0.27, 0.43, 0.41,    1, 0, 45.6, 0,   0, 0.341,   1],
       ] },
     { name: '2 orbit', dur: 8.5, ov: {botStand: true},
       note: 'an orbit round it',
       keys: [
-        [    0,    60,  0.36, 0.655,  0.66,    1, 0, 0, 45.6, 0,   0, 0.511,   1],
-        [    1,    82,  0.36, 0.655,  0.66,    1, 0, 1, 45.6, 0,   0, 0.511,   1],
-        [  7.5,   225,  0.34, 0.635,  0.66,    1, 0, 1, 45.6, 0,   0, 0.511,   1],
-        [  8.5,   247,  0.34, 0.635,  0.66,    1, 0, 0, 45.6, 0,   0, 0.511,   1],
+        [    0,  60, 0.36, 0.66, 0.66,    1, 0, 45.6, 0,   0, 0.511,   1],
+        [    1,  82, 0.36, 0.66, 0.66,    1, 1, 45.6, 0,   0, 0.511,   1],
+        [  7.5, 225, 0.34, 0.64, 0.66,    1, 1, 45.6, 0,   0, 0.511,   1],
+        [  8.5, 247, 0.34, 0.64, 0.66,    1, 0, 45.6, 0,   0, 0.511,   1],
       ] },
     { name: '3 pop', dur: 2.5, ov: {},
       note: 'black; the cork pops at popT. The bottle tips in, unseen',
       keys: [
-        [    0,   247,   0.3,  0.52,  0.44,    1, 0, 0, 45.6, 0,   0, 0.341,   1],
-        [  2.5,    39,  0.19,  0.53,  0.48, 0.25, 0, 0, 45.6, 0,  95, 0.341,   1],
+        [    0, 247, 0.34, 0.64, 0.66,    1, 0, 45.6, 0,   0, 0.341,   1],
+        [  2.5,  79, 0.13, 0.53,  0.5, 0.25, 0, 45.6, 0,  95, 0.341,   1],
       ] },
     { name: '4 pour', dur: 15, ov: {},
       note: 'the pour in slow motion: the bottle tips in, the flow starts, the glass fills',
       keys: [
-        [    0,    79, 0.128,  0.53,   0.5,  0.5, 0, 0, 45.6, 0,  95, 0.341,   1],
-        [0.625,    80, 0.128,  0.53,   0.5,  0.5, 1, 1, 45.6, 0, 112, 0.341,   1],
-        [1.125,    81, 0.126,  0.53,   0.5,  0.5, 0, 1, 45.6, 1, 118, 0.341,   1],
-        [8.125,    92, 0.118,  0.53,   0.5,  0.5, 1, 1, 45.6, 1, 118, 0.341,   1],
-        [13.75,   102, 0.118,  0.55,  0.51,  0.5, 0, 1, 45.6, 1, 118, 0.341,   1],
-        [   15,   105, 0.118,  0.55,  0.51,  0.5, 0, 0, 45.6, 1, 118, 0.341,   1],
+        [    0,  79, 0.13, 0.53,  0.5,  0.5, 0, 45.6, 0,  95, 0.341,   1],
+        [0.625,  80, 0.13, 0.53,  0.5,  0.5, 1, 45.6, 0, 112, 0.341,   1],
+        [1.125,  81, 0.13, 0.53,  0.5,  0.5, 1, 45.6, 1, 118, 0.341,   1],
+        [8.125,  92, 0.12, 0.53,  0.5,  0.5, 1, 45.6, 1, 118, 0.341,   1],
+        [13.75, 102, 0.12, 0.55, 0.51,  0.5, 1, 45.6, 1, 118, 0.341,   1],
+        [   15, 105, 0.12, 0.55, 0.51,  0.5, 0, 45.6, 1, 118, 0.341,   1],
       ] },
     { name: 'black', dur: 1.5, ov: {},
       note: 'the table drops to tier 2; the sim runs 8x, the top glass overflows into it',
       keys: [
-        [    0,    65,  0.18,  0.55,  0.49,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
-        [  1.5,   300,  0.62,  0.52,  0.33,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [    0, 105, 0.12, 0.55, 0.51,    8, 0, 45.6, 1, 118, 0.171,   1],
+        [  1.5, 300, 0.49, 0.52, 0.33,    8, 0, 45.6, 1, 118, 0.171,   1],
       ] },
     { name: '5 tiers', dur: 10.5, ov: {shutter: 1},
       note: 'an orbit of the two tiers',
       keys: [
-        [    0,   300, 0.488,  0.52,  0.33,  0.5, 0, 0, 45.6, 1, 118, 0.171,   1],
-        [    1,   310, 0.478,  0.52,  0.33,  0.5, 0, 1, 45.6, 1, 118, 0.171,   1],
-        [  9.5,   400, 0.428,   0.5,  0.33,  0.5, 0, 1, 45.6, 1, 118, 0.171,   1],
-        [ 10.5,   412, 0.423,   0.5,  0.33,  0.5, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [    0, 300, 0.49, 0.52, 0.33,  0.5, 0, 45.6, 1, 118, 0.171,   1],
+        [    1, 310, 0.48, 0.52, 0.33,  0.5, 1, 45.6, 1, 118, 0.171,   1],
+        [  9.5, 400, 0.43,  0.5, 0.33,  0.5, 1, 45.6, 1, 118, 0.171,   1],
+        [ 10.5, 412, 0.42,  0.5, 0.33,  0.5, 0, 45.6, 1, 118, 0.171,   1],
       ] },
     { name: 'black', dur: 1.5, ov: {},
       note: '8x again, tier 2 fills to overflowing',
       keys: [
-        [    0,   412, 0.555,   0.5,  0.33,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
-        [  1.5,    39,  0.26,   0.4,   0.3,    8, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [    0, 412, 0.42,  0.5, 0.33,    8, 0, 45.6, 1, 118, 0.171,   1],
+        [  1.5,  39, 0.26,  0.4,  0.3,    8, 0, 45.6, 1, 118, 0.171,   1],
       ] },
     { name: '6 tier 2', dur: 11, ov: {shutter: 0},
       note: 'tier 2 in slow motion, spilling onto the table',
       keys: [
-        [    0,    39,  0.26,   0.4,   0.3, 0.25, 0, 0, 45.6, 1, 118, 0.171,   1],
-        [    1,    42, 0.258,   0.4,   0.3, 0.25, 0, 1, 45.6, 1, 118, 0.171,   1],
-        [   10,    60,  0.25,  0.39,   0.3, 0.25, 0, 1, 45.6, 1, 118, 0.171,   1],
-        [   11,    62,  0.25,  0.39,   0.3, 0.25, 0, 0, 45.6, 1, 118, 0.171,   1],
+        [    0,  39, 0.26,  0.4,  0.3, 0.25, 0, 45.6, 1, 118, 0.171,   1],
+        [    1,  42, 0.26,  0.4,  0.3, 0.25, 1, 45.6, 1, 118, 0.171,   1],
+        [   10,  60, 0.25, 0.39,  0.3, 0.25, 1, 45.6, 1, 118, 0.171,   1],
+        [   11,  62, 0.25, 0.39,  0.3, 0.25, 0, 45.6, 1, 118, 0.171,   1],
       ] },
     { name: 'black', dur: 1.5, ov: {},
       note: 'the table drops to the floor, tier 3 starts to fill (8x)',
       keys: [
-        [    0,    62,  0.25,  0.39,   0.3,    8, 0, 0, 45.6, 1, 118,     0,   1],
-        [  1.5,   200,     1,  0.62,  0.28,    8, 0, 0, 45.6, 1, 118,     0,   1],
+        [    0,  62, 0.25, 0.39,  0.3,    8, 0, 45.6, 1, 118,     0,   1],
+        [  1.5, 200, 0.62, 0.62, 0.28,    8, 0, 45.6, 1, 118,     0,   1],
       ] },
     { name: '7 tower', dur: 10, ov: {shutter: 1},
       note: 'to be decided; for now the whole tower, wide',
       keys: [
-        [    0,   200, 0.624,  0.62,  0.28,  0.5, 0, 0, 45.6, 1, 118,     0,   1],
-        [    4,   208, 0.604,  0.61,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
-        [    9, 214.5, 0.588, 0.602,  0.28,  0.5, 0, 1, 45.6, 1, 118,     0,   1],
-        [   10,   216, 0.584,   0.6,  0.28,  0.5, 0, 0, 45.6, 1, 118,     0,   1],
+        [    0, 200, 0.62, 0.62, 0.28,  0.5, 0, 45.6, 1, 118,     0,   1],
+        [    4, 208,  0.6, 0.61, 0.28,  0.5, 1, 45.6, 1, 118,     0,   1],
+        [    9, 214, 0.59,  0.6, 0.28,  0.5, 1, 45.6, 1, 118,     0,   1],
+        [   10, 216, 0.58,  0.6, 0.28,  0.5, 0, 45.6, 1, 118,     0,   1],
       ] },
     { name: 'black', dur: 1.5, ov: {},
       note: 'between 7 and 8: the sim at 8x, the camera moves to shot 8',
       keys: [
-        [    0,   216, 0.584,   0.6,  0.28,    8, 0, 0, 45.6, 1, 118,     0,   1],
-        [  1.5,   270,   0.4,  0.01, 0.215,    8, 0, 0, 45.6, 1, 118,     0,   1],
+        [    0, 216, 0.58,  0.6, 0.28,    8, 0, 45.6, 1, 118,     0,   1],
+        [  1.5, 270,  0.4, 0.01, 0.21,    8, 0, 45.6, 1, 118,     0,   1],
       ] },
     { name: '8', dur: 20, ov: {botShare: 0.5, pourRate: 5000, shutter: 1},
       note: 'new: held on the last shot\'s final framing, no moves - to be designed',
       keys: [
-        [    0,   270,   0.4,  0.01, 0.215, 0.25, 0, 0, 45.6, 1, 118,     0,   1],
-        [    1, 276.5,   0.4,  0.01, 0.215, 0.25, 0, 1, 45.6, 1, 118,     0,   1],
-        [   17, 380.5,   0.4,  0.01, 0.215, 0.25, 0, 1, 45.6, 1, 118,     0,   1],
-        [   20,   400,   0.4,  0.01, 0.215, 0.25, 0, 0, 45.6, 1, 118,     0,   1],
+        [    0, 270,  0.4, 0.01, 0.21, 0.25, 0, 45.6, 1, 118,     0,   1],
+        [    1, 276,  0.4, 0.01, 0.21, 0.25, 1, 45.6, 1, 118,     0,   1],
+        [   17, 380,  0.4, 0.01, 0.21, 0.25, 1, 45.6, 1, 118,     0,   1],
+        [   20, 400,  0.4, 0.01, 0.21, 0.25, 0, 45.6, 1, 118,     0,   1],
       ] },
   ];
   // SHOTS:END
@@ -2663,16 +2664,15 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     });
   }
   // The show at time t, as a function of SHOW's column: sh(1) angle, 2 dist, 3 camY,
-  // 4 tgtY, 5 speed, 7 fade, 8 el, 9 pour, 10 tilt, 11 tableY, 12 env (6 is the smooth
-  // flag). A function rather than an object, so the release carries no field names.
+  // 4 tgtY, 5 speed, 6 fade, 7 el, 8 pour, 9 tilt, 10 tableY, 11 env.
+  // A function rather than an object, so the release carries no field names.
   function showAt(t) {
     t = Math.max(0, Math.min(t, SHOW_END));
     let i = 0;
     while (i < SHOW.length - 1 && SHOW[i + 1][0] <= t) { i++; }
     const a = SHOW[i], b = SHOW[Math.min(i + 1, SHOW.length - 1)];
     const span = b[0] - a[0];
-    let u = span > 1e-6 ? (t - a[0]) / span : 0;
-    if (a[6]) { u = u * u * u * (u * (u * 6 - 15) + 10); }   // smootherstep, as for shapes
+    const u = span > 1e-6 ? (t - a[0]) / span : 0;
     return k => a[k] + (b[k] - a[k]) * u;
   }
   //#D{
@@ -2682,7 +2682,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     let i = 0;
     while (i < SHOW.length - 1 && SHOW[i + 1][0] <= c) { i++; }
     return { shot: i, angle: m(1), dist: m(2), camY: m(3), tgtY: m(4), speed: m(5),
-             fade: m(7), el: m(8), pour: m(9), tilt: m(10), tableY: m(11), env: m(12) };
+             fade: m(6), el: m(7), pour: m(8), tilt: m(9), tableY: m(10), env: m(11) };
   }
   // Sim seconds elapsed by show time t. A seek needs the same integral the frame loop
   // builds step by step, or scrubbing would land somewhere playback never visits.
@@ -3231,13 +3231,13 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         const d = document.createElement('div');
         const next = list[n + 1] && list[n + 1].i === e.i ? list[n + 1] : null;
         const prev = list[n - 1];
-        d.className = 'kf' + (e.k[6] ? ' ease' : '') + (prev && prev.t === e.t ? ' cut' : '');
+        d.className = 'kf' + (prev && prev.t === e.t ? ' cut' : '');
         d.style.left = (e.t / T * 100) + '%';
         d.dataset.t = e.t;
         const vals = ED.COLS.slice(1).map((c, m) => c + ' ' + fmt(e.k[m + 1])).join('  ');
         const moves = next ? ED.keyChanges(e.k, next.k).map(([c, a, b]) => c + ' ' + fmt(a) + ' -> ' + fmt(b)) : [];
         d.title = st.shots[e.i].name + ', key ' + (e.j + 1) + ' at +' + fmt(e.k[0]) + ' s (show ' + fmt(e.t) + ' s)\n' +
-          vals + (next ? '\n\nto the next key (' + fmt(next.t - e.t) + ' s, ' + (e.k[6] ? 'eased' : 'linear') + '): ' +
+          vals + (next ? '\n\nto the next key (' + fmt(next.t - e.t) + ' s): ' +
           (moves.length ? moves.join(', ') : 'nothing moves') : '\n\nthe shot\'s last key');
         d.onclick = ev => { ev.stopPropagation(); jump(e.t); };
         keysEl.append(d);
@@ -3624,8 +3624,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       assert(n >= 0, 'no 4th key in 4 pour');
       const [c, a, b] = ED.keyChanges(list[n].k, list[n + 1].k)[0];
       assert(els[n].title.includes(c + ' ' + +(+a).toFixed(3) + ' -> ' + +(+b).toFixed(3)) &&
-             /eased/.test(els[n].title), 'tooltip: ' + els[n].title);
-      assert(els[n].classList.contains('ease'), 'an eased key is not filled');
+             /to the next key/.test(els[n].title), 'tooltip: ' + els[n].title);
       return els.some(e => e.classList.contains('cut'));
     });
     await t('curves: speed and fade drawn across the show', () => {
@@ -3884,14 +3883,14 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       slide('lightEl', from + 10);
       const dv = parseFloat(uiEl.lightEl.inp.value) - from;   // the slider snaps to its step
       assert(Math.abs(dv) > 5, 'the slider did not move');
-      assert(E.st.shots[i].keys.every((k, j) => near(k[8], before[i].keys[j][8] + dv, 1e-4)), 'keys not shifted');
+      assert(E.st.shots[i].keys.every((k, j) => near(k[ED.COL.lightEl], before[i].keys[j][ED.COL.lightEl] + dv, 1e-4)), 'keys not shifted');
       assert(E.st.shots.every((s, j) => j === i || JSON.stringify(s) === JSON.stringify(before[j])), 'other shots moved');
       assert(near(evalShow(showT).el, from + dv, 1e-3), 'the frame does not show it');
       assert(row('lightEl').dataset.chg === 'key', 'mark ' + row('lightEl').dataset.chg);
       uiEl.lightEl.rst.click();
       assert(JSON.stringify(E.st.shots) === JSON.stringify(before), 'reset');
       key('KeyZ');
-      assert(near(E.st.shots[i].keys[0][8], before[i].keys[0][8] + dv, 1e-4), 'undo');
+      assert(near(E.st.shots[i].keys[0][ED.COL.lightEl], before[i].keys[0][ED.COL.lightEl] + dv, 1e-4), 'undo');
       key('KeyZ');
       return JSON.stringify(E.st.shots) === JSON.stringify(before);
     });
