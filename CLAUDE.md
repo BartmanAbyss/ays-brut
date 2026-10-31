@@ -72,6 +72,14 @@ A link beats a description when comparing before/after.
   conclusion ("17.7 ms, slightly over" when it was nearer 31). Pass `w=1920&h=1080` and quote
   the per-pass split, not just the total.
 
+- **A video of the intro:** `python dev/export.py` (README, *Exporting a video*) renders
+  every frame - 4K, scaled to 1080p60, 20 Mbit/s, soundtrack muxed - and skips nothing:
+  `?export=1&det=1` takes one show step per frame and starts the next frame only after the
+  last was sent. It drives `frame()` itself, so anything new that `frame()` schedules
+  through `requestAnimationFrame` needs the same `cfg.export` exit, and anything new drawn
+  outside the canvas (like the lettering) must be composited in `__exportFrame` or it is
+  missing from the video.
+
 ## Traps already paid for
 
 Each of these cost real time. They are the reason the code looks the way it does.

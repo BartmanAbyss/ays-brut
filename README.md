@@ -687,6 +687,41 @@ GPU times come from timestamp queries, one frame at a time - at 60 Hz a light fr
 the GPU idle and it clocks down, so the light shots read a little high; the heavy ones are
 real.
 
+### Exporting a video
+
+```bash
+python dev/export.py
+```
+
+writes `build/intro.mp4`: the whole intro rendered at 3840×2160, scaled to 1920×1080,
+60 fps, H.264 at 20 Mbit/s (30 peak) with the soundtrack in AAC. It never skips a frame or
+a simulation step, whatever the machine: `?det=1` gives every frame exactly one show step,
+which is what the release takes at a steady 60 fps, and in `?export=1` the page starts the
+next frame only once this one is read back and handed over, instead of on
+`requestAnimationFrame`. A slow GPU only makes it take longer.
+
+It serves `dev/` on 127.0.0.1:8796 and opens the harness in the default browser (any WebGPU
+browser; `--no-open` prints the URL instead). The page renders the soundtrack first
+(`song()`, as a 16-bit WAV to `/audio`), then for each frame draws the 4K canvas down to
+1080p in a 2D canvas (smoothing 'high': at exactly 2:1 an even box filter), composites the
+lettering - it is an SVG overlay in the DOM, not in the canvas - from the overlay's own
+state, and sends the raw RGBA over a WebSocket on port 8797; the script pipes it into
+ffmpeg. The audio starts one frame in, since the page's frame k already shows show step
+k+1. RGB goes to YUV with the BT.709 matrix and is tagged so - swscale's default is BT.601,
+which every HD player would decode with the wrong colours.
+
+Options: `--seconds 30` stops at that show time (a test; the default is the end plus a
+second of reverb), `-o`, `--render 3840x2160`, `--size 1920x1080`, `--bitrate 20M`,
+`--maxrate`, `--bufsize`, `--preset slow`. The rate is fixed at 60: the simulation steps at
+60 Hz, and any other rate would not be the intro. Needs ffmpeg on PATH and
+`pip install websockets`. Keep the browser window visible: nothing depends on frame
+timing, but a hidden tab may be throttled to a crawl. ffmpeg's warnings go to
+`build/intro.ffmpeg.log`.
+
+The frames go over a WebSocket because a `fetch()` POST of 8 MB took the browser
+150-500 ms to upload (curl: 4 ms), which made the upload, not the render, the export's
+speed: 2.3 frames/s, against 13 with the socket on the light first shot.
+
 ### What each lever actually buys
 
 > Historical: measured before the profiler work, at fill 88, so the absolute numbers are

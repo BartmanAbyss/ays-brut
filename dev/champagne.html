@@ -1720,6 +1720,13 @@ const cfg = {
   text:     qf('text', 0),             // ?text=1: every word of the lettering, held (layout)
   edit:     Q.get('edit') === '1',     // the timeline editor: no sound, the show on, a shot strip
   edtest:   Q.get('edtest') === '1',   // with edit: run the editor's in-browser tests
+  // ?export=1: render the show frame by frame for dev/export.py (needs show=1&det=1).
+  // exportEnd: stop at this show time (0: the show's end plus the reverb's last second);
+  // ow/oh: the size the frames are scaled to before they are sent
+  export:   Q.get('export') === '1',
+  exportEnd: qf('exportEnd', 0),
+  ow:       qf('ow', 1920),
+  oh:       qf('oh', 1080),
   // the release's start screen: click, fullscreen, audio clock. Never in the editor: it
   // renders no audio at all
   gate:     Q.get('gate') === '1' && Q.get('edit') !== '1',
@@ -2263,6 +2270,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // this line used to see 'not paused' and queue a full frame - which stepped the sim
     // before noticing the pause. Every slider move on a paused page cost one hidden step.
     if ((cfg.paused && seekTo < 0) || redrawOnly) { updateHud(); return; }   // a seek runs on while paused
+//#D{
+    // the exporter starts the next frame itself, once this one is read back and sent
+    if (cfg.export) { window.__exportFrame(); return; }
+//#D}
     if (!cfg.still || frameNo < cfg.warm) requestAnimationFrame(frame); else updateHud();
   }
 
@@ -4240,6 +4251,85 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D{
   window.__song = song;   // await __song(48000) -> the AudioBuffer, for checking levels
   window.__stem = k => stem(k);   // await __stem('pad') -> one track alone, dry
+
+  // ── video export (python dev/export.py) ──
+  // ?export=1&show=1&det=1 renders the show frame by frame, never against the clock: det
+  // gives every frame exactly one show step, as the release takes at a steady 60 fps, and
+  // the next frame starts only once this one is read back and handed over (frame() calls
+  // this instead of requestAnimationFrame) - so a slow frame costs time, never a step, and
+  // a hidden page is no excuse to drop one either. Each frame is drawn down to ow x oh
+  // (smoothing 'high': at exactly 2:1 an even box filter), the lettering composited over
+  // it from the overlay's own state (it is DOM, not canvas), and sent raw as RGBA over a
+  // WebSocket - a fetch() POST of the same 8 MB took 150-500 ms to upload, more than the
+  // 4K frame took to render. The soundtrack goes first, as a 16-bit WAV, to /audio.
+  let exG = null, exAudio = null, exWs = null, exSent = Promise.resolve();
+  const exPost = (path, body) => fetch(path, { method: 'POST', body }).then(r => {
+    if (!r.ok) throw new Error(path + ' ' + r.status);
+  });
+  // one frame in flight: the exporter acks each once it is in the encoder
+  const exSend = px => new Promise((ok, no) => {
+    exWs.onmessage = ok; exWs.onclose = () => no(new Error('the exporter closed the connection'));
+    exWs.send(px);
+  });
+  async function exAudioWav() {
+    const b = await song(48000), n = b.length, L = b.getChannelData(0), R = b.getChannelData(1);
+    const v = new DataView(new ArrayBuffer(44 + n * 4));
+    const str = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+    str(0, 'RIFF'); v.setUint32(4, 36 + n * 4, true); str(8, 'WAVEfmt ');
+    v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 2, true);
+    v.setUint32(24, 48000, true); v.setUint32(28, 48000 * 4, true); v.setUint16(32, 4, true);
+    v.setUint16(34, 16, true); str(36, 'data'); v.setUint32(40, n * 4, true);
+    for (let i = 0; i < n; i++) {
+      v.setInt16(44 + i * 4, Math.max(-1, Math.min(1, L[i])) * 32767, true);
+      v.setInt16(46 + i * 4, Math.max(-1, Math.min(1, R[i])) * 32767, true);
+    }
+    await exPost('/audio', v.buffer);
+  }
+  // the lettering as an image, or null while every word is invisible
+  async function exText() {
+    const sv = canvas.nextSibling;
+    if (!(+sv.style.opacity > 0) || ![...sv.children].some(p => +p.style.opacity > 0)) return null;
+    const c = sv.cloneNode(true);
+    c.removeAttribute('style'); c.setAttribute('opacity', sv.style.opacity);
+    c.setAttribute('width', cfg.ow); c.setAttribute('height', cfg.oh);
+    const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(c)], { type: 'image/svg+xml' }));
+    try { const im = new Image(); im.src = url; await im.decode(); return im; }
+    finally { URL.revokeObjectURL(url); }
+  }
+  window.__exportFrame = async () => {
+    try {
+      if (!exG) {
+        const c = document.createElement('canvas'); c.width = cfg.ow; c.height = cfg.oh;
+        exG = c.getContext('2d', { willReadFrequently: true });
+        exG.imageSmoothingEnabled = true; exG.imageSmoothingQuality = 'high';
+        exAudio = exAudioWav();
+      }
+      // straight after the submit, before any await: the canvas texture is this frame's
+      // only until the task ends
+      exG.drawImage(canvas, 0, 0, cfg.ow, cfg.oh);
+      exWs ??= await new Promise((ok, no) => {
+        // the exporter takes frames on the port after the page's
+        const w = new WebSocket('ws://' + location.hostname + ':' + (+location.port + 1));
+        w.onopen = () => ok(w); w.onerror = () => no(new Error('no exporter socket - run python dev/export.py'));
+      });
+      const im = await exText();
+      if (im) exG.drawImage(im, 0, 0, cfg.ow, cfg.oh);
+      const px = exG.getImageData(0, 0, cfg.ow, cfg.oh).data;
+      await exAudio; await exSent;   // the audio first, and one frame in flight at most
+      exSent = exSend(px);
+      const end = cfg.exportEnd || SHOW_END + 1;
+      probe.export = { frame: frameNo, showT, end };
+      if (showT >= end) {
+        await exSent; await exPost('/done', '');
+        cfg.paused = true; console.log('EXPORT DONE', frameNo, 'frames');
+        return;
+      }
+      frame();
+    } catch (e) {
+      console.error('EXPORT FAILED', e); probe.export = { error: String(e) };
+      fetch('/fail', { method: 'POST', body: String(e) }).catch(() => {});
+    }
+  };
 
   // ── live stems (harness only) ──
   // With ?gate=1 the harness plays the soundtrack as four stems through a live hall, so

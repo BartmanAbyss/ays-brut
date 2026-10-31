@@ -22,3 +22,5 @@ build/combo*
 build/err.txt
 build/search.log
 build/min.pretty.*
+# python dev/export.py
+build/*.mp4
