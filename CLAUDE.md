@@ -470,13 +470,19 @@ on integer float literals -16 at best (unchecked upper bound). Most of Shader Mi
 other transforms have no WGSL form (braces are mandatory, no comma operator, no ternary
 statements, no overloading). Don't spend time here.
 
-**Roadroller (context mixing) beats brotli by 2.7%** on the whole payload - shader as a
-template string inside the JS (replacing the `getElementById('wgsl-main')` read), packed
-with `npx roadroller@2.1.0 -O2` (17 s), then served with brotli as now: 7 733 vs 7 950,
-its decoder included (default level: 7 781). The packed page runs: decodes, compiles,
-renders, clean console. Its output has no `</script` and 148 control bytes, which must be
-kept verbatim. Costs: a third-party tool in the build, a decode at startup, and our packer
-search scores for brotli, not for it. Worth adopting at the very end, when every byte counts.
+**The build runs Roadroller - Blueberry's fork - on the page's script, brotli on top.**
+Context mixing beats brotli alone: on 31 Oct, 10 306 -> 9 944 with stock 2.1.0 and
+**-> 9 514 with askeksa/roadroller branch `intro-size`** (float predictions, a shared
+table, mixer weight sets, identifier contexts, a smaller decoder; the fork the top 4k web
+coders use, pouet topic 13094). Vendored at its commit in
+`build/vendor/node_modules/roadroller` (VENDORED.md); `build/roadroller.py` packs with the
+settings in `build/roadroller.json` - fixed, so builds are deterministic and take ~1 s -
+and `python build/roadroller.py` re-runs the -O2 search (~40 s) and saves new ones. Its
+output is printable ASCII spread thin on purpose, for a compressor after it: served raw it
+is bigger, never serve it without brotli. It adds ~0.4 s of decoding before "click".
+`pack_state.json` still pays under it (default packer state: 9 612), though its search
+scores brotli alone. A packer bug now shows up as a Roadroller-packed page that fails, so
+compile `build/min.wgsl` directly when the release is black.
 
 **Never rename a member access.** The substitution uses a `(?<![.\w])` guard so a rename of
 `pos` cannot touch `p.pos`.

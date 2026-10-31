@@ -14,6 +14,10 @@ Two views, both on the shipped pipeline (prepare -> pack with the saved state ->
   code that echoes something earlier comes cheap.
 
 The JS has no share view; the part no removal accounts for is reported as its core.
+
+Since 31 Oct the build runs Roadroller on the script before brotli (build/roadroller.py);
+this map still measures brotli alone, so its totals are ~800 bytes above intro.cmd. Its
+proportions still say where the bytes are; a system's saving under Roadroller differs.
 The edits below anchor on the stripped JS (build/strip.js); when one stops matching, the
 script stops and names it.
 """

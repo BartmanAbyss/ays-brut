@@ -629,11 +629,19 @@ def main():
     pb = pack.assemble(wmin, jmin, parts, page)
     payload = pb.decode()
     io.open(os.path.join(ROOT, 'min.pretty.html'), 'wb').write(pretty_page(payload, pj, pw).encode())
-    raw_deflate = zlib.compress(pb, 9)[2:-4]          # raw deflate stream
     try:
         import brotli
     except ImportError:
         raise BuildError('the Python `brotli` module is missing - pip install brotli')
+    plain_br = len(brotli.compress(pb, quality=11, lgwin=24))
+    # Roadroller packs the page's script (build/roadroller.py); brotli then goes on top
+    import roadroller
+    try:
+        pb = roadroller.roll(pb)
+    except roadroller.RoadrollerError as e:
+        raise BuildError(str(e))
+    print('roadroller       script packed with build/roadroller.json (brotli alone: %d)' % plain_br)
+    raw_deflate = zlib.compress(pb, 9)[2:-4]          # raw deflate stream
     br = brotli.compress(pb, quality=11, lgwin=24)
 
     b64 = __import__('base64').b64encode(raw_deflate).decode()

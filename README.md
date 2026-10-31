@@ -952,8 +952,9 @@ Next:
 5. **Render size** — the release renders at the screen's size. At the compo's 1920×1080
    that is the budget; on a larger monitor it is proportionally slower.
 6. Timeline polish against the finished music.
-7. Late, when every byte counts: design-constant rounding (~-40 to -90), Roadroller
-   (-217, *Minifying* in CLAUDE.md), a final packer search.
+7. Late, when every byte counts: design-constant rounding (~-40 to -90), a final packer
+   search, a fresh Roadroller search (`python build/roadroller.py`). Roadroller itself is
+   in the build since 31 Oct (-792).
 
 Not planned for now: bloom, fluid inside the bottle (it is an empty shell).
 
@@ -1012,7 +1013,7 @@ the debug panel used to supply, minifies, packs, and writes:
 
 | file | what |
 |---|---|
-| `build/intro.cmd` | **the deliverable**: the dropper header plus the brotli payload |
+| `build/intro.cmd` | **the deliverable**: the dropper header plus the brotli payload - the page, its script packed by Roadroller (`build/roadroller.py`, settings in `build/roadroller.json`) |
 | `build/intro.html` | a local test copy that inflates itself (base64 + deflate), ~50% bigger - not the entry |
 | `build/min.wgsl`, `build/min.js` | what ships, as packed |
 | `build/min.pretty.wgsl`, `build/min.pretty.js` | the same, re-indented to read |
@@ -1556,7 +1557,10 @@ build tools in `build/vendor` are third-party code and keep their licences (belo
 - **Late-acceptance hill climbing** (the packer search) - E. K. Burke, Y. Bykov, "The Late
   Acceptance Hill-Climbing Heuristic", *European Journal of Operational Research* 258(1),
   2017 (Bykov's 2008 report first).
-- Evaluated, not used: **Roadroller** (Kang Seonghoon, MIT) - see *Minifying* in CLAUDE.md.
+- **Roadroller** (Kang Seonghoon, MIT), in Aske Simon Christensen's (Blueberry's)
+  `intro-size` fork, https://github.com/askeksa/roadroller - packs the page's script.
+  Vendored at its commit in `build/vendor/node_modules/roadroller`; its decoder, which
+  ships, is public domain.
 
 ### Lettering
 
