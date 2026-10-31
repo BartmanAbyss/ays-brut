@@ -2594,22 +2594,22 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // ── lettering ──
   // Josefin Sans SemiBold's capitals redrawn as pen strokes (dev/tools/strokefont.py: the
   // glyphs, the layout, a page comparing each with the real font). TEXT is groups of lines,
-  // each line one SVG path already in its place in a 1600 x 900 box over the picture (the
-  // tool stacks a group's lines round the middle), drawn with a pen as wide as the font's
-  // stem. No font ships - Josefin Sans is OFL (NFO).
+  // each line one SVG path already in its place in a 533 x 300 box over the picture (the
+  // tool stacks a group's lines round the middle; its GRID sets the box and the pen),
+  // drawn with a pen as wide as the font's stem. No font ships - Josefin Sans is OFL (NFO).
   // TEXT:BEGIN - written by python dev/tools/strokefont.py; edit the glyphs there
   const TEXT = [
     [
-      'm-195-135v-48l26 36l26-36v48m33 0l22-51l22 51m-36-18h28m41 18v-60m67 8q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m118-21a26 26 0 0 0-53 0a26 26 0 0 0 53 0zm34 30v-51l44 43v-52',
-      'm-185-25l22-51l22 51m-36-18h28m41 14v-52h14a13 13 0 0 1 0 26h3a13 13 0 0 1 0 26h-17zm0-26h17m43-30l21 36l22-36m-22 36v24m84-52q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m97-43q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m104-47h-36v52h37m-37-26h32',
-      'm-273 85v-48l26 36l26-36v48m38 0v-60m39 0v56h35m30-56v56h35m66-52h-36v52h37m-37-26h32m65-22q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m68 9v-60m39 60v-48l26 36l26-36v48m74-56h-36v52h37m-37-26h32',
-      'm-101 168a14 14 0 0 1 4-23a14 14 0 0 1 20 14q-2 15-25 32h31m60-23a18 23 0 0 0-36 0a18 23 0 0 0 36 0zm33 0a14 14 0 0 1 4-23a14 14 0 0 1 20 14q-2 15-25 32h31m54-13a15 14 0 0 0-30 0a15 14 0 0 0 30 0zm-30-3q3-19 23-32',
+      'm-65-46v-16l9 12l9-12v16m10 0l8-17l7 17m-12-6h9m14 6v-20m23 3q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m39-7a1 1 0 0 0-18 0a1 1 0 0 0 18 0zm11 10v-17l15 14v-17',
+      'm-62-8l8-17l7 17m-12-6h9m14 5v-18h5a1 1 0 0 1 0 9h1a1 1 0 0 1 0 9h-6zm0-9h6m14-10l7 12l7-12m-7 12v8m28-17q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m32-14q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m35-16h-12v18h13m-13-9h11',
+      'm-91 28v-16l9 12l9-12v16m12 0v-20m13 0v19h12m9-19v19h12m22-18h-12v18h13m-13-9h11m22-7q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m22 3v-20m13 20v-16l9 12l9-12v16m24-19h-12v18h13m-13-9h11',
+      'm-33.5 57a4.8 4.5 0 0 1 1-7.5a4.8 4.5 0 0 1 6.5 4.5q-.5 5-8 10.5h10.5m20.5-7.5a.8 1 0 0 0-12 0a.8 1 0 0 0 12 0zm10.5 0a4.8 4.5 0 0 1 1-7.5a4.8 4.5 0 0 1 6.5 4.5q-.5 5-8 10.5h10.5m18.5-4.5a1.1 1 0 0 0-10 0a1.1 1 0 0 0 10 0zm-10-1q1-6 7-10',
     ],
     [
-      'm-278-186a26 26 0 0 0-42 21a26 26 0 0 0 42 21m33 9v-60m40 60v-60m-40 30h40m32 30l22-51l22 51m-36-18h28m41 18v-48l26 36l26-36v48m38 0v-56h15a15 15 0 0 1 0 31h-15m58 25l22-51l22 51m-36-18h28m79-33a26 26 0 0 0-42 21a26 26 0 0 0 43 21v-17h-17m53 26v-51l44 43v-52m75 4h-36v52h37m-37-26h32',
-      'm-126-25v-56h15a15 15 0 0 1 0 31h-15m113-5a26 26 0 0 0-53 0a26 26 0 0 0 53 0zm34-30v38a19 18 0 0 0 38 1v-39m37 60v-56h15a15 15 0 0 1 0 31h-15m19 0l15 25',
-      'm-77 25v56h35m66-52h-36v52h37m-37-26h32m64-22q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6',
-      'm-187 195v-48l26 36l26-36v48m33 0l22-51l22 51m-36-18h28m70-34q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m97-43q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m104-47h-36v52h37m-37-26h32m64-22q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6',
+      'm-93-63a8.7 8.7 0 0 0-14 7a8.7 8.7 0 0 0 14 7m11 3v-20m14 20v-20m-14 10h14m10 10l8-17l7 17m-12-6h9m14 6v-16l9 12l9-12v16m12 0v-19h5a1 1 0 0 1 0 11h-5m19 8l8-17l7 17m-12-6h9m27-11a8.7 8.7 0 0 0-14 7a8.7 8.7 0 0 0 14 7v-5h-5m17 8v-17l15 14v-17m24 1h-12v18h13m-13-9h11',
+      'm-42-8v-19h5a1 1 0 0 1 0 11h-5m38-2a1 1 0 0 0-18 0a1 1 0 0 0 18 0zm11-10v13a1 1 0 0 0 13 0v-13m12 20v-19h5a1 1 0 0 1 0 11h-5m6 0l6 8',
+      'm-26 8v19h12m22-18h-12v18h13m-13-9h11m21-7q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2',
+      'm-62 66v-16l9 12l9-12v16m10 0l8-17l7 17m-12-6h9m23-11q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m33-14q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m34-16h-12v18h13m-13-9h11m21-7q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2',
     ],
   ];
   // TEXT:END
@@ -2637,8 +2637,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // drawText only runs once frames do, after the click, and until then they all showed
   // Its style is the canvas's own, letter for letter, which brotli then stores once. Clicks
   // pass through it to the start handler on the window, so no pointer-events here.
-  canvas.insertAdjacentHTML('afterend', '<svg viewBox="-800 -450 1600 900" style="position:fixed;inset:0;' +
-    'width:100%;height:100%" fill="none" stroke="#fff" stroke-width="9.7">' + SHOW_TEXT.map(c => TEXT[c[2]].map(d => '<path opacity="0" d="' + d + '"/>').join(''))
+  canvas.insertAdjacentHTML('afterend', '<svg viewBox="-267 -150 533 300" style="position:fixed;inset:0;' +
+    'width:100%;height:100%" fill="none" stroke="#fff" stroke-width="3.22">' + SHOW_TEXT.map(c => TEXT[c[2]].map(d => '<path opacity="0" d="' + d + '"/>').join(''))
     .join('') + '</svg>');
   const textEls = canvas.nextSibling.children;
 //#D{

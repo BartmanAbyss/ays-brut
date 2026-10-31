@@ -34,13 +34,19 @@ PEN = 116            # the stem width
 # paths, so the intro places nothing; the harness says when each group shows (TEXT_CUES).
 GROUPS = [['MAISON', 'ABYSSE', 'MILLESIME', '2026'],
           ['CHAMPAGNE', 'POUR', 'LES', 'MASSES']]
-LEAD = 110           # line spacing, in the overlay's 1600 x 900 units
 LINES = [t for g in GROUPS for t in g]
 # tracking: extra space between letters, in font units - wide-set capitals read as luxury
 TRACK = 150
-# output grid: font units per path unit. The overlay's viewBox is 1600 x 900, and a cap
-# height of CAP / Q units; 12 makes caps ~61 of 900 - about 7% of the screen's height
-Q = 12.0
+# The output grid. At GRID 1 a path unit is 12 font units in a 1600 x 900 overlay, caps ~61
+# of 900 - about 7% of the screen's height. GRID 3 draws the same size on a grid three
+# times coarser (36 font units, ~3.6 px at 1080p): most coordinates become one digit, 33
+# bytes less, and only the 2 needed help (FINE). Arcs survive it whole (radii()). The
+# harness's overlay must use VIEWBOX and PEN_W; writing the block checks it does.
+GRID = 3
+Q = 12.0 * GRID
+LEAD = round(110 / GRID)                       # line spacing, in path units
+VIEWBOX = '%d %d %d %d' % (round(-800 / GRID), round(-450 / GRID), round(1600 / GRID), round(900 / GRID))
+PEN_W = '%g' % round(PEN / Q, 2)               # the pen, in path units
 
 # ── the glyphs ──────────────────────────────────────────────────────────────────────
 # a glyph: (advance, [stroke, ...]); a stroke: list of nodes, optionally ending in 'z':
@@ -113,7 +119,7 @@ def stroke_segments(st):
                 elif math.dist(cur, s) > 0.5:
                     out.append(('L',) + s)
                 # y up: counter-clockwise (a1 > a0) is the positive sweep
-                out.append(('A', rx, ry, 1 if b1 > b0 else 0) + e)
+                out.append(('A', rx, ry, 1 if b1 > b0 else 0) + e + (abs(b1 - b0),))
                 cur = e
         elif isinstance(n, tuple) and n and n[0] == 'q':
             _, qx, qy, x, y = n
@@ -125,8 +131,33 @@ def stroke_segments(st):
     return out
 
 
+# Glyphs whose own coordinates keep half grid steps: the 2's hook is a short arc and a
+# curve, which a coarse grid bends out of shape; anything drawn as straight lines and
+# half-turns survives whole steps.
+FINE = {'2': 2}
+
+
 def num(v):
-    return str(int(v))
+    s = '%g' % round(v, 2)
+    return s.replace('0.', '.') if s.startswith(('0.', '-0.')) else s
+
+
+def dec(v):
+    """A radius to one decimal, as short as it writes: 6.5, 7, .8"""
+    s = '%g' % round(v, 1)
+    return s[1:] if s.startswith('0.') else s
+
+
+def radii(rx, ry, span, q):
+    """An arc's radii as written. A half-turn runs between opposite points of its ellipse,
+    and SVG scales radii too small to reach both endpoints up until they just do, keeping
+    their ratio - so a half-turn needs only the ratio, written smaller than any real radius
+    here: `1 1` for a circle. That is shorter, and exact on any grid, where radii rounded on
+    their own made a coarse grid's O pointed. Other arcs (C, G, 2) keep their size, to a
+    tenth: whole steps measured 12 bytes worse."""
+    if abs(span - 180) < 1e-6:
+        return '1 1' if rx == ry else '%s 1' % dec(rx / ry)
+    return '%s %s' % (dec(rx / q), dec(ry / q))
 
 
 def path_for(text, q=Q, oy=0):
@@ -140,11 +171,11 @@ def path_for(text, q=Q, oy=0):
     # coordinates round on their own, so every copy of a letter is the same string - which
     # brotli then stores once. Rounding the sum instead made each copy differ by a unit
     # here and there, and the three lines cost ~700 bytes instead of ~350.
-    ox = 0
-    T = lambda x, y: (ox + round(x / q), round(-(y - CAP / 2) / q) + oy)
+    ox, f = 0, 1
+    T = lambda x, y: (ox + round(x / q * f) / f, round(-(y - CAP / 2) / q * f) / f + oy)
     for c in text:
         adv, strokes = G[c]
-        ox = round(x0 / q)
+        ox, f = round(x0 / q), FINE.get(c, 1)
         for st in strokes:
             start = None
             for seg in stroke_segments(st):
@@ -154,11 +185,11 @@ def path_for(text, q=Q, oy=0):
                     last = start
                     continue
                 if op == 'A':
-                    _, rx, ry, sweep, ex, ey = seg
+                    _, rx, ry, sweep, ex, ey, span = seg
                     e = T(ex, ey)
                     # y flips, so the sweep flips
-                    d.append('a%s %s 0 0 %d %s %s' % (num(round(rx / q)), num(round(ry / q)), 1 - sweep,
-                                                       num(e[0] - last[0]), num(e[1] - last[1])))
+                    d.append('a%s 0 0 %d %s %s' % (radii(rx, ry, span, q), 1 - sweep,
+                                                    num(e[0] - last[0]), num(e[1] - last[1])))
                     last = e
                 elif op == 'Q':
                     _, qx, qy, ex, ey = seg
@@ -237,6 +268,8 @@ if __name__ == '__main__':
         print('%-26s %4d chars' % (t, len(p)))
     with io.open(SRC, encoding='utf-8', newline='') as f:
         src = f.read()
+    for attr in ('viewBox="%s"' % VIEWBOX, 'stroke-width="%s"' % PEN_W):
+        assert attr in src, 'the overlay in dev/champagne.html must have %s for GRID %d' % (attr, GRID)
     if '// TEXT:BEGIN' in src and '// TEXT:END' in src:
         out = with_block(src, groups)
         assert len(out) > len(src) // 2, 'refusing to write: the result lost half the file'
