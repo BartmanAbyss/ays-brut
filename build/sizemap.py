@@ -77,8 +77,10 @@ JS = {
     '  audio: fizz': [cut('    for (let t = 0; t < SHOW_END; t -= Math.log(1 - r2()) / 300)',
                           '    // The cork, before any picture')],
     'lettering (stroke font, SVG, fades)': [
-        cut('  const TEXT = [', '  function evalShow(t) {'),
-        ('    drawText(showT);\n', ''), ('    textFade = fade;\n', '')],
+        ('PAGE', ''),
+        cut('  // [from, to] for each line', '  function evalShow(t) {'),
+        ('    drawText(showT);\n', ''),
+        ('    canvas.nextSibling.style.opacity = fade;   // the words go dark with the picture\n', '')],
     'timeline keys (SHOW rows)': [
         ('RE', r'const SHOW = \[\[.*?\]\];',
          'const SHOW = [[0,0,0.8,0.44,0.26,1,0,1,45,1,118,0,1],[96,0,0.8,0.44,0.26,1,0,1,45,1,118,0,1]];')],
@@ -104,7 +106,7 @@ JS_REGIONS = [
     ('frame: submit, loop', '    device.queue.submit('),
     ('timeline keys (SHOW rows)', '  const SHOW = [['),
     ('shot table (SHOT_V)', '  const SHOT_V = ['),
-    ('lettering', '  const TEXT = ['),
+    ('lettering', '  // [from, to] for each line'),
     ('timeline evaluation (evalShow)', '  function evalShow(t) {'),
     ('audio: context, buses', '  const SCORE = ['),
     ('audio: pad synth', '    const r3 = rng(5);'),
@@ -118,8 +120,8 @@ JS_REGIONS = [
     ('start screen, audio start', '  let ac, tA;'),
 ]
 JS_SPANS = [
-    ('bottle wander', '    const wob = tt =>', '    textFade = fade;'),
-    ('lettering', '    textFade = fade;', '    const V = shotVals(showT);'),
+    ('bottle wander', '    const wob = tt =>', '    canvas.nextSibling.style.opacity = fade;'),
+    ('lettering', '    canvas.nextSibling.style.opacity = fade;', '    const V = shotVals(showT);'),
     ('lettering', '    drawText(showT);', '    const enc = device.createCommandEncoder();'),
     ('frame: show clock, locked to the audio', '    let nShow;', '    for (let i = 0; i < nShow; i++) {'),
 ]
@@ -213,6 +215,8 @@ def br(b):
 
 def edit_js(js, edits):
     for e in edits:
+        if e[0] == 'PAGE':
+            continue
         if e[0] == 'CUT':
             _, a, b, ins = e
             assert js.count(a) == 1, 'sizemap: JS anchor gone: %r' % a[:60]
@@ -228,7 +232,7 @@ def edit_js(js, edits):
 
 
 def main():
-    wgsl, js, jmin = B.prepare()
+    wgsl, js, jmin, page = B.prepare()
     saved = pack.load_state()
     # the source names of the renamed kernels, from the JS's own pipeline list
     zs = re.search(r"for \(const n of \(('[^)]*)\)\.split", js).group(1)
@@ -243,8 +247,8 @@ def main():
         p = pack.Program('\n'.join(items), prot, B.WGSL_KEEP)
         return p.render(p.adopt(saved) if state == 'saved' else p.default_state())
 
-    def size(w, j):
-        return HEAD + br(pack.assemble(w, j))
+    def size(w, j, pg=page):
+        return HEAD + br(pack.assemble(w, j, page=pg))
 
     full = {s: render(lambda k: True, s) for s in ('saved', 'default')}
     base = {s: size(full[s], jmin) for s in full}
@@ -287,15 +291,18 @@ def main():
     pre = B.read(os.path.join(ROOT, 'strip.js'))   # prepare() wrote it: the JS before renaming
     code, owner = js_line_map(pre, jmin, ren)
     reg = js_regions(pre)
-    ps = pack.assemble(full['saved'], jmin).decode()
+    ps = pack.assemble(full['saved'], jmin, page=page).decode()
     v = pack._shader_var[jmin]
     li = jmin.index(pack.SHADER_LOOKUP) + len(pack.SHADER_LOOKUP)
     st0 = ps.index('<script>') + len('<script>')
     def off(i):   # end of jmin char i in the payload (the shader lookup became a short name)
         return st0 + i + 1 + (len(v) - len(pack.SHADER_LOOKUP) if i >= li else 0)
     names = [reg[o] if o is not None else 'page and glue' for o in owner]
-    jshare = {'page and glue': br(ps[:st0].encode())}
-    prev, i = jshare['page and glue'], 0
+    # the page: the canvas tag, then the lettering's overlay, then the script
+    cv = ps.index('>') + 1
+    jshare = {'page and glue': br(ps[:cv].encode())}
+    jshare['lettering'] = br(ps[:st0].encode()) - jshare['page and glue']
+    prev, i = br(ps[:st0].encode()), 0
     while i < len(names):
         j = i
         while j < len(names) and names[j] == names[i]:
@@ -312,7 +319,8 @@ def main():
     top = 0
     for s, edits in JS.items():
         jm, _ = B.minify_js(edit_js(js, edits))
-        c = {t: base[t] - size(full[t], jm) for t in base}
+        pg = '' if ('PAGE', '') in edits else page
+        c = {t: base[t] - size(full[t], jm, pg) for t in base}
         if not s.startswith(' '):
             top += c['saved']
         print('       %-46s %6d %8d' % (s, c['saved'], c['default']))

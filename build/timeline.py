@@ -345,19 +345,37 @@ TABLE_CALL = 'shotTable(SHOTS)'
 TEXT_CALL = 'textCues(SHOTS)'
 
 
-def text_cues(js, shots):
-    """The lettering's cues - [shot name, from, to, word, x, y], seconds from the shot's
-    start - as the release needs them: [from, to, word, x, y] in show seconds. Mirrors the
-    harness's textCues(): `to` stops at the shot's end, a cue for a missing shot drops."""
+def text_block(js):
+    """The harness's TEXT block: the overlay's opening tag and the paths, in groups."""
+    m = re.search(r"const TEXT_SVG = '([^'\n]*)';\s*const TEXT = (\[.*?\n  \]);", js, re.S)
+    if not m:
+        raise TimelineError('the TEXT block (TEXT_SVG, TEXT) not found in the harness')
+    return m.group(1), parse_literal(m.group(2))
+
+
+def _cued(js, shots):
+    """(shot index, cue, group's paths) for each cue whose shot exists, in cue order."""
     m = re.search(r'const TEXT_CUES = (\[.*?\n  \]);', js, re.S)
     if not m:
         raise TimelineError('TEXT_CUES not found in the harness')
-    cues = parse_literal(m.group(1))
-    st, names = starts(shots), [s['name'] for s in shots]
-    out = []
-    for c in cues:
-        if c[0] not in names:
-            continue
-        i = names.index(c[0])
-        out.append([r6(st[i] + c[1]), r6(min(st[i] + c[2], st[i + 1]))] + list(c[3:]))
-    return out
+    groups = text_block(js)[1]
+    names = [s['name'] for s in shots]
+    return [(names.index(c[0]), c, groups[int(c[3])]) for c in parse_literal(m.group(1))
+            if c[0] in names]
+
+
+def text_cues(js, shots):
+    """The lettering's cues - [shot name, from, to, group], seconds from the shot's start -
+    as the release needs them: [from, to] for each line, in show seconds, a line a second
+    after the one above. Mirrors the harness's textCues(): `to` stops at the shot's end, a
+    cue for a missing shot drops."""
+    st = starts(shots)
+    return [[r6(st[i] + c[1] + k), r6(min(st[i] + c[2], st[i + 1]))]
+            for i, c, g in _cued(js, shots) for k in range(len(g))]
+
+
+def text_overlay(js, shots):
+    """The overlay as the release's page has it, after the canvas: the cued lines' paths in
+    the order text_cues() times them, every one unseen until the first frame sets it."""
+    svg = text_block(js)[0]
+    return svg + ''.join('<path opacity=0 d="%s"/>' % d for _, _, g in _cued(js, shots) for d in g) + "</svg>"

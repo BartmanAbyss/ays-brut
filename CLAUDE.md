@@ -338,6 +338,16 @@ glass constants included. The module then failed to compile, which shows only as
 any folding. To find a compile error in the release, compile `build/min.wgsl` yourself
 and read `getCompilationInfo()` — the page only reports the invalid pipelines.
 
+**The browser pane never goes fullscreen, and does not start on white.** The release made
+the canvas fullscreen, which in Chrome hides everything outside it - the lettering's
+overlay included - and every check in the pane passed. Text, overlays and anything else
+the release puts outside the canvas need a look in the user's Chrome.
+
+**A canvas is not a void element.** The page is `<canvas ...>` and then the script, with no
+end tag - fine for a script, but markup put after it (the lettering's overlay) became the
+canvas's fallback content: parsed, never drawn, and `canvas.nextSibling` null. `assemble`
+closes the canvas when there is page markup.
+
 **A created pipeline is not a compiled one.** Chromium's `createComputePipeline` returns
 at once and compiles lazily; on a cold shader cache the first submit waited 3-7 s, after the
 click, with the music already running. Your own machine's cache hides it - test start-up

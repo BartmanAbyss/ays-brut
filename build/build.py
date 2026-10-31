@@ -500,6 +500,17 @@ def pretty_wgsl(w):
     return '\n'.join(out) + '\n'
 
 
+def pretty_page(payload, pj, pw):
+    """The shipped page laid out for reading: a tag per line (the lettering's overlay, a
+    path per line), and the readable JS and shader where the minified ones sit. For reading
+    only - what ships is the payload itself."""
+    head, rest = payload.split('<script>', 1)
+    head = re.sub(r'<(/canvas|svg|path|/svg)\b', lambda m: '\n' + ('  ' if m.group(1) == 'path' else '') + '<' + m.group(1), head)
+    var = re.search(r';var (\w+)=`', rest).group(1)
+    return (head.strip() + '\n<script>\n' + pj.rstrip() + '\n;var ' + var + ' = `\n' + pw.rstrip() +
+            '\n`</script>\n')
+
+
 def pretty_js(js):
     """Shipped JS beautified by terser (no compression, no renaming), for reading only."""
     tmp = os.path.join(ROOT, '_pretty.js')
@@ -539,6 +550,8 @@ def prepare(verbose=False):
     say('source           wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
     # the shot table is harness-side; the release gets it flattened into one key list
     js, warn = timeline.emit_release(js, ui)
+    # the lettering's overlay goes into the page, not the JS (timeline.text_overlay)
+    page = timeline.text_overlay(js, timeline.read_shots(js))
     for w in warn:
         print('WARNING: per-shot slider values are harness-only, not in this build - ' + w)
     wgsl, js = cut_dev(wgsl), cut_dev(js)
@@ -568,7 +581,8 @@ def prepare(verbose=False):
     say('js minified with %s' % how)
     wgsl, js, jmin, n = short_entries(wgsl, js, jmin)
     say('entry points     %d compute entries renamed Z0, Z1, ...' % n)
-    return wgsl, js, jmin
+    say('page             %7d   (the lettering overlay, in the HTML)' % len(page.encode()))
+    return wgsl, js, jmin, page
 
 
 def short_entries(wgsl, js, jmin):
@@ -591,7 +605,7 @@ def short_entries(wgsl, js, jmin):
 def main():
     sys.path.insert(0, ROOT)      # -I keeps the script's own directory off sys.path
     import pack
-    wgsl, js, jmin = prepare(verbose=True)
+    wgsl, js, jmin, page = prepare(verbose=True)
     # No fallback: the regex minifier (minify_wgsl, kept for experiment.py) builds a bigger
     # intro, and a build that quietly changes size is worse than one that stops.
     prog = pack.Program(wgsl, _protected(wgsl, js), WGSL_KEEP)
@@ -608,11 +622,13 @@ def main():
     io.open(os.path.join(ROOT, 'min.wgsl'), 'wb').write(wmin.encode())
     io.open(os.path.join(ROOT, 'min.js'), 'wb').write(jmin.encode())
     # ...and readable copies of exactly what ships, for reading only (never packed)
-    io.open(os.path.join(ROOT, 'min.pretty.wgsl'), 'wb').write(pretty_wgsl(wmin).encode())
-    io.open(os.path.join(ROOT, 'min.pretty.js'), 'wb').write(pretty_js(jmin).encode())
+    pw, pj = pretty_wgsl(wmin), pretty_js(jmin)
+    io.open(os.path.join(ROOT, 'min.pretty.wgsl'), 'wb').write(pw.encode())
+    io.open(os.path.join(ROOT, 'min.pretty.js'), 'wb').write(pj.encode())
 
-    pb = pack.assemble(wmin, jmin, parts)
+    pb = pack.assemble(wmin, jmin, parts, page)
     payload = pb.decode()
+    io.open(os.path.join(ROOT, 'min.pretty.html'), 'wb').write(pretty_page(payload, pj, pw).encode())
     raw_deflate = zlib.compress(pb, 9)[2:-4]          # raw deflate stream
     try:
         import brotli

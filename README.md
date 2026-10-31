@@ -353,8 +353,21 @@ letter is the same string and brotli stores it once. Measured 31 Oct, intro.cmd:
 - The fades lean on CSS clamping opacity to 0..1: a word's opacity is just
   `min(t - from - k, to - t)`, and the picture's fade is the overlay's own opacity: 10 406.
 - No `stroke-miterlimit`: the default limit of 4 already mitres every corner these letters
-  have (the sharpest, M's top corners at 35 degrees, need 3.3): **10 398**. A new letter
+  have (the sharpest, M's top corners at 35 degrees, need 3.3): 10 398. A new letter
   with a corner under ~29 degrees would get a flat tip; then it comes back.
+- Fullscreen goes on the body, not the canvas: fullscreen shows only that element and its
+  contents, and the overlay beside the canvas vanished in Chrome (10 400). The browser pane
+  never goes fullscreen, so check text in the release in a real browser.
+- A 3x coarser grid at the same size on screen (`GRID` in the tool): most coordinates one
+  digit. Half-turn arcs keep only their radius ratio (`a1 1` for a circle) - SVG scales radii
+  too small for their endpoints up to fit, so they stay exact on any grid, where rounded radii
+  made an O pointed; the 2 keeps half steps (`FINE`). 1.5x saved 5, 2x 9, 3x 33, 4x and 6x
+  more but bent the 2: 10 367.
+- The overlay is in the release's PAGE, after the canvas, written by the build
+  (`timeline.text_overlay`); the JS keeps one [from, to] per line: 10 313. The canvas needs
+  its end tag there, or the overlay is the canvas's fallback content and never drawn.
+- `t` for curves whose control point is the previous one mirrored exactly: **10 299**.
+  Allowing it within a grid step saved 7 more, but the S looked worse.
 - Re-checked: a glyph table laid out at runtime is still worse, 10 573 against 10 470.
   Brotli already stores each repeated letter once, so the table only adds layout code.
 
@@ -996,6 +1009,7 @@ the debug panel used to supply, minifies, packs, and writes:
 | `build/intro.html` | a local test copy that inflates itself (base64 + deflate), ~50% bigger - not the entry |
 | `build/min.wgsl`, `build/min.js` | what ships, as packed |
 | `build/min.pretty.wgsl`, `build/min.pretty.js` | the same, re-indented to read |
+| `build/min.pretty.html` | the whole page as it ships - canvas, the lettering's overlay, a path per line - with the readable JS and shader inlined |
 
 It needs **Python 3 with `brotli`** and **Node.js 16+** on PATH (*Setting up a machine*).
 That is all: wgslender 1.5.1 and terser 5.51.2 are vendored in `build/vendor/node_modules`

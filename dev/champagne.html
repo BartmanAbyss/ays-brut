@@ -2594,56 +2594,56 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // ── lettering ──
   // Josefin Sans SemiBold's capitals redrawn as pen strokes (dev/tools/strokefont.py: the
   // glyphs, the layout, a page comparing each with the real font). TEXT is groups of lines,
-  // each line one SVG path already in its place in a 533 x 300 box over the picture (the
-  // tool stacks a group's lines round the middle; its GRID sets the box and the pen),
-  // drawn with a pen as wide as the font's stem. No font ships - Josefin Sans is OFL (NFO).
+  // each line one SVG path already in its place in the overlay TEXT_SVG opens (the tool
+  // stacks a group's lines round the middle; its GRID sets the box and the pen), drawn with
+  // a pen as wide as the font's stem. No font ships - Josefin Sans is OFL (NFO).
+  // The release has the overlay in its PAGE, right after the canvas: the build writes it
+  // there from this block (build/timeline.py text_overlay), so none of it is JS there.
+  // Its style is the canvas's own, letter for letter, which brotli then stores once; clicks
+  // on it still bubble to the start handler on the window.
+//#D{
   // TEXT:BEGIN - written by python dev/tools/strokefont.py; edit the glyphs there
+  const TEXT_SVG = '<svg viewBox="-267 -150 533 300" style=position:fixed;inset:0;width:100%;height:100% fill=none stroke=#fff stroke-width=3.22>';
   const TEXT = [
     [
-      'm-65-46v-16l9 12l9-12v16m10 0l8-17l7 17m-12-6h9m14 6v-20m23 3q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m39-7a1 1 0 0 0-18 0a1 1 0 0 0 18 0zm11 10v-17l15 14v-17',
-      'm-62-8l8-17l7 17m-12-6h9m14 5v-18h5a1 1 0 0 1 0 9h1a1 1 0 0 1 0 9h-6zm0-9h6m14-10l7 12l7-12m-7 12v8m28-17q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m32-14q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m35-16h-12v18h13m-13-9h11',
-      'm-91 28v-16l9 12l9-12v16m12 0v-20m13 0v19h12m9-19v19h12m22-18h-12v18h13m-13-9h11m22-7q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m22 3v-20m13 20v-16l9 12l9-12v16m24-19h-12v18h13m-13-9h11',
+      'm-65-46v-16l9 12l9-12v16m10 0l8-17l7 17m-12-6h9m14 6v-20m23 3q-2-2-6-2t-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m39-7a1 1 0 0 0-18 0a1 1 0 0 0 18 0zm11 10v-17l15 14v-17',
+      'm-62-8l8-17l7 17m-12-6h9m14 5v-18h5a1 1 0 0 1 0 9h1a1 1 0 0 1 0 9h-6zm0-9h6m14-10l7 12l7-12m-7 12v8m28-17q-2-2-6-2t-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m32-14q-2-2-6-2t-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m35-16h-12v18h13m-13-9h11',
+      'm-91 28v-16l9 12l9-12v16m12 0v-20m13 0v19h12m9-19v19h12m22-18h-12v18h13m-13-9h11m22-7q-2-2-6-2t-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m22 3v-20m13 20v-16l9 12l9-12v16m24-19h-12v18h13m-13-9h11',
       'm-33.5 57a4.8 4.5 0 0 1 1-7.5a4.8 4.5 0 0 1 6.5 4.5q-.5 5-8 10.5h10.5m20.5-7.5a.8 1 0 0 0-12 0a.8 1 0 0 0 12 0zm10.5 0a4.8 4.5 0 0 1 1-7.5a4.8 4.5 0 0 1 6.5 4.5q-.5 5-8 10.5h10.5m18.5-4.5a1.1 1 0 0 0-10 0a1.1 1 0 0 0 10 0zm-10-1q1-6 7-10',
     ],
     [
       'm-93-63a8.7 8.7 0 0 0-14 7a8.7 8.7 0 0 0 14 7m11 3v-20m14 20v-20m-14 10h14m10 10l8-17l7 17m-12-6h9m14 6v-16l9 12l9-12v16m12 0v-19h5a1 1 0 0 1 0 11h-5m19 8l8-17l7 17m-12-6h9m27-11a8.7 8.7 0 0 0-14 7a8.7 8.7 0 0 0 14 7v-5h-5m17 8v-17l15 14v-17m24 1h-12v18h13m-13-9h11',
       'm-42-8v-19h5a1 1 0 0 1 0 11h-5m38-2a1 1 0 0 0-18 0a1 1 0 0 0 18 0zm11-10v13a1 1 0 0 0 13 0v-13m12 20v-19h5a1 1 0 0 1 0 11h-5m6 0l6 8',
-      'm-26 8v19h12m22-18h-12v18h13m-13-9h11m21-7q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2',
-      'm-62 66v-16l9 12l9-12v16m10 0l8-17l7 17m-12-6h9m23-11q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m33-14q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m34-16h-12v18h13m-13-9h11m21-7q-2-2-6-2q-4 0-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2',
+      'm-26 8v19h12m22-18h-12v18h13m-13-9h11m21-7q-2-2-6-2t-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2',
+      'm-62 66v-16l9 12l9-12v16m10 0l8-17l7 17m-12-6h9m23-11q-2-2-6-2t-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m33-14q-2-2-6-2t-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2m34-16h-12v18h13m-13-9h11m21-7q-2-2-6-2t-4 4q0 3 4 5q5 2 5 5q0 4-5 4q-4 0-6-2',
     ],
   ];
   // TEXT:END
-//#D{
   // When each group of lines shows: [shot, from, to, group]. Seconds from the shot's
   // start, so the words stay with their shot when shots are stretched or moved (`to` past
   // the shot's end means to its end). Its first line shows at `from`, each next one a
-  // second later; each fades in and out over 1 s, and with the picture's own fades. The
-  // release gets them as show times: the build resolves textCues() as it does flattenShots().
+  // second later; each fades in and out over 1 s, and with the picture's own fades.
   const TEXT_CUES = [
     ['2 orbit', 1, 99, 0],               // MAISON / ABYSSE / MILLESIME / 2026
     ['8', 10, 99, 1],                    // CHAMPAGNE / POUR / LES / MASSES
   ];
-  function textCues(shots) {
+  // The cued groups' lines in order: [from, to] each, in show seconds - or, with `paths`,
+  // their paths for the overlay, in the same order. The build resolves textCues(SHOTS) for
+  // the release as it does flattenShots(), and writes the paths into the page.
+  function textCues(shots, paths) {
     const st = ED.starts(shots), names = shots.map(s => s.name);
-    return TEXT_CUES.filter(c => names.includes(c[0])).map(([n, a, b, ...r]) => {
+    return TEXT_CUES.filter(c => names.includes(c[0])).flatMap(([n, a, b, g]) => {
       const i = names.indexOf(n);
-      return [ED.r6(st[i] + a), ED.r6(Math.min(st[i] + b, st[i + 1])), ...r];
+      return TEXT[g].map((d, k) => paths ? '<path opacity=0 d="' + d + '"/>'
+        : [ED.r6(st[i] + a + k), ED.r6(Math.min(st[i] + b, st[i + 1]))]);
     });
   }
-//#D}
-  // [from, to, group] in show seconds
-  const SHOW_TEXT = textCues(SHOTS);
-  // after the canvas, so the harness's panels stay on top of it. Every word starts unseen:
-  // drawText only runs once frames do, after the click, and until then they all showed
-  // Its style is the canvas's own, letter for letter, which brotli then stores once. Clicks
-  // pass through it to the start handler on the window, so no pointer-events here.
-  canvas.insertAdjacentHTML('afterend', '<svg viewBox="-267 -150 533 300" style="position:fixed;inset:0;' +
-    'width:100%;height:100%" fill="none" stroke="#fff" stroke-width="3.22">' + SHOW_TEXT.map(c => TEXT[c[2]].map(d => '<path opacity="0" d="' + d + '"/>').join(''))
-    .join('') + '</svg>');
-  const textEls = canvas.nextSibling.children;
-//#D{
+  canvas.insertAdjacentHTML('afterend', TEXT_SVG + textCues(SHOTS, 1).join('') + '</svg>');
   canvas.nextSibling.style.pointerEvents = 'none';   // the harness's panels sit under it
 //#D}
+  // [from, to] for each line, in show seconds; the overlay's paths are in the same order
+  const SHOW_TEXT = textCues(SHOTS);
+  const textEls = canvas.nextSibling.children;
   function drawText(t) {
 //#D{
     // the harness letterboxes a fixed w x h inside the window: lay the words over the
@@ -2651,16 +2651,15 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const r = canvas.getBoundingClientRect(), sv = canvas.nextSibling.style;
     sv.left = r.left + 'px'; sv.top = r.top + 'px'; sv.width = r.width + 'px'; sv.height = r.height + 'px';
 //#D}
-    let j = 0;
-    SHOW_TEXT.forEach(([a, b, g]) => TEXT[g].forEach((_, k) => {
-      // line k, k s later; CSS clamps opacity to 0..1, and the picture's fade is the
-      // overlay's own opacity (writeUniforms)
-      let o = Math.min(t - a - k, b - t);
+    SHOW_TEXT.forEach(([a, b], j) => {
+      // CSS clamps opacity to 0..1, and the picture's fade is the overlay's own opacity
+      // (writeUniforms). Every path starts at opacity 0: drawText only runs once frames do.
+      let o = Math.min(t - a, b - t);
 //#D{
       if (cfg.text > 0) o = 1;           // ?text=1: every word, held, for the layout
 //#D}
-      textEls[j++].style.opacity = o;
-    }));
+      textEls[j].style.opacity = o;
+    });
   }
   function evalShow(t) {
     t = Math.max(0, Math.min(t, SHOW_END));

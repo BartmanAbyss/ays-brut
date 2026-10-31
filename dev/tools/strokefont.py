@@ -41,12 +41,16 @@ TRACK = 150
 # of 900 - about 7% of the screen's height. GRID 3 draws the same size on a grid three
 # times coarser (36 font units, ~3.6 px at 1080p): most coordinates become one digit, 33
 # bytes less, and only the 2 needed help (FINE). Arcs survive it whole (radii()). The
-# harness's overlay must use VIEWBOX and PEN_W; writing the block checks it does.
+# tool writes the overlay's opening tag (TEXT_SVG) with the box and the pen to match.
 GRID = 3
 Q = 12.0 * GRID
 LEAD = round(110 / GRID)                       # line spacing, in path units
 VIEWBOX = '%d %d %d %d' % (round(-800 / GRID), round(-450 / GRID), round(1600 / GRID), round(900 / GRID))
 PEN_W = '%g' % round(PEN / Q, 2)               # the pen, in path units
+# The overlay over the picture, as the release's page has it: HTML, so unquoted wherever it
+# can be; the style is the canvas's own (build/pack.py assemble), which brotli stores once.
+SVG_OPEN = ('<svg viewBox="%s" style=position:fixed;inset:0;width:100%%;height:100%% fill=none '
+            'stroke=#fff stroke-width=%s>' % (VIEWBOX, PEN_W))
 
 # ── the glyphs ──────────────────────────────────────────────────────────────────────
 # a glyph: (advance, [stroke, ...]); a stroke: list of nodes, optionally ending in 'z':
@@ -135,6 +139,9 @@ def stroke_segments(st):
 # curve, which a coarse grid bends out of shape; anything drawn as straight lines and
 # half-turns survives whole steps.
 FINE = {'2': 2}
+# How far, in grid steps, a curve's control point may move so it can be written as the
+# shorthand `t` (the previous control point mirrored). 0 keeps every curve exact.
+SMOOTH = 0
 
 
 def num(v):
@@ -171,7 +178,7 @@ def path_for(text, q=Q, oy=0):
     # coordinates round on their own, so every copy of a letter is the same string - which
     # brotli then stores once. Rounding the sum instead made each copy differ by a unit
     # here and there, and the three lines cost ~700 bytes instead of ~350.
-    ox, f = 0, 1
+    ox, f, ctrl = 0, 1, None
     T = lambda x, y: (ox + round(x / q * f) / f, round(-(y - CAP / 2) / q * f) / f + oy)
     for c in text:
         adv, strokes = G[c]
@@ -180,6 +187,8 @@ def path_for(text, q=Q, oy=0):
             start = None
             for seg in stroke_segments(st):
                 op = seg[0]
+                if op != 'Q':
+                    ctrl = None           # `t` only follows a curve
                 if op == 'Z':
                     d.append('z')
                     last = start
@@ -194,9 +203,19 @@ def path_for(text, q=Q, oy=0):
                 elif op == 'Q':
                     _, qx, qy, ex, ey = seg
                     c1, e = T(qx, qy), T(ex, ey)
+                    # `t` takes the previous curve's control point mirrored through the
+                    # current point: where that lands within SMOOTH grid steps of this
+                    # curve's own, write `t` and let the browser use the mirror
+                    if ctrl is not None:
+                        m = (2 * last[0] - ctrl[0], 2 * last[1] - ctrl[1])
+                        if max(abs(m[0] - c1[0]), abs(m[1] - c1[1])) <= SMOOTH:
+                            d.append('t%s %s' % (num(e[0] - last[0]), num(e[1] - last[1])))
+                            ctrl, last = m, e
+                            continue
                     d.append('q%s %s %s %s' % (num(c1[0] - last[0]), num(c1[1] - last[1]),
                                               num(e[0] - last[0]), num(e[1] - last[1])))
-                    last = e
+                    ctrl, last = c1, e
+                    continue
                 else:
                     p = T(seg[1], seg[2])
                     dx, dy = p[0] - last[0], p[1] - last[1]
@@ -255,7 +274,7 @@ def with_block(src, groups):
     a, b = src.index('// TEXT:BEGIN'), src.index('// TEXT:END')
     a = src.index('\n', a) + 1
     b = src.rindex('\n', 0, b) + 1
-    body = ('  const TEXT = [\n' + ''.join('    [\n' + ''.join("      '%s',\n" % p for p in g) + '    ],\n'
+    body = ("  const TEXT_SVG = '%s';\n" % SVG_OPEN + '  const TEXT = [\n' + ''.join('    [\n' + ''.join("      '%s',\n" % p for p in g) + '    ],\n'
                                        for g in groups) + '  ];\n')
     return src[:a] + body + src[b:]
 
@@ -268,8 +287,6 @@ if __name__ == '__main__':
         print('%-26s %4d chars' % (t, len(p)))
     with io.open(SRC, encoding='utf-8', newline='') as f:
         src = f.read()
-    for attr in ('viewBox="%s"' % VIEWBOX, 'stroke-width="%s"' % PEN_W):
-        assert attr in src, 'the overlay in dev/champagne.html must have %s for GRID %d' % (attr, GRID)
     if '// TEXT:BEGIN' in src and '// TEXT:END' in src:
         out = with_block(src, groups)
         assert len(out) > len(src) // 2, 'refusing to write: the result lost half the file'

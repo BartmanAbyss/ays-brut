@@ -98,10 +98,14 @@ class Table(unittest.TestCase):
         self.assertEqual(warn, ['b: expo, fade'])
 
     def test_text_cues_become_show_times(self):
-        js = ("const TEXT_CUES = [\n    ['a', 1, 99, 0, -400, 0],   // to past the end: to the end\n"
-              "    ['b', 0.5, 1.5, 1, 0, 20],\n    ['gone', 1, 2, 2, 0, 0],\n  ];")
-        self.assertEqual(T.text_cues(js, mini()),
-                         [[1.0, 4.0, 0.0, -400.0, 0.0], [4.5, 5.5, 1.0, 0.0, 20.0]])
+        js = ("  const TEXT_SVG = '<svg x=1>';\n  const TEXT = [\n    ['p0', 'p1'],\n    ['p2'],\n  ];\n"
+              "  const TEXT_CUES = [\n    ['a', 1, 99, 0],   // to past the end: to the end\n"
+              "    ['b', 0.5, 1.5, 1],\n    ['gone', 1, 2, 1],\n  ];")
+        # a line a second after the one above; a cue for a missing shot drops
+        self.assertEqual(T.text_cues(js, mini()), [[1.0, 4.0], [2.0, 4.0], [4.5, 5.5]])
+        # ...and the page gets their paths in the same order, each unseen to start with
+        self.assertEqual(T.text_overlay(js, mini()), '<svg x=1><path opacity=0 d="p0"/>'
+                         '<path opacity=0 d="p1"/><path opacity=0 d="p2"/></svg>')
         # the harness's own cues resolve against its own shots, inside the show
         cues = T.text_cues(SRC, T.read_shots(SRC))
         self.assertTrue(cues)

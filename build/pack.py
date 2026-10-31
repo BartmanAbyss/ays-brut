@@ -222,7 +222,7 @@ SHADER_LOOKUP = 'document.getElementById("wgsl-main").textContent'
 _shader_var = {}
 
 
-def assemble(wgsl, js, parts=None):
+def assemble(wgsl, js, parts=None, page=''):
     """The served page: a canvas styled inline, then ONE classic script. The shader rides in
     that script as a template string at its END - the code reads it only after its first
     `await`, by which time the whole script has run. That drops the shader's own
@@ -230,36 +230,40 @@ def assemble(wgsl, js, parts=None):
     <style> block: -36 bytes measured. (In the middle of the code it was +31: the search
     tunes order for the shader following the JS.) `parts` is kept for old saved states and
     ignored. No background colour: the click-to-start screen comes first and owns the look
-    of the page until the first frame."""
+    of the page until the first frame. `page` is markup that sits right after the canvas:
+    the lettering's overlay."""
     assert js.count(SHADER_LOOKUP) == 1, 'release JS no longer reads the shader by id'
-    assert '`' not in wgsl and '${' not in wgsl and '</script' not in wgsl
+    assert '`' not in wgsl and '${' not in wgsl and '</script' not in wgsl and '<script' not in page
     if js not in _shader_var:                 # a one-letter JS name the code does not use
         used = set(re.findall(r'[A-Za-z_$][\w$]*', js.replace(SHADER_LOOKUP, '')))
         _shader_var.clear()
         _shader_var[js] = next(n for n in 'WQKVXZJYHUabcdefghijklmnopqrstuvwxyz'
                                if n not in used)
     v = _shader_var[js]
-    return ('<canvas id=c style=position:fixed;inset:0;width:100%;height:100%>'
-            '<script>' + js.replace(SHADER_LOOKUP, v) + ';var ' + v + '=`' + wgsl + '`'
+    # A canvas is not a void element: without its end tag, markup after it is its fallback
+    # content, never drawn - the overlay vanished there, and canvas.nextSibling was null.
+    # The script alone needs no end tag before it (scripts in fallback content still run).
+    return ('<canvas id=c style=position:fixed;inset:0;width:100%;height:100%>' +
+            ('</canvas>' + page if page else '') + '<script>' + js.replace(SHADER_LOOKUP, v) + ';var ' + v + '=`' + wgsl + '`'
             '</script>').encode()
 
 
-def score(prog, st, js):
-    return len(brotli.compress(assemble(prog.render(st), js, st['parts']), quality=11, lgwin=24))
+def score(prog, st, js, page=''):
+    return len(brotli.compress(assemble(prog.render(st), js, st['parts'], page), quality=11, lgwin=24))
 
 
 def _copy(st):
     return {k: list(v) for k, v in st.items()}
 
 
-def lahc(prog, st, js, iters, seed, history=400):
+def lahc(prog, st, js, iters, seed, history=400, page=''):
     """Late-acceptance hill climbing: accept a candidate if it is no worse than the current
     state OR than the state `history` steps ago. It wanders across plateaus a plain hill
     climber gets stuck on, with no temperature schedule to tune. Returns the best state
     seen and the state it ended on."""
     rng = random.Random(seed)
     cur = _copy(st)
-    cs = score(prog, cur, js)
+    cs = score(prog, cur, js, page)
     best, bs = _copy(cur), cs
     hist = [cs] * history
     for it in range(iters):
@@ -275,7 +279,7 @@ def lahc(prog, st, js, iters, seed, history=400):
             if len(L) > 1:
                 i, j = rng.randrange(len(L)), rng.randrange(len(L))
                 L[i], L[j] = L[j], L[i]
-        sc = score(prog, cand, js)
+        sc = score(prog, cand, js, page)
         v = it % history
         if sc <= cs or sc <= hist[v]:
             cur, cs = cand, sc
@@ -293,24 +297,24 @@ def lahc(prog, st, js, iters, seed, history=400):
 _W = {}
 
 
-def _init(wgsl, protected, keep, js):
+def _init(wgsl, protected, keep, js, page):
     _W['prog'] = Program(wgsl, set(protected), set(keep))
-    _W['js'] = js
+    _W['js'], _W['page'] = js, page
 
 
 def _round(args):
     st, iters, seed = args
-    return lahc(_W['prog'], st, _W['js'], iters, seed)
+    return lahc(_W['prog'], st, _W['js'], iters, seed, page=_W['page'])
 
 
-def search(wgsl, protected, keep, js, start, rounds, per_round, workers, seed, log=print):
+def search(wgsl, protected, keep, js, start, rounds, per_round, workers, seed, log=print, page=''):
     import multiprocessing as mp
     prog = Program(wgsl, set(protected), set(keep))
-    gbest, gs = _copy(start), score(prog, start, js)
+    gbest, gs = _copy(start), score(prog, start, js, page)
     states = [_copy(start) for _ in range(workers)]
     t0 = time.time()
     with mp.get_context('spawn').Pool(workers, initializer=_init,
-                                      initargs=(wgsl, sorted(protected), sorted(keep), js)) as pool:
+                                      initargs=(wgsl, sorted(protected), sorted(keep), js, page)) as pool:
         for r in range(rounds):
             res = pool.map(_round, [(states[i], per_round, seed * 1000003 + r * 1009 + i)
                                     for i in range(workers)])
@@ -349,7 +353,7 @@ if __name__ == '__main__':
 
     sys.path.insert(0, ROOT)
     import build as B
-    wgsl, js, jmin = B.prepare()
+    wgsl, js, jmin, page = B.prepare()
     protected = B._protected(wgsl, js)
     prog = Program(wgsl, protected, B.WGSL_KEEP)
     st = prog.adopt(load_state())
@@ -357,14 +361,14 @@ if __name__ == '__main__':
         len(prog.items), len(prog.globals), len(prog.all_locals), len(prog.fields),
         a.workers, a.rounds, a.per_round))
     print('default state %d   starting state %d' % (
-        score(prog, prog.default_state(), jmin), score(prog, st, jmin)))
+        score(prog, prog.default_state(), jmin, page), score(prog, st, jmin, page)))
     best, bs = search(wgsl, protected, B.WGSL_KEEP, jmin, st, a.rounds, a.per_round,
-                      a.workers, a.seed)
+                      a.workers, a.seed, page=page)
     # A stored score only means something for the input it was searched on: after a shader
     # or JS change it is a different problem, and comparing against the old score would
     # discard a valid search whenever the payload grew.
     import hashlib
-    src = hashlib.sha1((wgsl + jmin).encode()).hexdigest()[:16]
+    src = hashlib.sha1((wgsl + jmin + page).encode()).hexdigest()[:16]
     old = load_state()
     prev = old.get('score') if old.get('src') == src else None
     if prev is None or bs < prev:
