@@ -355,6 +355,10 @@ end tag - fine for a script, but markup put after it (the lettering's overlay) b
 canvas's fallback content: parsed, never drawn, and `canvas.nextSibling` null. `assemble`
 closes the canvas when there is page markup.
 
+**The page must open with a tag the sniffer knows.** The dropper sends no Content-Type, so
+the browser sniffs; `<body>` passes, `<canvas>` does not and the page came up as plain
+text. `assemble` puts `<body>` first - it looks removable and is not.
+
 **A created pipeline is not a compiled one.** Chromium's `createComputePipeline` returns
 at once and compiles lazily; on a cold shader cache the first submit waited 3-7 s, after the
 click, with the music already running. Your own machine's cache hides it - test start-up
@@ -514,8 +518,8 @@ chain - brotli alone ranked `unsafe` second, Roadroller ranked it last.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 310 bytes. `intro.cmd` is **9 379** (26 Oct 2026), 1 187
-  OVER, with the start screen and the sound engine in but the score empty and no text;
+  stale. Our dropper header is 226 bytes. `intro.cmd` is **9 344** (31 Oct 2026), 1 152
+  OVER, with the start screen, the sound engine and the lettering in but the score empty;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
   README (*Where it lands today*) has the size map by feature and function.

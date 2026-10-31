@@ -105,5 +105,5 @@ if __name__ == '__main__':
     packed = roll(pb)
     print('saved build/roadroller.json: %s' % args)
     print('intro.cmd with these settings: %d (brotli alone: %d)' % (
-        310 + len(brotli.compress(packed, quality=11, lgwin=24)),
-        310 + len(brotli.compress(pb, quality=11, lgwin=24))))
+        226 + len(brotli.compress(packed, quality=11, lgwin=24)),
+        226 + len(brotli.compress(pb, quality=11, lgwin=24))))

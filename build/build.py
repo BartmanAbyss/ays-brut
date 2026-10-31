@@ -665,19 +665,29 @@ def main():
     # the browser decodes brotli natively. This is INCENDIUM's trick. HttpListener binds
     # localhost without elevation (checked).
     PORT = 8044
-    # Golfed (371 -> 310 bytes, uncompressed, so every one counts):
+    # Golfed (371 -> 310 -> 226 bytes, uncompressed, so every one counts):
     # - cmd expands %~f0 into the command line itself: no `set` and no $env:f. The path sits
     #   in single quotes, so a folder name containing an apostrophe would break it.
-    # - no `-ep bypass`: execution policy governs script files, not a -c command string
-    # - the URL once, in $u; [Net.HttpListener]::new() (PowerShell 5+, what Windows ships)
-    # - GetContext().Response in one go; AddHeader; no $l.Stop() - the process exits anyway
-    # Kept: -nop (a user profile could print or slow the start) and ContentType (without it
-    # the browser sniffs, and its HTML sniffer does not recognise a page opening `<canvas`).
-    head = ("@powershell -nop -c \"$b=[IO.File]::ReadAllBytes('%~f0');$l=[Net.HttpListener]::new();"
-            "$u='http://localhost:@PORT@/';$l.Prefixes.Add($u);$l.Start();start $u;"
-            "$r=$l.GetContext().Response;$r.ContentType='text/html';"
-            "$r.AddHeader('Content-Encoding','br');"
-            "$r.OutputStream.Write($b,@@,$b.Length-@@);$r.Close()\"&exit/b\r\n")
+    # - no `-ep bypass`: execution policy governs script files, not a command string; and
+    #   no `-c` either - powershell.exe runs a bare trailing argument as the command
+    # - [Net.HttpListener]@{}: a hashtable cast calls the default constructor (PS 3+)
+    # - assignments inside the expression that first uses them: ($l=...).Prefixes...
+    # - Close(byte[], willBlock) writes the body, sets Content-Length and closes in one call.
+    #   The body is a slice of the file: out-of-range indices are dropped, so [N..1e5] is
+    #   "from N to the end" (asserted below); PowerShell converts the object[] to byte[].
+    #   willBlock 1: the process exits right after, and must not cut the send short.
+    # - gc -en 3 (Byte) instead of [IO.File]::ReadAllBytes. -li (LiteralPath) is needed: a
+    #   plain path treats [ ] as wildcards, and a folder like "intro [final]" failed to read.
+    # - no Content-Type: the page opens with <body>, which the browser's sniffer recognises
+    #   (pack.assemble; checked - without it Chrome showed the page as text/plain)
+    # - LF alone ends the line; cmd does not need the CR
+    # - port: a 4-digit one is needed - below ~5000 binding localhost is "Access is denied"
+    #   without admin (1024 failed, 5000 worked; there is no URL reservation for 8044)
+    # Kept: -nop (a user profile could print or slow the start), `@` (or cmd echoes the
+    # whole line), exit/b rather than exit (exit closes a console the user ran it from).
+    head = ("@powershell -nop \"($l=[Net.HttpListener]@{}).Prefixes.Add(($u='http://localhost:@PORT@/'));"
+            "$l.Start();start $u;($r=$l.GetContext().Response).AddHeader('Content-Encoding','br');"
+            "$r.Close((gc -li '%~f0' -en 3)[@@..1e5],1)\"&exit/b\n")
     head = head.replace('@PORT@', str(PORT))   # not %-formatting: the header contains %~f0
     # The offset is written into the header itself; find the length that is consistent
     # with its own digit count (3 digits for any plausible header).
@@ -688,6 +698,8 @@ def main():
     head = head.replace('@@', str(off))
     assert len(head.encode('ascii')) == off, 'header length moved'
     cmd = head.encode('ascii') + br
+    if len(cmd) > 1e5:
+        raise BuildError('intro.cmd is over 100 000 bytes: the dropper serves [offset..1e5]')
     io.open(os.path.join(ROOT, 'intro.cmd'), 'wb').write(cmd)
 
     print()

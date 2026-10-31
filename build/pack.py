@@ -244,8 +244,11 @@ def assemble(wgsl, js, parts=None, page=''):
     # content, never drawn - the overlay vanished there, and canvas.nextSibling was null.
     # The script alone needs no end tag before it (scripts in fallback content still run).
     # `hidden` until the click shows it (the start handler): an unpainted WebGPU canvas is
-    # black in Firefox, and full-screen it covered the "click" text
-    return ('<canvas id=c hidden style=position:fixed;inset:0;width:100%;height:100%>' +
+    # black in Firefox, and full-screen it covered the "click" text.
+    # `<body>` first so a browser sniffs the page as HTML: the dropper sends no Content-Type
+    # (27 bytes of header). Chrome's sniffer knows <body>, not <canvas> - without it the page
+    # came up as text/plain. ~2 bytes after brotli; the tag is implied anyway.
+    return ('<body><canvas id=c hidden style=position:fixed;inset:0;width:100%;height:100%>' +
             ('</canvas>' + page if page else '') + '<script>' + js.replace(SHADER_LOOKUP, v) + ';var ' + v + '=`' + wgsl + '`'
             '</script>').encode()
 

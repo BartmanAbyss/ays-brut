@@ -29,7 +29,7 @@ sys.path.insert(0, ROOT)
 import build as B   # noqa: E402
 import pack         # noqa: E402
 
-HEAD = 310   # the dropper header
+HEAD = 226   # the dropper header
 
 # shader systems as packer items; Z0.. are the compute kernels (short_entries renames them in
 # the order the JS lists them: see KERNELS)

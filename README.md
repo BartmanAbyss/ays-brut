@@ -1455,13 +1455,24 @@ Worth 1 050 bytes over the deflate version, for a header that came out *smaller*
 
 ### The dropper
 
-`intro.cmd` is one batch line that hands itself to PowerShell (310 bytes). PowerShell
-reads its own file, starts an `HttpListener` on http://localhost:8044/, opens that URL in
-the default browser and answers the one request with everything past a fixed offset, sent
-as `text/html` with `Content-Encoding: br`. The payload sits in the file as **raw brotli
-bytes** — no base64, no escaping. The offset is written into the header; the build finds
-the value consistent with its own digit count, so the number cannot move what it points
-at. Every golfing choice is commented in `build.py`.
+`intro.cmd` is one batch line that hands itself to PowerShell (226 bytes). PowerShell
+starts an `HttpListener` on http://localhost:8044/, opens that URL in the default browser
+and answers the one request with its own file past a fixed offset, sent with
+`Content-Encoding: br` and no Content-Type: the page opens with `<body>`, so the browser
+sniffs it as HTML. The payload sits in the file as **raw brotli bytes** — no base64, no
+escaping. The offset is written into the header; the build finds the value consistent
+with its own digit count, so the number cannot move what it points at. Every golfing
+choice is commented in `build.py`.
+
+Golfed again on 31 Oct, 310 -> 226 (intro.cmd 9 426 -> 9 344): no `-c` (a bare trailing
+argument is the command), `[Net.HttpListener]@{}` for `::new()`, assignments inside their
+first use, `Close(bytes, 1)` for Write + Close with the body a slice of `gc -li ... -en 3`
+(out-of-range indices are dropped, so `[N..1e5]` runs to the end), no Content-Type for
+`<body>` in the page (+2 after brotli), and LF without CR. Ruled out: a port under ~5000
+(binding localhost there needs admin). Not tried: raw `TcpListener` with the HTTP header
+in the file - its short constructor binds every interface (a firewall prompt), the
+loopback one costs most of what it saves, and it has to cope with the browser's extra
+connections itself. Left in on purpose: `-nop`, `@`, `exit/b` (5, 1 and 2 bytes).
 
 Verified end to end: Chrome, Edge and Firefox decode it over plain http://localhost and
 render with a clean console (*Browsers*).
