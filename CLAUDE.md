@@ -481,8 +481,19 @@ and `python build/roadroller.py` re-runs the -O2 search (~40 s) and saves new on
 output is printable ASCII spread thin on purpose, for a compressor after it: served raw it
 is bigger, never serve it without brotli. It adds ~0.4 s of decoding before "click".
 `pack_state.json` still pays under it (default packer state: 9 612), though its search
-scores brotli alone. A packer bug now shows up as a Roadroller-packed page that fails, so
-compile `build/min.wgsl` directly when the release is black.
+scores brotli alone - and a brotli gain mostly does not carry over: a fresh search took
+brotli alone -45 and the shipped size only -10, then -34 more once Roadroller was
+re-searched on the new script. So after a packer search, re-run `build/roadroller.py`
+and keep the pair only if `intro.cmd` shrank. A packer bug now shows up as a
+Roadroller-packed page that fails, so compile `build/min.wgsl` directly when the release
+is black.
+
+**Small wins on top, all measured on the shipped size (31 Oct, 9 514 -> 9 426 with the
+searches):** Roadroller's `-D` decoder, -22 (its globals cannot clash with ours: the
+decoder is done before our script is eval'd); terser `passes=2`, -16 (passes=3 the same,
+the unsafe rewrites worse under Roadroller); brotli's window searched 10..24, -6
+(INCENDIUM's slow mode does it too). Measure terser and packer changes through the whole
+chain - brotli alone ranked `unsafe` second, Roadroller ranked it last.
 
 **Never rename a member access.** The substitution uses a `(?<![.\w])` guard so a rename of
 `pos` cannot touch `p.pos`.

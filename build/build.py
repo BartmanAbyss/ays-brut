@@ -527,7 +527,9 @@ def minify_js(js):
     try:
         io.open(tmp, 'wb').write(js.encode())
         # terser reads a FILE here: piping source through stdin fails on Windows.
-        out = run_tool('terser', [tmp, '--compress', '--mangle', '--module'])
+        # passes=2: measured through Roadroller and brotli, -16 bytes shipped (31 Oct); a
+        # third pass changed nothing, and the unsafe rewrites lost under Roadroller
+        out = run_tool('terser', [tmp, '--compress', 'passes=2', '--mangle', '--module'])
         if len(out) < 200:
             raise BuildError('terser produced no usable output (%d chars)' % len(out))
         return out, 'terser 5.51.2 (vendored)'
@@ -642,7 +644,9 @@ def main():
         raise BuildError(str(e))
     print('roadroller       script packed with build/roadroller.json (brotli alone: %d)' % plain_br)
     raw_deflate = zlib.compress(pb, 9)[2:-4]          # raw deflate stream
-    br = brotli.compress(pb, quality=11, lgwin=24)
+    # brotli's window size, searched (INCENDIUM's slow mode does the same): the smallest
+    # output wins, the smaller window on a tie. Any window decodes in every browser.
+    br = min((brotli.compress(pb, quality=11, lgwin=w) for w in range(10, 25)), key=len)
 
     b64 = __import__('base64').b64encode(raw_deflate).decode()
     loader = ('<body style=margin:0;overflow:hidden><script>'

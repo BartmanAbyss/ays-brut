@@ -1,4 +1,4 @@
 {
- "args": "-Zab0 -Zdy0 -Zlr710 -Zmc6 -Zmd15 -Zst0 -Sw0,0,1,2,3,6,7,13,50,53,184,193,345,354",
- "searched": "2026-10-31, -O2 on the 10 306-byte build (script 26 411 bytes): estimated 8683, intro.cmd 9 514"
+ "args": "-Zab0 -Zdy0 -Zlr710 -Zmc5 -Zmd14 -Sw4,w0,0,1,2,3,6,7,13,25,43,50,170,245,269,404",
+ "searched": "estimated 8619"
 }

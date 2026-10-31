@@ -22,6 +22,13 @@ CLI = os.path.join(ROOT, 'vendor', 'node_modules', 'roadroller', 'cli.mjs')
 SETTINGS = os.path.join(ROOT, 'roadroller.json')
 
 
+# -D, the "dirty" decoder: shorter, its variables global (Blueberry's fork searches their
+# names). The CLI calls it unsafe for scripts with top-level code or single-letter names,
+# and ours has both - but the decoder is done by the time our script is eval'd, and our
+# top-level consts are scoped to that eval. -22 bytes; checked: decodes, plays, shows text.
+DIRTY = ['-D']
+
+
 class RoadrollerError(Exception):
     pass
 
@@ -64,7 +71,7 @@ def roll(page):
     """The assembled page (bytes) with its script packed by Roadroller."""
     if not os.path.exists(SETTINGS):
         raise RoadrollerError('build/roadroller.json is missing - run python build/roadroller.py')
-    args = json.load(io.open(SETTINGS, encoding='utf-8'))['args'].split()
+    args = json.load(io.open(SETTINGS, encoding='utf-8'))['args'].split() + DIRTY
     head, script = split(page.decode('utf-8'))
     packed, _ = _run(script, args)
     return (head + packed + '</script>').encode('utf-8')
@@ -73,7 +80,7 @@ def roll(page):
 def search(page):
     """-O2 search on the page's script; returns the CLI args that replicate the best."""
     _, script = split(page.decode('utf-8'))
-    _, err = _run(script, ['-O2'])
+    _, err = _run(script, ['-O2'] + DIRTY)
     m = re.search(r'use `([^`]+)` to replicate', err)
     if not m:
         raise RoadrollerError('the search did not report its settings:\n' + err[-1500:])
