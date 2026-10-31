@@ -4340,8 +4340,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     onclick = () => {
       onclick = null;
       // fullscreen is the screen: size the canvas once, here, rather than on every resize
-      // (the release always; the harness only with ?fs=1)
-      if (cfg.fs) { canvas.width = screen.width; canvas.height = screen.height; canvas.requestFullscreen(); }
+      // (the release always; the harness only with ?fs=1). The BODY goes fullscreen, not the
+      // canvas: fullscreen shows only that element and what is inside it, and with the canvas
+      // the lettering's overlay beside it vanished - in Chrome, not in the browser pane,
+      // which never goes fullscreen. The body's backdrop is black, as the canvas's was.
+      if (cfg.fs) { canvas.width = screen.width; canvas.height = screen.height; document.body.requestFullscreen(); }
       ac.resume();
       const src = ac.createBufferSource();
       src.buffer = b; src.connect(ac.destination);

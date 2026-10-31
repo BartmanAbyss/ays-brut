@@ -63,7 +63,7 @@ JS = {
         ('    if (true) {\n      nShow = Math.max', '    if (false) {\n      nShow = Math.max'),
         cut('  const SCORE = [', '  // frame-count driven', ins=
             "  onclick = () => { onclick = null; canvas.width = screen.width; canvas.height = "
-            "screen.height; canvas.requestFullscreen(); requestAnimationFrame(frame); };\n"
+            "screen.height; document.body.requestFullscreen(); requestAnimationFrame(frame); };\n"
             "  document.body.append('click');\n")],
     '  audio: pad synth (the score is empty)': [
         cut('  const SCORE = [', '  // The whole soundtrack'),
