@@ -1259,13 +1259,15 @@ fn turbo(x: f32) -> vec3f {
 // out-of-focus party lights: what makes refraction through glass worth looking at
 var<private> gl: f32;   // 1 while tableShade looks up its glossy reflection, else 0
 fn bokeh(rd: vec3f) -> vec3f {
-  let g  = vec2f(atan2(rd.z, rd.x), rd.y) / 0.20;   // rd.y, not asin: ~5% off at 30 deg
+  // 32 cells round exactly (32 / 2pi), the hash index wrapped below: at 0.20 rad a cell it
+  // was 31.4, and a part cell at the wrap showed as a seam. rd.y, not asin: ~5% off at 30 deg.
+  let g  = vec2f(atan2(rd.z, rd.x), rd.y) * 5.093;
   let b  = floor(g);
   var acc = vec3f(0);
   for (var i = -1; i <= 1; i++) {
     for (var k = -1; k <= 1; k++) {
       let id = b + vec2f(f32(i), f32(k));
-      let cx = u32(id.x + 2048);
+      let cx = u32(id.x + 2048) % 32;
       let cy = u32(id.y + 2048);
       // Each cell lives through cycles of bkLife seconds, phase-shifted per cell, and every
       // cycle rolls it a new disc - or none - so discs fade out and come back elsewhere.
@@ -1373,7 +1375,9 @@ fn tableShade(p: vec3f, d: vec3f) -> vec3f {
   gl = 1;
   let e = env(reflect(d, vec3f(0, 1, 0)));
   gl = 0;
-  return (amb * u.envA + c) * fall * vec3f(0.97, 0.94, 0.90) + e * (0.04 + 0.96 * pow(1 + d.y, 5));
+  // gone by 1 m out: mirrored all the way, the far table met the backdrop at the horizon as
+  // a mirrored band - it read as an image clamped and repeated
+  return (amb * u.envA + c) * fall * vec3f(0.97, 0.94, 0.90) + e * (0.04 + 0.96 * pow(1 + d.y, 5)) * max(1 - r, 0);
 }
 fn tonemap(x: vec3f) -> vec3f {
   return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3f(0), vec3f(1));

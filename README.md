@@ -1197,7 +1197,7 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 042 bytes (31 Oct 2026), 850 OVER 8 192**, lettering in, score
+**`intro.cmd` is 9 044 bytes (31 Oct 2026), 852 OVER 8 192**, lettering in, score
 empty. The last steps, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
 Roadroller searches (-> 9 319); sloppy literals in the WGSL (-> 9 213): 520 places where
