@@ -646,6 +646,38 @@ in heavy spray. To make tier2 fit: cut ~3.5 ms there, avoid holding on it while 
 is at its densest, or take the `bounces` trade on that shot only (about 1.1 ms per bounce,
 visible on the rim glints).
 
+### Profiling a whole run
+
+The table above freezes one state. A whole run shows the show as it plays: every frame of
+the timeline, with the sim running and the spill as it really develops. On 31 Oct, RTX 4070,
+1920×1080, 60 Hz, the audio clock (`dev/profiles/1080p-2026-10-31.json`, 5 488 frames):
+
+| shot | GPU median | p95 | frames over 19 ms |
+|---|---|---|---|
+| 1 glass, 2 orbit, 3 pop, 5 tiers | 6–11 | 7–12 | 0 |
+| 4 pour | 10.6 | 18.3 | 12 of 888 (the end, full and overflowing) |
+| 6 tier 2 | **19.7** | 20.6 | **427 of 564** |
+| 7 tower | 13.0 | 13.6 | 0 |
+| 8 | **19.1** | **24.1** | **611 of 1061**, rising to ~25 ms at the end |
+| the 8x blacks | 16–20 | 18–27 | the sim pass: 8 steps a frame |
+
+Render is the bulk in every heavy stretch; the sim matters only in the blacks, and nobody
+sees those frames. Shots 6 and 8 are the ones over the target here; 8 holds the whole tower
+overflowing for 20 s, and its cost keeps climbing with the spray.
+
+To record one: `python dev/serve.py`, then `python dev/profiles/save.py <name> --gpu "..."`
+(it waits for the data), open
+`http://localhost:8787/champagne.html?gate=1&show=1&master=0&w=1920&h=1080`, paste
+`dev/profiles/record.js` into its console and keep the page on screen for the ~100 s the
+show runs. It clicks start, records a row per frame (show time, frame interval, the four
+passes' GPU ms, sim steps, live drops, the top glass's level), pauses the renderer at the
+end and sends the rows; `save.py` writes `<name>.json` and `<name>.csv`. Look at it in
+`http://localhost:8787/profiles/view.html`: the passes stacked over show time, shots
+marked, the frame interval, both budget lines, a hover readout and a per-shot table. The
+GPU times come from timestamp queries, one frame at a time - at 60 Hz a light frame leaves
+the GPU idle and it clocks down, so the light shots read a little high; the heavy ones are
+real.
+
 ### What each lever actually buys
 
 > Historical: measured before the profiler work, at fill 88, so the absolute numbers are
