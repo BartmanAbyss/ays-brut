@@ -345,7 +345,16 @@ letter's origin snaps to the grid before its own coordinates round, so every cop
 letter is the same string and brotli stores it once. Measured 31 Oct, intro.cmd:
 - MILLESIME added in the old per-word layout: 10 464 -> 10 480.
 - Groups with the positions baked into the paths, one cue per group: 10 470.
-- Half-turn arcs as one arc each (an O is two arcs, not four): **10 440**.
+- Half-turn arcs as one arc each (an O is two arcs, not four): 10 440.
+- The overlay's style is the canvas's own string (`position:fixed;inset:0;width:100%;
+  height:100%`), which brotli stores once: 10 408. `pointer-events:none` is harness-only
+  (its panels sit under the overlay). In the release a click on the overlay still bubbles
+  up to the window's start handler.
+- The fades lean on CSS clamping opacity to 0..1: a word's opacity is just
+  `min(t - from - k, to - t)`, and the picture's fade is the overlay's own opacity: 10 406.
+- No `stroke-miterlimit`: the default limit of 4 already mitres every corner these letters
+  have (the sharpest, M's top corners at 35 degrees, need 3.3): **10 398**. A new letter
+  with a corner under ~29 degrees would get a flat tip; then it comes back.
 - Re-checked: a glyph table laid out at runtime is still worse, 10 573 against 10 470.
   Brotli already stores each repeated letter once, so the table only adds layout code.
 

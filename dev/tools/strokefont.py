@@ -8,6 +8,10 @@ ends, mitred corners. The browser renders it as an SVG path: no font, no glyph c
                                       # the real outline, to compare) and the TEXT block
                                       # in dev/champagne.html
 
+The intro draws them with the browser's default miter limit (4), which mitres any corner
+wider than ~29 degrees; the sharpest here is M's at 35. A new letter with a sharper corner
+gets a flat tip, unless the overlay gets its stroke-miterlimit back.
+
 The glyphs are defined below in font units, y up, baseline 0, cap height 728 - the
 coordinates are read off the outlines in glyphs_ref.json (python dev/tools/glyphs.py).
 Josefin Sans is under the SIL OFL (dev/fonts/OFL.txt); these are our own strokes after

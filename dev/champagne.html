@@ -1994,7 +1994,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
                        Math.cos(tt * 0.29 * K + 2.1) * 0.62 + Math.sin(tt * 0.73 * K + 0.7) * 0.38];
     const W = ui.pourWander * 0.001;
     const w0 = wob(time), w1 = wob(time + 0.02);
-    textFade = fade;
+    canvas.nextSibling.style.opacity = fade;   // the words go dark with the picture
     const V = shotVals(showT);
     // in struct U order: what the release keeps first...
     f32.set([canvas.width, canvas.height, time, simU,
@@ -2633,14 +2633,17 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D}
   // [from, to, group] in show seconds
   const SHOW_TEXT = textCues(SHOTS);
-  let textFade = 1;               // the picture's fade: the words go dark with it
   // after the canvas, so the harness's panels stay on top of it. Every word starts unseen:
   // drawText only runs once frames do, after the click, and until then they all showed
-  canvas.insertAdjacentHTML('afterend', '<svg viewBox="-800 -450 1600 900" style="position:fixed;left:0;' +
-    'top:0;width:100%;height:100%;pointer-events:none" fill="none" stroke="#fff" stroke-width="9.7" ' +
-    'stroke-miterlimit="9">' + SHOW_TEXT.map(c => TEXT[c[2]].map(d => '<path opacity="0" d="' + d + '"/>').join(''))
+  // Its style is the canvas's own, letter for letter, which brotli then stores once. Clicks
+  // pass through it to the start handler on the window, so no pointer-events here.
+  canvas.insertAdjacentHTML('afterend', '<svg viewBox="-800 -450 1600 900" style="position:fixed;inset:0;' +
+    'width:100%;height:100%" fill="none" stroke="#fff" stroke-width="9.7">' + SHOW_TEXT.map(c => TEXT[c[2]].map(d => '<path opacity="0" d="' + d + '"/>').join(''))
     .join('') + '</svg>');
   const textEls = canvas.nextSibling.children;
+//#D{
+  canvas.nextSibling.style.pointerEvents = 'none';   // the harness's panels sit under it
+//#D}
   function drawText(t) {
 //#D{
     // the harness letterboxes a fixed w x h inside the window: lay the words over the
@@ -2650,7 +2653,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D}
     let j = 0;
     SHOW_TEXT.forEach(([a, b, g]) => TEXT[g].forEach((_, k) => {
-      let o = Math.max(0, Math.min(1, t - a - k, b - t)) * textFade;   // line k, k s later
+      // line k, k s later; CSS clamps opacity to 0..1, and the picture's fade is the
+      // overlay's own opacity (writeUniforms)
+      let o = Math.min(t - a - k, b - t);
 //#D{
       if (cfg.text > 0) o = 1;           // ?text=1: every word, held, for the layout
 //#D}
