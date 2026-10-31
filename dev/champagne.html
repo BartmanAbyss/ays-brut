@@ -151,8 +151,7 @@ struct U {
   strat    : f32,
   stratJit : f32,
   nSmooth  : f32,          // span normals are measured over, in grid cells (0 = fine)
-  puntSoft : f32,          // the radius the punt's dome blends into the flat base with, m
-  _w2      : f32,          // buffer is 240 bytes = 60 floats; 55 used
+  _w2      : f32,          // buffer is 240 bytes = 60 floats; 54 used
 //#D}
 };
 
@@ -991,7 +990,9 @@ fn sprayDist(p: vec3f) -> f32 {
 // the table is NOT marched — it is intersected analytically (grazing rays used to burn
 // the whole step budget skimming the plane)
 // ── magnum (1.5 L): 345 mm tall, 116 mm body, 30 mm neck ──
-// (no punt: the dome in the base was cut for 32 bytes - the base faces away while pouring)
+// Solid glass with a flat base. A punt (the dome pushed up into the base) went in for shot 2,
+// where the hollow bottle's base was in view; carved out of SOLID glass it showed as an air
+// bubble in the base, so it went out again with the hollow (31 Oct).
 const BOT_H   = 0.345;
 const BODY_R  = 0.060;                   // height/width 2.87, matching the reference
 const NECK_R  = 0.0150;
@@ -1034,16 +1035,6 @@ fn sdBottleLocal(p: vec3f) -> f32 {
   // lip ring below the mouth
   let lip = sdCyl(p, NECK_R + 0.0019, BOT_H - 0.013, BOT_H - 0.003) - 0.0011;
   d = min(d, lip);
-  // Punt: the dome pushed up into the base, 80 mm across and 20 mm high. Cut once for 32
-  // bytes, when the base only ever faced away; standing on the table (shot 2) it is in
-  // view, and a flat 3 mm floor behind the thick round wall stacked the wall's repeated
-  // reflections of the horizon into concentric rings. Divided by the radii, not scaled
-  // inside length() - that makes the ellipsoid taller, not flatter (the old one was 72 mm).
-  let punt = (length((p - vec3f(0, -0.002, 0)) / vec3f(0.040, 0.022, 0.040)) - 1) * 0.022;
-  // blended into the flat base over puntSoft rather than meeting it in a crease: the two
-  // meet near a right angle, so a smooth max rounds the corner without the bulge it gives
-  // surfaces that already run alongside each other
-  d = -smin(-d, punt, u.puntSoft);
   // Solid glass, not a hollow shell: a photon crosses two surfaces instead of four and
   // reaches the table within its 4 legs (hollow, the fifth leg was always one too many - a
   // black shadow), rays through it take two bounces fewer, and dark solid glass reads as a
@@ -2037,7 +2028,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkLife, ui.strat, ui.stratJit, ui.smooth, ui.puntSoft * 0.001], 24);
+             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkLife, ui.strat, ui.stratJit, ui.smooth], 24);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
@@ -2769,7 +2760,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['glugHz',   'range', 3.5,  0.5,  10,   0.1,  1],
     ['bottle',   'check', true],
     ['botStand', 'check', false],
-    ['puntSoft', 'range', 6,    0.5,  15,   0.5,  1],
     ['botTilt',  'range', 118,  0,    170,  1,    0],
     ['botAz',    'range', 205, -180,  180,  1,    0],
     ['pourWander','range', 35,  0,    60,   0.5,  1],
@@ -2865,7 +2855,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     botShare: 'The bottle\'s share of the 65536 particles; the rest are for the spill between the glasses. A drop holds its particle from the bottle until it lands (~17 steps), so the share caps the stream at about share x 65536 / 17 drops a step - 0.17 is ~650. Raise it with pourRate for a heavier pour, at the cost of the spill cascade. Per shot.',
     pourRate: 'Drops leaving the bottle per frame. Raise it for a dense continuous stream, lower it for separate falling drops.',
     wanderSpd: 'How quickly the bottle drifts around. Higher makes the pour restless and the stream whip about; lower is a slow lazy sway.',
-    puntSoft: 'Bottle: how softly the punt (the dome in the base) rises out of the flat bottom, in mm - the radius of the rounded edge between them. Small is a crisp crease, large a gentle swell.',
     botStand: 'The bottle stands upright on the table at the centre instead of pouring - where the top glass stands; raise the table over the glass\'s rim (tableY 0.511) to show the bottle alone. Per shot (shot 2).',
     bottle: 'Show the magnum. It is an analytic shape only - there is no fluid simulated inside it yet.',
     botTilt: 'Tilt from upright, in degrees. 0 is standing up; pouring needs to go past horizontal, so 110-130 is the useful range. The mouth stays at the pour point and the body swings around it.',

@@ -220,7 +220,7 @@ def release_uniforms(ui):
         'ltAz': f('lightAz') * rad,
         'prad': f('dropRad') * 0.001, 'foamG': f('foam'), 'glug': f('glug'), 'glugHz': f('glugHz'),
         'botAz': f('botAz') * rad,
-        'botOn': on('bottle'), 'puntSoft': f('puntSoft') * 0.001,
+        'botOn': on('bottle'),
         'bkLife': f('bkLife'),
         'strat': f('strat'), 'stratJit': f('stratJit'), 'nSmooth': f('smooth'),
     }
