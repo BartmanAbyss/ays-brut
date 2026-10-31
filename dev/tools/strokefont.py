@@ -25,8 +25,13 @@ REF = os.path.join(HERE, 'glyphs_ref.json')
 
 CAP = 728
 PEN = 116            # the stem width
-# the words, each laid out on its own (the harness places them): TEXT[0], TEXT[1], ...
-LINES = ['MAISON', 'ABYSSE', '2026', 'CHAMPAGNE', 'POUR', 'LES', 'MASSES']
+# The lettering as groups of lines, TEXT[0], TEXT[1], ...: each line centred, the group's
+# lines stacked LEAD apart round the middle of the screen. The position is baked into the
+# paths, so the intro places nothing; the harness says when each group shows (TEXT_CUES).
+GROUPS = [['MAISON', 'ABYSSE', 'MILLESIME', '2026'],
+          ['CHAMPAGNE', 'POUR', 'LES', 'MASSES']]
+LEAD = 110           # line spacing, in the overlay's 1600 x 900 units
+LINES = [t for g in GROUPS for t in g]
 # tracking: extra space between letters, in font units - wide-set capitals read as luxury
 TRACK = 150
 # output grid: font units per path unit. The overlay's viewBox is 1600 x 900, and a cap
@@ -116,8 +121,8 @@ def num(v):
     return str(int(v))
 
 
-def path_for(text, q=Q):
-    """One relative SVG path for a line, centred on x = 0 with the caps centred on y = 0.
+def path_for(text, q=Q, oy=0):
+    """One relative SVG path for a line, centred on x = 0 with the caps centred on y = oy.
     Coordinates are rounded as ABSOLUTE positions and then differenced, so rounding
     never drifts along a line."""
     width = sum(G[c][0] for c in text) + TRACK * (len(text) - 1)
@@ -128,7 +133,7 @@ def path_for(text, q=Q):
     # brotli then stores once. Rounding the sum instead made each copy differ by a unit
     # here and there, and the three lines cost ~700 bytes instead of ~350.
     ox = 0
-    T = lambda x, y: (ox + round(x / q), round(-(y - CAP / 2) / q))
+    T = lambda x, y: (ox + round(x / q), round(-(y - CAP / 2) / q) + oy)
     for c in text:
         adv, strokes = G[c]
         ox = round(x0 / q)
@@ -199,27 +204,33 @@ def compare_page(ref):
             '<p>the three lines as the intro draws them</p>' + lines)
 
 
-def with_block(src, paths):
+def group_paths():
+    return [[path_for(t, oy=round((k - (len(g) - 1) / 2) * LEAD)) for k, t in enumerate(g)]
+            for g in GROUPS]
+
+
+def with_block(src, groups):
     """src with the TEXT block replaced. Pure: the caller reads and writes - this once
     emptied the harness, because `open(SRC, 'w').write(f())` truncates the file BEFORE
     f() reads it, and f() then failed on the empty text."""
     a, b = src.index('// TEXT:BEGIN'), src.index('// TEXT:END')
     a = src.index('\n', a) + 1
     b = src.rindex('\n', 0, b) + 1
-    body = '  const TEXT = [\n' + ''.join("    '%s',\n" % p for p in paths) + '  ];\n'
+    body = ('  const TEXT = [\n' + ''.join('    [\n' + ''.join("      '%s',\n" % p for p in g) + '    ],\n'
+                                       for g in groups) + '  ];\n')
     return src[:a] + body + src[b:]
 
 
 if __name__ == '__main__':
     ref = json.load(io.open(REF, encoding='utf-8'))
     io.open(os.path.join(HERE, 'strokefont.html'), 'w', encoding='utf-8').write(compare_page(ref))
-    paths = [path_for(t) for t in LINES]
-    for t, p in zip(LINES, paths):
+    groups = group_paths()
+    for t, p in zip(LINES, [p for g in groups for p in g]):
         print('%-26s %4d chars' % (t, len(p)))
     with io.open(SRC, encoding='utf-8', newline='') as f:
         src = f.read()
     if '// TEXT:BEGIN' in src and '// TEXT:END' in src:
-        out = with_block(src, paths)
+        out = with_block(src, groups)
         assert len(out) > len(src) // 2, 'refusing to write: the result lost half the file'
         tmp = SRC + '.writing'
         with io.open(tmp, 'w', encoding='utf-8', newline='') as f:

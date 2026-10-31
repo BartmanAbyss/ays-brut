@@ -2593,34 +2593,35 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D}
   // ── lettering ──
   // Josefin Sans SemiBold's capitals redrawn as pen strokes (dev/tools/strokefont.py: the
-  // glyphs, the layout, a page comparing each with the real font). Each word is one SVG
-  // path, centred on its own origin, placed in a 1600 x 900 box over the picture and drawn
-  // with a pen as wide as the font's stem. No font ships - Josefin Sans is OFL (NFO).
+  // glyphs, the layout, a page comparing each with the real font). TEXT is groups of lines,
+  // each line one SVG path already in its place in a 1600 x 900 box over the picture (the
+  // tool stacks a group's lines round the middle), drawn with a pen as wide as the font's
+  // stem. No font ships - Josefin Sans is OFL (NFO).
   // TEXT:BEGIN - written by python dev/tools/strokefont.py; edit the glyphs there
   const TEXT = [
-    'm-195 30v-48l26 36l26-36v48m33 0l22-51l22 51m-36-18h28m41 18v-60m67 8q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m118-21a26 26 0 0 0-26-26a26 26 0 0 0-27 26a26 26 0 0 0 27 26a26 26 0 0 0 26-26zm34 30v-51l44 43v-52',
-    'm-185 30l22-51l22 51m-36-18h28m41 14v-52h14a13 13 0 0 1 13 13a13 13 0 0 1-13 13h3a13 13 0 0 1 13 13a13 13 0 0 1-13 13h-17zm0-26h17m43-30l21 36l22-36m-22 36v24m84-52q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m97-43q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m104-47h-36v52h37m-37-26h32',
-    'm-101 3a14 14 0 0 1 4-23a14 14 0 0 1 20 14q-2 15-25 32h31m60-23a18 23 0 0 0-18-23a18 23 0 0 0-18 23a18 23 0 0 0 18 23a18 23 0 0 0 18-23zm33 0a14 14 0 0 1 4-23a14 14 0 0 1 20 14q-2 15-25 32h31m54-13a15 14 0 0 0-15-14a15 14 0 0 0-15 14a15 14 0 0 0 15 14a15 14 0 0 0 15-14zm-30-3q3-19 23-32',
-    'm-278-21a26 26 0 0 0-42 21a26 26 0 0 0 42 21m33 9v-60m40 60v-60m-40 30h40m32 30l22-51l22 51m-36-18h28m41 18v-48l26 36l26-36v48m38 0v-56h15a15 15 0 0 1 15 16a15 15 0 0 1-15 15h-15m58 25l22-51l22 51m-36-18h28m79-33a26 26 0 0 0-42 21a26 26 0 0 0 43 21v-17h-17m53 26v-51l44 43v-52m75 4h-36v52h37m-37-26h32',
-    'm-126 30v-56h15a15 15 0 0 1 15 16a15 15 0 0 1-15 15h-15m113-5a26 26 0 0 0-26-26a26 26 0 0 0-27 26a26 26 0 0 0 27 26a26 26 0 0 0 26-26zm34-30v38a19 18 0 0 0 19 18a19 18 0 0 0 19-17v-39m37 60v-56h15a15 15 0 0 1 15 16a15 15 0 0 1-15 15h-15m19 0l15 25',
-    'm-77-30v56h35m66-52h-36v52h37m-37-26h32m64-22q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6',
-    'm-187 30v-48l26 36l26-36v48m33 0l22-51l22 51m-36-18h28m70-34q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m97-43q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m104-47h-36v52h37m-37-26h32m64-22q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6',
+    [
+      'm-195-135v-48l26 36l26-36v48m33 0l22-51l22 51m-36-18h28m41 18v-60m67 8q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m118-21a26 26 0 0 0-26-26a26 26 0 0 0-27 26a26 26 0 0 0 27 26a26 26 0 0 0 26-26zm34 30v-51l44 43v-52',
+      'm-185-25l22-51l22 51m-36-18h28m41 14v-52h14a13 13 0 0 1 13 13a13 13 0 0 1-13 13h3a13 13 0 0 1 13 13a13 13 0 0 1-13 13h-17zm0-26h17m43-30l21 36l22-36m-22 36v24m84-52q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m97-43q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m104-47h-36v52h37m-37-26h32',
+      'm-273 85v-48l26 36l26-36v48m38 0v-60m39 0v56h35m30-56v56h35m66-52h-36v52h37m-37-26h32m65-22q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m68 9v-60m39 60v-48l26 36l26-36v48m74-56h-36v52h37m-37-26h32',
+      'm-101 168a14 14 0 0 1 4-23a14 14 0 0 1 20 14q-2 15-25 32h31m60-23a18 23 0 0 0-18-23a18 23 0 0 0-18 23a18 23 0 0 0 18 23a18 23 0 0 0 18-23zm33 0a14 14 0 0 1 4-23a14 14 0 0 1 20 14q-2 15-25 32h31m54-13a15 14 0 0 0-15-14a15 14 0 0 0-15 14a15 14 0 0 0 15 14a15 14 0 0 0 15-14zm-30-3q3-19 23-32',
+    ],
+    [
+      'm-278-186a26 26 0 0 0-42 21a26 26 0 0 0 42 21m33 9v-60m40 60v-60m-40 30h40m32 30l22-51l22 51m-36-18h28m41 18v-48l26 36l26-36v48m38 0v-56h15a15 15 0 0 1 15 16a15 15 0 0 1-15 15h-15m58 25l22-51l22 51m-36-18h28m79-33a26 26 0 0 0-42 21a26 26 0 0 0 43 21v-17h-17m53 26v-51l44 43v-52m75 4h-36v52h37m-37-26h32',
+      'm-126-25v-56h15a15 15 0 0 1 15 16a15 15 0 0 1-15 15h-15m113-5a26 26 0 0 0-26-26a26 26 0 0 0-27 26a26 26 0 0 0 27 26a26 26 0 0 0 26-26zm34-30v38a19 18 0 0 0 19 18a19 18 0 0 0 19-17v-39m37 60v-56h15a15 15 0 0 1 15 16a15 15 0 0 1-15 15h-15m19 0l15 25',
+      'm-77 25v56h35m66-52h-36v52h37m-37-26h32m64-22q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6',
+      'm-187 195v-48l26 36l26-36v48m33 0l22-51l22 51m-36-18h28m70-34q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m97-43q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6m104-47h-36v52h37m-37-26h32m64-22q-7-4-17-4q-13 0-13 12q0 8 13 14q14 6 14 14q0 13-15 13q-11 0-18-6',
+    ],
   ];
   // TEXT:END
 //#D{
-  // Where and when each word shows: [shot, from, to, word, x, y]. Seconds from the shot's
-  // start, so a word stays with its shot when shots are stretched or moved (`to` past the
-  // shot's end means to its end); x, y in the 1600 x 900 box, 0 0 the centre. A word
-  // fades in and out over 1 s, and with the picture's own fades. The release gets them as
-  // show times: the build resolves textCues() as it does flattenShots().
+  // When each group of lines shows: [shot, from, to, group]. Seconds from the shot's
+  // start, so the words stay with their shot when shots are stretched or moved (`to` past
+  // the shot's end means to its end). Its first line shows at `from`, each next one a
+  // second later; each fades in and out over 1 s, and with the picture's own fades. The
+  // release gets them as show times: the build resolves textCues() as it does flattenShots().
   const TEXT_CUES = [
-    ['2 orbit', 1, 99, 0, -400, 0],      // MAISON, left of the bottle
-    ['2 orbit', 1, 99, 1, 400, 0],       // ABYSSE, right of it
-    ['2 orbit', 1, 99, 2, 0, -110],      // 2026, centred above
-    ['8', 10, 99, 3, 0, -165],           // CHAMPAGNE
-    ['8', 11, 99, 4, 0, -55],            // POUR
-    ['8', 12, 99, 5, 0, 55],             // LES
-    ['8', 13, 99, 6, 0, 165],            // MASSES
+    ['2 orbit', 1, 99, 0],               // MAISON / ABYSSE / MILLESIME / 2026
+    ['8', 10, 99, 1],                    // CHAMPAGNE / POUR / LES / MASSES
   ];
   function textCues(shots) {
     const st = ED.starts(shots), names = shots.map(s => s.name);
@@ -2630,15 +2631,15 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     });
   }
 //#D}
-  // [from, to, word, x, y] in show seconds
+  // [from, to, group] in show seconds
   const SHOW_TEXT = textCues(SHOTS);
   let textFade = 1;               // the picture's fade: the words go dark with it
   // after the canvas, so the harness's panels stay on top of it. Every word starts unseen:
   // drawText only runs once frames do, after the click, and until then they all showed
   canvas.insertAdjacentHTML('afterend', '<svg viewBox="-800 -450 1600 900" style="position:fixed;left:0;' +
     'top:0;width:100%;height:100%;pointer-events:none" fill="none" stroke="#fff" stroke-width="9.7" ' +
-    'stroke-miterlimit="9">' + SHOW_TEXT.map(c => '<path opacity="0" transform="translate(' + c[3] + ' ' + c[4] +
-    ')" d="' + TEXT[c[2]] + '"/>').join('') + '</svg>');
+    'stroke-miterlimit="9">' + SHOW_TEXT.map(c => TEXT[c[2]].map(d => '<path opacity="0" d="' + d + '"/>').join(''))
+    .join('') + '</svg>');
   const textEls = canvas.nextSibling.children;
   function drawText(t) {
 //#D{
@@ -2647,13 +2648,14 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const r = canvas.getBoundingClientRect(), sv = canvas.nextSibling.style;
     sv.left = r.left + 'px'; sv.top = r.top + 'px'; sv.width = r.width + 'px'; sv.height = r.height + 'px';
 //#D}
-    SHOW_TEXT.forEach(([a, b], k) => {
-      let o = Math.max(0, Math.min(1, t - a, b - t)) * textFade;
+    let j = 0;
+    SHOW_TEXT.forEach(([a, b, g]) => TEXT[g].forEach((_, k) => {
+      let o = Math.max(0, Math.min(1, t - a - k, b - t)) * textFade;   // line k, k s later
 //#D{
       if (cfg.text > 0) o = 1;           // ?text=1: every word, held, for the layout
 //#D}
-      textEls[k].style.opacity = o;
-    });
+      textEls[j++].style.opacity = o;
+    }));
   }
   function evalShow(t) {
     t = Math.max(0, Math.min(t, SHOW_END));
