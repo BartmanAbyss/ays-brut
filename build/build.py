@@ -122,6 +122,14 @@ REWRITES = [
     # `let`s it sees reset every frame: as constants it folds them away. -44 bytes.
     ('  let redrawOnly = false;', '  const redrawOnly = false;'),
     ('    const ffNow = ffSteps; ffSteps = 0;', '    const ffNow = 0;'),
+    ('    clockT += ffNow * SIM_DT;\n', ''),               # terser left `clockT += 0`
+    # wall time only feeds the harness's ungated clock and its HUD: the release runs on the
+    # audio clock, and terser keeps a performance.now() call even when nothing reads it
+    ('    const now = performance.now();\n', ''),
+    ('  const t0 = performance.now();\n  let last = t0,', '  let last = 0,'),
+    # simSpeed is a dev URL parameter (A/B freezes): 1 in the release, and terser keeps `* 1`
+    ('      clockT += SIM_DT * sp * ui.simSpeed;', '      clockT += SIM_DT * sp;'),
+    ('(ui.show ? showAt(showT)(5) : ui.speed) * ui.simSpeed);', '(ui.show ? showAt(showT)(5) : ui.speed));'),
     ('    const burst = burstSteps; burstSteps = 0;', '    const burst = 0;'),
     ('    const dt = now - last; last = now;\n', ''),
     ('    acc += dt; accN++;\n', ''),
