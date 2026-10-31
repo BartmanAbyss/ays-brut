@@ -1728,7 +1728,7 @@ function fail(where, e) {
 const probe = {
   ok: false, adapter: null, features: [], errors,
   frameMs: 0, fps: 0, gpuMs: {}, frames: 0, time: 0, live: 0, selftest: null, edtest: null,
-  drift: 0, resyncs: 0, step: 0, showT: 0, shot: 0, frameSteps: 1, streakMM: 0,
+  drift: 0, step: 0, showT: 0, shot: 0, frameSteps: 1, streakMM: 0,
 };
 window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D}
@@ -1936,7 +1936,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   if (!cfg.fs) { resize(); addEventListener('resize', resize); }
 
   const SIM_DT = 1 / 60;
-  const LAG_STEPS = 30;        // 0.5 s behind the clock before we give up the missed steps
   let clockT = 0;              // master clock, seconds; the sim step index derives from it
   let showStep = 0;            // show time in whole SIM_DT steps - the clock the music owns
   let showPend = 0, showT = 0, burstSteps = 0;
@@ -2111,50 +2110,44 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       }
 //#D}
     }
-    for (let i = 0; i < nShow; i++) {
-      const sp = ui.show ? showAt((showStep + i) * SIM_DT)(5) : ui.speed;
-      clockT += SIM_DT * sp * ui.simSpeed;
-    }
     showStep += nShow; showT = showStep * SIM_DT;
 //#D{
     if (ed) ed.onShow();         // loop wrap, the shot's own slider values, the playhead
     else if (ui.show) showOv();  // the plain show applies a shot's own values too
 //#D}
     if (ui.show && nShow) { setUI('showT', Math.min(showT, SHOW_END).toFixed(2)); }
-    // Fast-forward is a deliberate burst, not a hitch: it has to actually simulate its
-    // steps or the glasses never fill, so it raises the ceiling for this frame only. The
-    // substep slots wrap every 16, so a burst reuses RNG streams - fine when skipping
-    // ahead, not fine as a steady state.
-    const ffNow = ffSteps; ffSteps = 0;
-    clockT += ffNow * SIM_DT;
 
-    // 16 is the steady-state ceiling: the sub-step index wraps at 16 (it reaches the shader
-    // as the dispatch's grid height), and reusing one would make two substeps share an RNG
-    // stream - the bug that used to thin the pour whenever a frame ran long.
-    const burst = burstSteps; burstSteps = 0;
-    // Slow motion: below speed 1 each step covers LESS sim time, one step per show step,
-    // so the liquid moves every frame. Skipping steps instead (whole 1/60 s steps, run
-    // less often) showed the same frame several times over - at 0.25, motion at 15 fps.
-    // At speed 1 and above steps are 1/60 s as before, more of them when faster; seeks and
-    // fast-forward always take full steps.
-    let big = ffNow + burst > 0;
+    // ── sim steps ──
+    // The sim follows the show clock frame by frame, at the timeline's speed sp at showT.
+    // Slow motion: below 1 each show step is ONE step covering sp of a 1/60 s step, so the
+    // liquid moves every frame (skipping whole steps instead showed each frame several
+    // times: at 0.25, motion at 15 fps). Above 1 a show step is sp full steps.
+    // Since 31 Oct this is the whole algorithm, 30 bytes smaller than the clock it replaced:
+    // - the speed is read once per frame, not integrated per show step: exact at 60 fps, off
+    //   only on a frame that straddles a speed change;
+    // - steps a slow frame cannot afford are DROPPED, not owed. The picture stays with the
+    //   music; the fluid just gets less done (a sub-60 fps machine fills the tower less in
+    //   the 8x blacks). The old clock kept the deficit and worked it off.
+    // The 16 cap stays: the sub-step slot wraps at 16 (it reaches the shader as the
+    // dispatch's grid height), and two steps sharing a slot share an RNG stream - the bug
+    // that thinned the pour whenever a frame ran long. Uncapped, a long hitch would also ask
+    // the next frame for hundreds of steps, and the frames after it for more.
+    let big = false;
 //#D{
-    if (seekTo >= 0) big = true;   // a replay takes full steps, as many as it needs
+    // Fast-forward and step bursts are deliberate, not hitches: they take full steps, past
+    // the cap, or the glasses never fill. So does a seek's replay.
+    const ffNow = ffSteps, burst = burstSteps; ffSteps = burstSteps = 0;
+    big = ffNow + burst > 0 || seekTo >= 0;
+    clockT += ffNow * SIM_DT;
 //#D}
-    const hu = big ? 1 : Math.min(1, (ui.show ? showAt(showT)(5) : ui.speed) * ui.simSpeed);
+    const sp = (ui.show ? showAt(showT)(5) : ui.speed) * ui.simSpeed;
+    const hu = big ? 1 : Math.min(1, sp);
+    clockT += nShow * SIM_DT * sp;
     stepDt = hu * SIM_DT;
-    const want = hu > 0 ? Math.floor((clockT / SIM_DT - simU) / hu + 1e-6) : 0;
-    let simSteps = redrawOnly ? 0 : Math.max(0, Math.min(16 + ffNow + burst, want));
+    let simSteps = redrawOnly || !hu ? 0 : Math.min(16, Math.round(nShow * sp / hu));
 //#D{
-    if (seekTo >= 0 && !redrawOnly) simSteps = Math.max(0, want);
+    if (!redrawOnly) simSteps = seekTo >= 0 ? Math.round(nShow * sp) : simSteps + ffNow + burst;
 //#D}
-    if (!redrawOnly && (want - simSteps) * hu > LAG_STEPS) {
-      // Persistently too slow to hold the clock. In a demo sync beats continuity: drop
-      // the steps we cannot afford so the picture stays with the music, and count it so
-      // the cost is visible rather than silent.
-      simU = clockT / SIM_DT - simSteps * hu;
-      probe.resyncs++;
-    }
 
     // The narrow band is rebuilt ONCE per frame, but a particle moved `simSteps` steps to
     // get where it is. A streak sized to one step therefore leaves a gap whenever the
@@ -2278,7 +2271,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         '  shot ' + probe.shot + String.fromCharCode(10) : '') +
       'step  ' + probe.step + '  x' + probe.frameSteps +
         '   drift ' + (probe.drift * 1000).toFixed(1) + ' ms' +
-        (probe.resyncs ? '   resync ' + probe.resyncs : '') + String.fromCharCode(10) +
+        String.fromCharCode(10) +
       (probe.adapter?.vendor ?? '?') + ' / ' + (probe.adapter?.architecture ?? '?') +
       (errors.length ? '\nERRORS ' + errors.length : '');
   }

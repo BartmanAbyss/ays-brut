@@ -262,10 +262,17 @@ sized per step has to scale: waves, decay rates, emission cadence, the motion st
 **One sim step per rendered frame makes the sim run at the refresh rate.** It reads as
 correct because the step size is fixed, but the step *rate* is then the frame rate:
 measured 1.160× at 66 fps and 0.624× at 39. Against music that error accumulates for the
-whole run. The step index must come from a clock, and a deficit must be KEPT and worked off
-rather than discarded — discarding it is exactly how the drift gets in. Corollary: a
-deliberate burst (the ff button, 1200 steps) has to be allowed past the steady-state
-catch-up cap, or it silently skips instead of simulating and the glasses never fill.
+whole run. The step index must come from a clock. Corollary: a deliberate burst (the ff
+button, 1200 steps) has to be allowed past the steady-state catch-up cap, or it silently
+skips instead of simulating and the glasses never fill.
+Since 31 Oct the steps come straight from the audio clock's show steps, each frame: as many
+show steps as the music played, times the timeline's speed read once per frame, capped at 16
+- no deficit kept, no resync (-31 bytes against the banked clock). Nothing drifts against
+the music, because the show clock IS the music; what a slow frame cannot afford is simply
+dropped. With the cap at 16 that only happens in the 8x blacks below ~30 fps (or below
+~4 fps elsewhere), where the tower then fills less. Keep the cap: the sub-step slot wraps at
+16 (shared slot, shared RNG stream), and uncapped, a hitch asks the next frame for hundreds
+of steps and the intro never recovers.
 
 **A debug toggle must isolate exactly one thing.** `parts=0` also disabled the puddle, which
 sent a bisection at the wrong subsystem for several rounds. When a toggle's result is
@@ -544,7 +551,7 @@ chain - brotli alone ranked `unsafe` second, Roadroller ranked it last.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 218 bytes. `intro.cmd` is **9 080** (31 Oct 2026), 888
+  stale. Our dropper header is 218 bytes. `intro.cmd` is **9 022** (31 Oct 2026), 830
   OVER, with the start screen, the sound engine and the lettering in but the score empty;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
