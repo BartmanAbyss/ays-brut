@@ -314,34 +314,40 @@ to be on screen.
 
 ### Lettering
 
-MAISON ABYSSE and 2026 over the standing bottle in shot 2; CHAMPAGNE / POUR / LES / MASSES
-stacked over the tower in shot 8, a line a second from 10 s in. Josefin Sans SemiBold
+MAISON / ABYSSE / MILLESIME / 2026 stacked over the standing bottle in shot 2, a line a
+second from 1 s in; CHAMPAGNE / POUR / LES / MASSES the same over the tower in shot 8,
+from 10 s in. Josefin Sans SemiBold
 capitals, which no PC at the party will have installed and which cannot ship inside 8 KB.
 Josefin is geometric and monoline, so each capital is redrawn as a pen path: a few lines,
 ellipse arcs and curves, drawn with a pen as wide as the font's stem (116 of 1000 units),
 butt ends, mitred corners, and set wide (150 units between letters) for a luxury feel.
-Each word is one SVG path over the picture, placed in a 1600 x 900 box (0 0 the centre;
-caps ~7% of the screen's height); the browser draws it, so there is no font and no glyph
-code.
+Each line is one SVG path over the picture, already in its place in a 1600 x 900 box (0 0
+the centre; caps ~7% of the screen's height): `TEXT` is groups of lines, and the tool
+stacks each group's lines 110 apart round the middle. The browser draws them, so there is
+no font, no glyph code and no layout code.
 
-`TEXT_CUES` places and times the words: `[shot, from, to, word, x, y]`, seconds from the
-shot's start, so a word stays with its shot when shots are stretched or moved (`to` past
-the shot's end means to its end). A word fades in and out over 1 s, and with the picture's
-own fades. The build resolves the cues to show times for the release, as it flattens the
-shots; the editor re-resolves them whenever the shots change. `?text=1` holds every word.
+`TEXT_CUES` times the groups: `[shot, from, to, group]`, seconds from the shot's start, so
+the words stay with their shot when shots are stretched or moved (`to` past the shot's end
+means to its end). The group's first line shows at `from`, each next one a second later;
+each fades in and out over 1 s, and with the picture's own fades. The build resolves the
+cues to show times for the release, as it flattens the shots; the editor re-resolves them
+whenever the shots change. `?text=1` holds every word.
 
 `python dev/tools/strokefont.py` holds the glyphs (in the font's units, read off its
-outlines), lays the words out, writes them into the harness's `TEXT` block, and writes
+outlines), the groups and their layout, writes them into the harness's `TEXT` block, and writes
 `dev/tools/strokefont.html`, every glyph over the real outline to compare.
 `python dev/tools/glyphs.py` cuts the 600 weight out of the variable font in `dev/fonts`
 (from Google Fonts' repository, with its OFL) and dumps the reference outlines. A new
 letter needs its strokes added there.
 
-Cost: ~725 bytes (intro.cmd 10 413) - ~450 for the paths, the rest the overlay, its
-fades and the cues. Baked
-lines beat a glyph table laid out at runtime (~620 for the table alone), and a coarser grid
-saves ~20. Each letter's origin snaps to the grid before its own coordinates round, so
-every copy of a letter is the same string and brotli stores it once.
+Cost: ~730 bytes (measured 30 Oct, before the changes below), ~450 of it the paths. Each
+letter's origin snaps to the grid before its own coordinates round, so every copy of a
+letter is the same string and brotli stores it once. Measured 31 Oct, intro.cmd:
+- MILLESIME added in the old per-word layout: 10 464 -> 10 480.
+- Groups with the positions baked into the paths, one cue per group: 10 470.
+- Half-turn arcs as one arc each (an O is two arcs, not four): **10 440**.
+- Re-checked: a glyph table laid out at runtime is still worse, 10 573 against 10 470.
+  Brotli already stores each repeated letter once, so the table only adds layout code.
 
 ### Sound
 

@@ -95,7 +95,11 @@ def stroke_segments(st):
             continue
         if isinstance(n, tuple) and n and n[0] == 'arc':
             _, cx, cy, rx, ry, a0, a1 = n
-            parts = max(1, int(math.ceil(abs(a1 - a0) / 179.0)))
+            # Half-turns are one arc: a 180-degree arc between opposite points is still one
+            # well-defined curve (the sweep flag picks the side), and an O drawn as two arcs
+            # instead of four is ~30 characters shorter. Only past 180 must it split, since
+            # every arc here is written with the large-arc flag 0.
+            parts = max(1, int(math.ceil(abs(a1 - a0) / 180.0 - 1e-9)))
             for k in range(parts):
                 b0 = a0 + (a1 - a0) * k / parts
                 b1 = a0 + (a1 - a0) * (k + 1) / parts
