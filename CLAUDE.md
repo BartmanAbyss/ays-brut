@@ -494,6 +494,12 @@ into `array<vec4f,6>` and `u.time` into `u[0].z`, offsets unchanged - the JS fil
 buffer positionally. -32 fair. A uniform field must be f32 or vecNf and must not straddle
 a 16-byte slot, or the build stops; the harness keeps its names.
 
+**Names that survive into the release cost - the JS ones too.** Terser renames variables,
+never object keys. `evalShow` returned `{angle, dist, camY, ...}`; the release code now
+calls `showAt(t)` and reads columns, `sh(1)` for the angle: -72 shipped. The named
+`evalShow` stays for the editor and tests, dev-only, built on `showAt`. Before adding an
+object with named fields to release code, ask whether an index would do.
+
 **The build runs Roadroller - Blueberry's fork - on the page's script, brotli on top.**
 Context mixing beats brotli alone: on 31 Oct, 10 306 -> 9 944 with stock 2.1.0 and
 **-> 9 514 with askeksa/roadroller branch `intro-size`** (float predictions, a shared
@@ -538,7 +544,7 @@ chain - brotli alone ranked `unsafe` second, Roadroller ranked it last.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 218 bytes. `intro.cmd` is **9 213** (31 Oct 2026), 1 021
+  stale. Our dropper header is 218 bytes. `intro.cmd` is **9 141** (31 Oct 2026), 949
   OVER, with the start screen, the sound engine and the lettering in but the score empty;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The

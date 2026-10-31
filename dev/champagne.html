@@ -1967,24 +1967,24 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     let ang, dist = ui.dist, camY = ui.camY, tgtY = ui.tgtY,
         fade = 1, el = ui.lightEl, pour = 1, tilt = ui.botTilt, ty = ui.tableY, en = ui.envAmt;
     if (ui.show) {
-      const sh = evalShow(showT);
+      let sh = showAt(showT);   // columns: see showAt
 //#D{
-      if (previewT >= 0) Object.assign(sh, evalShow(previewT));   // scrubbing: the camera leads
+      if (previewT >= 0) sh = showAt(previewT);   // scrubbing: the camera leads
 //#D}
-      ang = sh.angle / 57.3; dist = sh.dist; camY = sh.camY; tgtY = sh.tgtY;   // deg -> rad, 0.007% off: -6 bytes
-      fade = sh.fade; el = sh.el; pour = sh.pour; tilt = sh.tilt; ty = sh.tableY; en = sh.env;
+      ang = sh(1) / 57.3; dist = sh(2); camY = sh(3); tgtY = sh(4);   // deg -> rad, 0.007% off: -6 bytes
+      fade = sh(7); el = sh(8); pour = sh(9); tilt = sh(10); ty = sh(11); en = sh(12);
 //#D{
       // a shot's own fade length (harness-only for now) replaces its keyed fade
       { const f = ED.fadeAt(ed ? ed.st.shots : SHOTS, previewT >= 0 ? previewT : showT); if (f !== null) fade = f; }
       probe.fade = fade;
       setUI('lightEl', el.toFixed(1)); setUI('botTilt', tilt.toFixed(0)); setUI('tableY', ty.toFixed(3)); setUI('envAmt', en.toFixed(2));
-      setUI('speed', sh.speed.toFixed(2));
+      setUI('speed', sh(5).toFixed(2));
 //#D}
       // Sliders follow for readout only. Driving the camera THROUGH them would quantise it
       // to the slider step - dist steps by 0.01, visible stepping on a push-in that only
       // covers 0.01 in eight seconds.
-      setUI('angle', sh.angle.toFixed(1)); setUI('dist', sh.dist.toFixed(2));
-      setUI('camY', sh.camY.toFixed(3));   setUI('tgtY', sh.tgtY.toFixed(3));
+      setUI('angle', sh(1).toFixed(1)); setUI('dist', sh(2).toFixed(2));
+      setUI('camY', sh(3).toFixed(3));   setUI('tgtY', sh(4).toFixed(3));
     }
     else if (ui.spin) { ang = time * 0.25; setUI('angle', (ang * 180 / Math.PI) % 360); }
     else              { ang = ui.angle * Math.PI / 180; }
@@ -2113,7 +2113,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D}
     }
     for (let i = 0; i < nShow; i++) {
-      const sp = ui.show ? evalShow((showStep + i) * SIM_DT).speed : ui.speed;
+      const sp = ui.show ? showAt((showStep + i) * SIM_DT)(5) : ui.speed;
       clockT += SIM_DT * sp * ui.simSpeed;
     }
     showStep += nShow; showT = showStep * SIM_DT;
@@ -2142,7 +2142,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D{
     if (seekTo >= 0) big = true;   // a replay takes full steps, as many as it needs
 //#D}
-    const hu = big ? 1 : Math.min(1, (ui.show ? evalShow(showT).speed : ui.speed) * ui.simSpeed);
+    const hu = big ? 1 : Math.min(1, (ui.show ? showAt(showT)(5) : ui.speed) * ui.simSpeed);
     stepDt = hu * SIM_DT;
     const want = hu > 0 ? Math.floor((clockT / SIM_DT - simU) / hu + 1e-6) : 0;
     let simSteps = redrawOnly ? 0 : Math.max(0, Math.min(16 + ffNow + burst, want));
@@ -2662,7 +2662,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       textEls[j].style.opacity = o;
     });
   }
-  function evalShow(t) {
+  // The show at time t, as a function of SHOW's column: sh(1) angle, 2 dist, 3 camY,
+  // 4 tgtY, 5 speed, 7 fade, 8 el, 9 pour, 10 tilt, 11 tableY, 12 env (6 is the smooth
+  // flag). A function rather than an object, so the release carries no field names.
+  function showAt(t) {
     t = Math.max(0, Math.min(t, SHOW_END));
     let i = 0;
     while (i < SHOW.length - 1 && SHOW[i + 1][0] <= t) { i++; }
@@ -2670,11 +2673,17 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     const span = b[0] - a[0];
     let u = span > 1e-6 ? (t - a[0]) / span : 0;
     if (a[6]) { u = u * u * u * (u * (u * 6 - 15) + 10); }   // smootherstep, as for shapes
-    const m = k => a[k] + (b[k] - a[k]) * u;
+    return k => a[k] + (b[k] - a[k]) * u;
+  }
+  //#D{
+  // the same with names, for the editor and the tests
+  function evalShow(t) {
+    const m = showAt(t), c = Math.max(0, Math.min(t, SHOW_END));
+    let i = 0;
+    while (i < SHOW.length - 1 && SHOW[i + 1][0] <= c) { i++; }
     return { shot: i, angle: m(1), dist: m(2), camY: m(3), tgtY: m(4), speed: m(5),
              fade: m(7), el: m(8), pour: m(9), tilt: m(10), tableY: m(11), env: m(12) };
   }
-  //#D{
   // Sim seconds elapsed by show time t. A seek needs the same integral the frame loop
   // builds step by step, or scrubbing would land somewhere playback never visits.
   function showIntegral(t) {
@@ -4069,7 +4078,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // glass is already overflowing at t = 0 (the show starts from a warmed-up state), and
     // the second tier reaches its spill level between 19 and 26 s, which doubles the spray.
     // Loudness follows the camera too: 1 at the macro shot's distance, quieter when wide.
-    const near = t => Math.min(1, 0.2 / evalShow(t).dist);
+    const near = t => Math.min(1, 0.2 / showAt(t)(2));
     // The drip and splash moments: a Poisson process whose rate follows the spill - each
     // [time, drip or splash, loudness from the camera, pan]. (A stream hiss and drips and
     // splashes of their own - sines chirping upward, high-passed noise - came first; the

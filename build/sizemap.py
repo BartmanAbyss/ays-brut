@@ -82,7 +82,7 @@ JS = {
                           '    // The cork, before any picture')],
     'lettering (stroke font, SVG, fades)': [
         ('PAGE', ''),
-        cut('  // [from, to] for each line', '  function evalShow(t) {'),
+        cut('  // [from, to] for each line', '  // The show at time t, as a function'),
         ('    drawText(showT);\n', ''),
         ('    canvas.nextSibling.style.opacity = fade;   // the words go dark with the picture\n', '')],
     'timeline keys (SHOW rows)': [
@@ -111,7 +111,7 @@ JS_REGIONS = [
     ('timeline keys (SHOW rows)', '  const SHOW = [['),
     ('shot table (SHOT_V)', '  const SHOT_V = ['),
     ('lettering', '  // [from, to] for each line'),
-    ('timeline evaluation (evalShow)', '  function evalShow(t) {'),
+    ('timeline evaluation (showAt)', '  // The show at time t, as a function'),
     ('audio: context, buses', '  const SCORE = ['),
     ('audio: pad synth', '    const r3 = rng(5);'),
     ('audio: drip/splash timing', '    const lb = bus = gain(1, out);'),
