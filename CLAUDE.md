@@ -343,6 +343,13 @@ the canvas fullscreen, which in Chrome hides everything outside it - the letteri
 overlay included - and every check in the pane passed. Text, overlays and anything else
 the release puts outside the canvas need a look in the user's Chrome.
 
+**Firefox draws an unpainted WebGPU canvas black; Chrome leaves it clear.** With the
+full-screen canvas there from the start, Firefox's start screen was black: "click" (page
+text under the canvas) gone, the white words (in the overlay above it) showing. The
+release's canvas is now `hidden` until the click, as INCENDIUM's is small and inline until
+its click: the start screen is then the browser's own page, in its own colours. Check the
+start screen in Firefox too.
+
 **A canvas is not a void element.** The page is `<canvas ...>` and then the script, with no
 end tag - fine for a script, but markup put after it (the lettering's overlay) became the
 canvas's fallback content: parsed, never drawn, and `canvas.nextSibling` null. `assemble`

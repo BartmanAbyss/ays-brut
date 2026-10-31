@@ -4344,6 +4344,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       // canvas: fullscreen shows only that element and what is inside it, and with the canvas
       // the lettering's overlay beside it vanished - in Chrome, not in the browser pane,
       // which never goes fullscreen. The body's backdrop is black, as the canvas's was.
+      // The release's canvas is `hidden` until now (build/pack.py assemble): Firefox draws an
+      // unpainted WebGPU canvas black, and the full-screen canvas covered "click". Hidden, the
+      // start screen is the browser's own page in its own colours - INCENDIUM's idea.
+      canvas.hidden = 0;
       if (cfg.fs) { canvas.width = screen.width; canvas.height = screen.height; document.body.requestFullscreen(); }
       ac.resume();
       const src = ac.createBufferSource();

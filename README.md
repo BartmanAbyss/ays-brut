@@ -366,8 +366,15 @@ letter is the same string and brotli stores it once. Measured 31 Oct, intro.cmd:
 - The overlay is in the release's PAGE, after the canvas, written by the build
   (`timeline.text_overlay`); the JS keeps one [from, to] per line: 10 313. The canvas needs
   its end tag there, or the overlay is the canvas's fallback content and never drawn.
-- `t` for curves whose control point is the previous one mirrored exactly: **10 299**.
+- `t` for curves whose control point is the previous one mirrored exactly: 10 299.
   Allowing it within a grid step saved 7 more, but the S looked worse.
+- Dropping `opacity=0` (10 292) relied on a white page behind the words. Firefox draws an
+  unpainted WebGPU canvas black, so its start screen showed the words and hid "click".
+  Now the canvas is `hidden` until the click and the words keep `opacity=0`: **10 306**.
+  Other browser intros do the same in other ways: INCENDIUM opens on plain "Click" text
+  above a small inline canvas that only turns full-screen in the click handler; elusive
+  (bypass, Deadline 2023) puts a native `<button>CLICK` on the page with the canvas
+  zero-wide inside it until fullscreen.
 - Re-checked: a glyph table laid out at runtime is still worse, 10 573 against 10 470.
   Brotli already stores each repeated letter once, so the table only adds layout code.
 

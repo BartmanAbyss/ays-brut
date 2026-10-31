@@ -376,9 +376,8 @@ def text_cues(js, shots):
 
 def text_overlay(js, shots):
     """The overlay as the release's page has it, after the canvas: the cued lines' paths in
-    the order text_cues() times them. No opacity=0 on them (-7 bytes): before the click
-    they are white on the page's white, and the first frame - which the browser runs before
-    its first paint after the click - sets every one. (The harness keeps opacity=0: its
-    page is dark.)"""
+    the order text_cues() times them, every one unseen until the first frame sets it.
+    opacity=0 stays: without it (-7 bytes) the words relied on a white page behind them,
+    and a browser that starts dark (Firefox) showed them on the start screen."""
     svg = text_block(js)[0]
-    return svg + ''.join('<path d="%s"/>' % d for _, _, g in _cued(js, shots) for d in g) + "</svg>"
+    return svg + ''.join('<path opacity=0 d="%s"/>' % d for _, _, g in _cued(js, shots) for d in g) + "</svg>"

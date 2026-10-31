@@ -243,7 +243,9 @@ def assemble(wgsl, js, parts=None, page=''):
     # A canvas is not a void element: without its end tag, markup after it is its fallback
     # content, never drawn - the overlay vanished there, and canvas.nextSibling was null.
     # The script alone needs no end tag before it (scripts in fallback content still run).
-    return ('<canvas id=c style=position:fixed;inset:0;width:100%;height:100%>' +
+    # `hidden` until the click shows it (the start handler): an unpainted WebGPU canvas is
+    # black in Firefox, and full-screen it covered the "click" text
+    return ('<canvas id=c hidden style=position:fixed;inset:0;width:100%;height:100%>' +
             ('</canvas>' + page if page else '') + '<script>' + js.replace(SHADER_LOOKUP, v) + ';var ' + v + '=`' + wgsl + '`'
             '</script>').encode()
 
