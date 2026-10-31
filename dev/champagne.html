@@ -735,7 +735,7 @@ fn photons(@builtin(global_invocation_id) g: vec3u) {
       let t = (hp.xz / (2 * CEXT) + 0.5) * f32(CN);
       if (all(t >= vec2f(0)) && all(t < vec2f(f32(CN)))) {
         let k = causIdx(vec2i(t));
-        let e = w * CSCALE * clamp(-d.y, 0, 1);
+        let e = w * (CSCALE * 65536 / u.nPhoton) * clamp(-d.y, 0, 1);   // brightness independent of the count
         atomicAdd(&atom[A_CAUST + k],      u32(max(e.x, 0)));
         atomicAdd(&atom[A_CAUST + k + 1], u32(max(e.y, 0)));
         atomicAdd(&atom[A_CAUST + k + 2], u32(max(e.z, 0)));
@@ -1324,7 +1324,11 @@ fn env(rd: vec3f) -> vec3f {
 fn sky(rd: vec3f) -> vec3f { return env(rd); }
 const CN     : u32 = 768;
 const CEXT   = 0.55;        // half-extent (m); must contain the lit ellipse
-const CSCALE = 3000;      // photon energy fixed-point scale
+// photon energy fixed-point scale: what ONE frame's photons add to the map, whatever their
+// number (each deposits CSCALE * 65536 / nPhoton). 24000, 8x the 3000 it was at 65 536
+// photons: at 2.4 M a photon keeps ~670 units, so the u32 rounding of dim ones stays small,
+// and the brightest texel stays far under 2^32.
+const CSCALE = 24000;
 fn lightDir() -> vec3f {
   let ce = cos(u.ltEl);
   return normalize(vec3f(ce * cos(u.ltAz), sin(u.ltEl), ce * sin(u.ltAz)));
@@ -1691,7 +1695,12 @@ const cfg = {
   camQ:     ['angle','dist','camY','tgtY','lightAz','lightEl']
               .filter(k => Q.has(k.toLowerCase()) || Q.has(k))
               .map(k => [k, qf(Q.has(k) ? k : k.toLowerCase(), 0)]),
-  nphoton:  qf('nphoton', 65536),
+  // 1536^2 (the jittered-grid emitter needs a square; a dispatch holds at most 65535 x 64).
+  // At 1600x900 the render time that frees goes into 36x the photons. Sized on shot 8, the
+  // heaviest: photons cost ~2 ns each once they pass through the whole tower (1.2 through
+  // one glass), and 1920^2 there cost 8 ms against render's 4.3 ms saving - whole-run
+  // profiles in dev/profiles.
+  nphoton:  qf('nphoton', 2359296),
   cgain:    qf('cgain', 0.05),
   paused:   Q.get('pause') === '1',
   det:      Q.get('det') === '1' || Q.get('still') === '1',   // frame N is always step N
@@ -4348,7 +4357,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       // unpainted WebGPU canvas black, and the full-screen canvas covered "click". Hidden, the
       // start screen is the browser's own page in its own colours - INCENDIUM's idea.
       canvas.hidden = 0;
-      if (cfg.fs) { canvas.width = screen.width; canvas.height = screen.height; document.body.requestFullscreen(); }
+      // 1600x900, stretched to the screen: 0.69x the pixels of 1080p, and the render time
+      // that frees goes into photons (nphoton). Fixed for now, whatever the screen.
+      if (cfg.fs) { canvas.width = 1600; canvas.height = 900; document.body.requestFullscreen(); }
       ac.resume();
       const src = ac.createBufferSource();
       src.buffer = b; src.connect(ac.destination);

@@ -24,7 +24,7 @@ CFG = {
     'steps': '160', 'npart': '65536', 'spawnMod': '1600', 'pvol': '2e-8', 'warm': '400',
     'single': 'false', 'noliq': 'false', 'bub': 'true', 'expo': '1.45', 'wav': 'true',
     'pfield': 'true', 'bounces': '10', 'refl': '1.0', 'envg': 'false', 'fillQ': 'null',
-    'nphoton': '65536', 'cgain': '0.05', 'paused': 'false', 'det': 'false',
+    'nphoton': '2359296', 'cgain': '0.05', 'paused': 'false', 'det': 'false',
     'show': 'true', 'showt': '0',
     'gate': 'true', 'tick': 'false',     # the release always opens on the start screen
     'fs': 'true',                        # ...and goes fullscreen at the click
@@ -603,6 +603,13 @@ def prepare(verbose=False):
         print('WARNING: per-shot slider values are harness-only, not in this build - ' + w)
     wgsl, js = cut_dev(wgsl), cut_dev(js)
     say('harness stripped wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
+    # CFG copies the harness's cfg defaults; a copy drifts. The photon count did once (the
+    # harness went to 3.7 M, the release kept shipping 65 536): check the ones that matter.
+    for k in ('nphoton', 'npart', 'steps'):
+        m = re.search(r"\b%s:\s*qf\('%s',\s*([\d.e]+)\)" % (k, k), js)
+        if m and float(m.group(1)) != float(CFG[k]):
+            raise BuildError('CFG[%r] is %s but the harness defaults to %s - update build.py CFG'
+                             % (k, CFG[k], m.group(1)))
     js = strip_js(js, ui)
     say('dev code removed wgsl %7d   js %7d' % (len(wgsl.encode()), len(js.encode())))
     io.open(os.path.join(ROOT, 'strip.js'), 'wb').write(js.encode())
