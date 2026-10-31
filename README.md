@@ -1165,7 +1165,18 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 379 bytes (26 Oct 2026), 1 187 OVER 8 192**: shot 1 stretched 1.5x
+**`intro.cmd` is 9 213 bytes (31 Oct 2026), 1 021 OVER 8 192**, lettering in, score
+empty. The last steps, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
+*The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
+Roadroller searches (-> 9 319); sloppy literals in the WGSL (-> 9 213): 520 places where
+an abstract literal takes its type from context - `x * 2` for `x * 2.0`, `n * 4` for
+`n * 4u` - each found by the compiler, checked against integer division by a scan and
+against the picture by a pixel-exact A/B (CLAUDE.md has the rules). Tried and dropped on
+the way: float constants packed into vectors (+35 shipped, -25 fair - the packer already
+names repeated literals), local floats packed into a `vec3f` (-2), the page markup moved
+inside the Roadroller-packed script (-4), mgnauck's wgslminify (does nothing ours does not).
+
+Before that, 9 379 (26 Oct): shot 1 stretched 1.5x
 (+10, the shifted key times). Before that 9 369: stratified photon emission
 (+56 shipped, +78 with the packer's default state on both sides). The lit table's grain is
 photon noise: 65 536 photons a frame put ~5 in each blurred (5x5 texel) cell, and the

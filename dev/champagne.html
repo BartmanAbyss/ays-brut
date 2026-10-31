@@ -189,19 +189,19 @@ override PROF : bool = false;
 // offset by u._w2 (padding, always 0) so the compiler cannot prove it equal and drop it.
 // The picture is unchanged; the extra render time is what that component costs.
 // 1 tower, 2 liquidDist, 4 bulk liquid, 8 bottle, 16 spray trilerp, 32 spray far field.
-override XC : u32 = 0u;
+override XC : u32 = 0;
 //#D}
 var<private> pc : array<u32, 112>;
 // step-limiter accounting (profiler only): which component set each march step
-var<private> profMarchS : f32 = 0.0;      // the march's sign while map() is called from it, else 0
+var<private> profMarchS : f32 = 0;      // the march's sign while map() is called from it, else 0
 var<private> profSprayD : f32 = 1e9;
 var<private> profBulkD : f32 = 1e9;
-var<private> profSpraySrc : u32 = 0u;     // 0 narrow band, 1 far-field estimate, 2 band floor
+var<private> profSpraySrc : u32 = 0;     // 0 narrow band, 1 far-field estimate, 2 band floor
 var<private> profCoupeB : bool = false;   // the last sdCoupe answered from its bounding cylinder
 var<private> profTowerB : bool = false;   // ...and so did the coupe sdTower's min came from
 // primary-ray step accounting (profiler only): set by fs around the bounce-0 march
 var<private> profPrim : bool = false;
-var<private> profTpl : f32 = 0.0;
+var<private> profTpl : f32 = 0;
 
 // ── glass geometry (metres) ───────────────────────────────
 // Proportions taken from the reference coupe, as ratios of the rim diameter D:
@@ -212,7 +212,7 @@ const RIM_R    = 0.0560;                // 112 mm diameter
 const BOWL_D   = 0.0463;                // bowl depth, solved for 280 ml
 const RIM_Y    = 0.1700;                // 170 mm tall
 const BOWL_BOT = RIM_Y - BOWL_D;
-const SPH_R    = (RIM_R * RIM_R + BOWL_D * BOWL_D) / (2.0 * BOWL_D);  // cap radius
+const SPH_R    = (RIM_R * RIM_R + BOWL_D * BOWL_D) / (2 * BOWL_D);  // cap radius
 const SPH_CY   = BOWL_BOT + SPH_R;
 const GLASS_T  = 0.0007;                // wall half-thickness
 const STEM_R   = 0.0026;                // slender stem (0.04 D)
@@ -221,27 +221,27 @@ const FOOT_H   = 0.0077;
 const FLARE_H  = 0.015;                 // stem-to-foot trumpet: height
 const FLARE_R  = 0.011;                 // ...and radius where it meets the foot
 const GH       = RIM_Y;                 // tier spacing = glass height
-const SP       = 2.0 * RIM_R;           // rims touching
+const SP       = 2 * RIM_R;           // rims touching
 
 fn smin(a: f32, b: f32, k: f32) -> f32 {
-  let h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-  return mix(b, a, h) - k * h * (1.0 - h);
+  let h = clamp(0.5 + 0.5 * (b - a) / k, 0, 1);
+  return mix(b, a, h) - k * h * (1 - h);
 }
 
 // ── volume ────────────────────────────────────────────────
-const FINE   : u32 = 320u;
-const COARSE : u32 = 32u;
+const FINE   : u32 = 320;
+const COARSE : u32 = 32;
 const DOM_LO = vec3f(-0.31, -0.015, -0.31);
 const DOM_SZ = 0.62;                     // the tower is 0.537 m tall
-const FCELL  = DOM_SZ / 320.0;    // 1.94 mm
-const CCELL  = DOM_SZ / 32.0;     // 19.4 mm
+const FCELL  = DOM_SZ / 320;    // 1.94 mm
+const CCELL  = DOM_SZ / 32;     // 19.4 mm
 const KR     : i32 = 3;
 const BAND   = 0.00625;           // KR * FCELL
 // A droplet smaller than the grid's cell half-diagonal (FCELL*sqrt(3)/2 = 1.68mm at
 // FINE=320) only registers when it lands near a cell centre, so a dense stream renders
 // as a few scattered drops. Keep u.prad above that.
-const QMAX   = 1000000.0;
-const INFQ   : u32 = 4294967295u;
+const QMAX   = 1000000;
+const INFQ   : u32 = 4294967295;
 
 // ── bulk liquid ───────────────────────────────────────────
 const PI    = 3.14159265;
@@ -253,12 +253,12 @@ const Y0    = SPH_CY - R_IN;           // lowest point of the bowl interior
 // Spill 4mm BELOW the rim. At exactly RIM_Y the liquid's top plane is coplanar with the
 // glass's rim cut plane, and that coincidence renders as an opaque disc once a glass fills.
 const LMAX  = RIM_Y - Y0 - 0.004;
-const WN    : u32 = 32u;               // wave grid per glass
+const WN    : u32 = 32;               // wave grid per glass
 const NG    : i32 = 14;
 const VUNIT = 1e-12;                   // volume fixed-point unit (m^3)
 const WUNIT = 1e-9;                    // wave impulse fixed-point unit (m)
 const FUNIT = 1e-6;                    // foam fixed-point unit
-const NWCELL : u32 = 14u * 32u * 32u;  // NG * WN * WN
+const NWCELL : u32 = 14 * 32 * 32;  // NG * WN * WN
 const WMAX  = 0.01;                    // wave amplitude clamp (must match waveUpdate)
 
 // tier split heights (midway between adjacent bowls)
@@ -268,19 +268,19 @@ const TS1 = TS0 + GH;
 fn glassIdx(p: vec3f) -> i32 {
   if (p.y >= TS1) { return 13; }
   if (p.y >= TS0) {
-    let c = clamp(round(p.xz / SP - 0.5), vec2f(-1.0), vec2f(0.0));
-    return 9 + i32(c.x + 1.0) + 2 * i32(c.y + 1.0);
+    let c = clamp(round(p.xz / SP - 0.5), vec2f(-1), vec2f(0));
+    return 9 + i32(c.x + 1) + 2 * i32(c.y + 1);
   }
-  let c = clamp(round(p.xz / SP), vec2f(-1.0), vec2f(1.0));
-  return i32(c.x + 1.0) + 3 * i32(c.y + 1.0);
+  let c = clamp(round(p.xz / SP), vec2f(-1), vec2f(1));
+  return i32(c.x + 1) + 3 * i32(c.y + 1);
 }
 fn glassOff(g: i32) -> vec3f {
-  if (g == 13) { return vec3f(0.0, 2.0 * GH, 0.0); }
+  if (g == 13) { return vec3f(0, 2 * GH, 0); }
   if (g >= 9) {
     let k = g - 9;
     return vec3f((f32(k % 2) - 0.5) * SP, GH, (f32(k / 2) - 0.5) * SP);
   }
-  return vec3f((f32(g % 3) - 1.0) * SP, 0.0, (f32(g / 3) - 1.0) * SP);
+  return vec3f((f32(g % 3) - 1) * SP, 0, (f32(g / 3) - 1) * SP);
 }
 fn wIdx(g: i32, c: vec2i) -> u32 {
   let q = clamp(c, vec2i(0), vec2i(i32(WN) - 1));
@@ -289,14 +289,14 @@ fn wIdx(g: i32, c: vec2i) -> u32 {
 // The wave field of glass g, bilinear at xz: x = surface height, z = foam. One fetch for
 // both - they were two copies differing only in the channel.
 fn sampleWave(g: i32, xz: vec2f) -> vec4f {
-  let t = (xz / (2.0 * RIM_R) + 0.5) * f32(WN) - 0.5;
+  let t = (xz / (2 * RIM_R) + 0.5) * f32(WN) - 0.5;
   let b = floor(t);
   let f = t - b;
   let c = vec2i(b);
   let a0 = mix(vecs[V_WAVE + wIdx(g, c)],                  vecs[V_WAVE + wIdx(g, c + vec2i(1,0))], f.x);
   let a1 = mix(vecs[V_WAVE + wIdx(g, c + vec2i(0,1))],     vecs[V_WAVE + wIdx(g, c + vec2i(1,1))], f.x);
   var r = mix(a0, a1, f.y);
-  if (u.wav < 0.5) { r.x = 0.0; }               // waves off: a flat surface, foam kept
+  if (u.wav < 0.5) { r.x = 0; }               // waves off: a flat surface, foam kept
   return r;
 }
 // rising CO2 bubbles, as a lattice of spheres translated upward through glass-local space
@@ -305,8 +305,8 @@ fn bubbleSDF(ql: vec3f) -> f32 {
   var p = ql;
   p.y -= u.time * 0.085;
   let id = floor(p / CB);
-  let r3 = rnd3(u32(i32(id.x) + 4096), u32(i32(id.y) + 4096), u32(i32(id.z) + 4096));
-  if (r3.z > 0.22) { return 1.0; }                       // most cells are empty
+  let r3 = rnd3(u32(id.x + 4096), u32(id.y + 4096), u32(id.z + 4096));
+  if (r3.z > 0.22) { return 1; }                       // most cells are empty
   let rad = 0.00010 + r3.x * 0.00034;
   let jit = (r3 - 0.5) * CB * 0.45;
   return length(p - (id + 0.5) * CB - jit) - rad;
@@ -316,15 +316,15 @@ fn bubbleSDF(ql: vec3f) -> f32 {
 fn bulkSDF(p: vec3f) -> f32 {
   let g = glassIdx(p);
   let L = vecs[V_GLASS + g].x;
-  if (L <= 0.0002) { return 1.0; }
+  if (L <= 0.0002) { return 1; }
   let q  = p - glassOff(g);
-  let dS = length(q - vec3f(0.0, SPH_CY, 0.0)) - R_LIQ;
+  let dS = length(q - vec3f(0, SPH_CY, 0)) - R_LIQ;
   // flat-surface estimate first; waves are clamped to +/-WMAX so this bounds the error
   let d0 = max(dS, q.y - (Y0 + L));
   if (d0 > WMAX * 1.1) { return d0 - WMAX; }   // too far for a wave to matter: skip the fetch
-  if (PROF) { pc[5] += 1u; }
+  if (PROF) { pc[5] += 1; }
   let dl = max(dS, q.y - (Y0 + L + sampleWave(g, q.xz).x));
-  if (u.bub > 0.5 && dl < 0.0) { if (PROF) { pc[43] += 1u; } return max(dl, -bubbleSDF(q)); }
+  if (u.bub > 0.5 && dl < 0) { if (PROF) { pc[43] += 1; } return max(dl, -bubbleSDF(q)); }
   return dl;
 }
 
@@ -336,9 +336,9 @@ fn c3(i: u32) -> vec3i {
 // PCG3D. The sin()-based hash below loses all precision once the index is large
 // (dot() reaches ~3e7 for 262k photons), which shows up as correlated samples.
 fn pcg3d(vin: vec3u) -> vec3u {
-  var v = vin * 1664525u + 1013904223u;
+  var v = vin * 1664525 + 1013904223;
   v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
-  v ^= v >> vec3u(16u);
+  v ^= v >> vec3u(16);
   v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
   return v;
 }
@@ -354,19 +354,19 @@ fn hash3(p: vec3f) -> vec3f {
 
 fn sdCyl(p: vec3f, r: f32, y0: f32, y1: f32) -> f32 {
   let d = vec2f(length(p.xz) - r, max(y0 - p.y, p.y - y1));
-  return min(max(d.x, d.y), 0.0) + length(max(d, vec2f(0.0)));
+  return min(max(d.x, d.y), 0) + length(max(d, vec2f(0)));
 }
 fn sdCoupe(p: vec3f) -> f32 {
-  if (PROF) { pc[6] += 1u; }
+  if (PROF) { pc[6] += 1; }
   // Bounding cylinder first. It is a lower bound on the distance to anything this coupe can
   // be - safe for sphere tracing, a step can only get shorter - and the exact SDF is only
   // needed within a few mm of it. sdTower evaluates three coupes per sample and a point is
   // usually far from at least two of them: the tiers are 17 cm apart.
   let bnd = max(length(p.xz) - (RIM_R + 0.002), max(-p.y - 0.002, p.y - (RIM_Y + 0.002)));
   if (bnd > 0.004) { if (PROF) { profCoupeB = true; } return bnd; }
-  if (PROF) { pc[7] += 1u; profCoupeB = false; }
+  if (PROF) { pc[7] += 1; profCoupeB = false; }
   // bowl: a spherical cap shell, cut at the rim and thinned towards it
-  var bowl = abs(length(p - vec3f(0.0, SPH_CY, 0.0)) - SPH_R) - GLASS_T;
+  var bowl = abs(length(p - vec3f(0, SPH_CY, 0)) - SPH_R) - GLASS_T;
   bowl = max(bowl, p.y - RIM_Y);
   // slender stem, and the solid glass knuckle the bowl sits on
   // Stem, flaring into the foot like a trumpet as in the reference: ONE profiled surface,
@@ -378,23 +378,23 @@ fn sdCoupe(p: vec3f) -> f32 {
   // The radial distance is scaled by the LOCAL steepness, 1/sqrt(1 + r'(y)^2), which is 1
   // up the plain stem, so the long straight part marches at full speed.
   let fr = length(p.xz);
-  let ft = clamp((p.y - 0.0030) / FLARE_H, 0.0, 1.0);
+  let ft = clamp((p.y - 0.0030) / FLARE_H, 0, 1);
   // x^2.5 and x^1.5 as products with one sqrt: pow() is exp(log()) and sdCoupe runs 3-4
   // times per distance evaluation, millions of times a frame
-  let fx = 1.0 - ft;
+  let fx = 1 - ft;
   let fq = fx * sqrt(fx);
   let sr = STEM_R + (FLARE_R - STEM_R) * fx * fq;
   let fk = 2.5 * (FLARE_R - STEM_R) / FLARE_H * fq;
-  let stem = max(max((fr - sr) / sqrt(1.0 + fk * fk), p.y - (BOWL_BOT + 0.005)), -p.y);
-  let knuc = length((p - vec3f(0.0, BOWL_BOT + 0.0045, 0.0)) * vec3f(1.0, 0.62, 1.0)) - 0.0080;
+  let stem = max(max((fr - sr) / sqrt(1 + fk * fk), p.y - (BOWL_BOT + 0.005)), -p.y);
+  let knuc = length((p - vec3f(0, BOWL_BOT + 0.0045, 0)) * vec3f(1, 0.62, 1)) - 0.0080;
   // Foot: a thin plate, 2.2 mm at the rim rising to 4.4 mm at the centre, flat underneath
   // at y = 0, rim rounded. It used to be a rounded cylinder spanning y = -1.3..7.7 mm - a
   // 9 mm puck, sunk 1.3 mm into the table - where the reference (a thin plate, photo 5) is
   // a quarter of that. Cross-section: a capsule along r whose centre height and radius
   // both taper linearly, so it is flat-bottomed and its top is a shallow cone.
-  let fs = clamp(fr / (FOOT_R - 0.0011), 0.0, 1.0);
+  let fs = clamp(fr / (FOOT_R - 0.0011), 0, 1);
   let fh = mix(0.0022, 0.0011, fs);
-  let foot = (length(vec2f(max(fr - (FOOT_R - 0.0011), 0.0), p.y - fh)) - fh) * 0.95;
+  let foot = (length(vec2f(max(fr - (FOOT_R - 0.0011), 0), p.y - fh)) - fh) * 0.95;
   var d = smin(stem, knuc, 0.0070);
   d = smin(d, bowl, 0.0045);
   d = smin(d, foot, 0.0020);
@@ -406,39 +406,39 @@ fn sdCoupe(p: vec3f) -> f32 {
   // else, whatever the fillets and the knuckle do underneath. It coincides exactly with the
   // shell's own inner face, which is fine within one SDF - the liquid's deliberate 0.5 mm
   // overlap into the shell is unchanged.
-  let cav = length(p - vec3f(0.0, SPH_CY, 0.0)) - (SPH_R - GLASS_T);
+  let cav = length(p - vec3f(0, SPH_CY, 0)) - (SPH_R - GLASS_T);
   return max(d, -cav);
 }
 fn sdTower(p: vec3f) -> f32 {
   if (u.single > 0.5) { return sdCoupe(p); }   // debug: one coupe, no folding
-  let f0 = SP * clamp(round(p.xz / SP), vec2f(-1.0), vec2f(1.0));
+  let f0 = SP * clamp(round(p.xz / SP), vec2f(-1), vec2f(1));
   var d = sdCoupe(vec3f(p.x - f0.x, p.y, p.z - f0.y));
-  let p1 = p - vec3f(0.0, GH, 0.0);
-  let f1 = SP * (clamp(round(p1.xz / SP - 0.5), vec2f(-1.0), vec2f(0.0)) + 0.5);
+  let p1 = p - vec3f(0, GH, 0);
+  let f1 = SP * (clamp(round(p1.xz / SP - 0.5), vec2f(-1), vec2f(0)) + 0.5);
 //#D{
   if (PROF) {   // the same, noting whether the winning coupe answered from its bound
     var tb = profCoupeB;
     let d1 = sdCoupe(vec3f(p1.x - f1.x, p1.y, p1.z - f1.y));
     if (d1 < d) { tb = profCoupeB; }
     d = min(d, d1);
-    let d2 = sdCoupe(p - vec3f(0.0, 2.0 * GH, 0.0));
+    let d2 = sdCoupe(p - vec3f(0, 2 * GH, 0));
     if (d2 < d) { tb = profCoupeB; }
     profTowerB = tb;
     return min(d, d2);
   }
 //#D}
   d = min(d, sdCoupe(vec3f(p1.x - f1.x, p1.y, p1.z - f1.y)));
-  d = min(d, sdCoupe(p - vec3f(0.0, 2.0 * GH, 0.0)));
+  d = min(d, sdCoupe(p - vec3f(0, 2 * GH, 0)));
   return d;
 }
 fn towerN(p: vec3f) -> vec3f {
-  let e = vec2f(1.0, -1.0) * 0.00015;
+  let e = vec2f(1, -1) * 0.00015;
   return normalize( e.xyy * sdTower(p + e.xyy) + e.yyx * sdTower(p + e.yyx)
                   + e.yxy * sdTower(p + e.yxy) + e.xxx * sdTower(p + e.xxx) );
 }
 fn sdBoxDom(p: vec3f) -> f32 {
-  let q = abs(p - (DOM_LO + vec3f(DOM_SZ * 0.5))) - vec3f(DOM_SZ * 0.5);
-  return length(max(q, vec3f(0.0))) + min(max(q.x, max(q.y, q.z)), 0.0);
+  let q = abs(p - (DOM_LO + (DOM_SZ * 0.5))) - (DOM_SZ * 0.5);
+  return length(max(q, vec3f(0))) + min(max(q.x, max(q.y, q.z)), 0);
 }
 
 // ═══════════════ compute ═══════════════
@@ -448,7 +448,7 @@ fn sdBoxDom(p: vec3f) -> f32 {
 // a second bind group and dynamic offsets - all of it JS the release had to carry.
 fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups) nw: vec3u) {
   let i = g.x;
-  if (i >= u32(u.nPart) || g.y > 0u) { return; }
+  if (i >= u32(u.nPart) || g.y > 0) { return; }
   var p = parts[i];
 
   let PV = u32(u.pvol / VUNIT);
@@ -460,16 +460,16 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
   // holds its particle from the bottle until it lands, ~15-20 steps, so the slice caps the
   // stream at about slice / 17 drops a step. botShare can change from shot to shot: a
   // particle changes role only once it is free, so nothing in the air pops.
-  let POOL = max(u32(u.nPart * u.botShare), 1u);
+  let POOL = max(u32(u.nPart * u.botShare), 1);
 
   // The emission cadence counts SIM TIME in 1/60 s units, not steps: a slow-motion step
   // covers less time, and counting steps would pour faster per sim second the slower the
   // shot. nw.y - 1 is the sub-step index: without it every substep in a frame shares one
   // spawn cadence, so fast-forward advances the drops without emitting new ones.
-  let fc = u32(u.frame + f32(nw.y - 1u) * u.dt * 60.0);
+  let fc = u32(u.frame + f32(nw.y - 1) * u.dt * 60);
 
-  if (p.life <= 0.0) {
-    let h = rnd3(i, fc, 3u);
+  if (p.life <= 0) {
+    let h = rnd3(i, fc, 3);
     var born = false;
 
     if (i < POOL) {
@@ -478,15 +478,15 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
       // cadence offers twice the drops and keeps a share that pulses with sim time:
       // p = 0.5 on average (the pourRate you set), swinging by glug at about glugHz, the
       // frequency itself wandering. On sim time, so slow motion slows the glugs too.
-      let m = max(u32(u.spawnMod) / 2u, 1u);
+      let m = max(u32(u.spawnMod) / 2, 1);
       let gt = 6.2831853 * u.glugHz * u.time;
       let pg = (0.5 + 0.5 * u.glug * sin(gt + 1.5 * sin(gt * 0.31)) * (0.6 + 0.4 * sin(gt * 0.13))) * u.pour;
-      if ((i % m) == (fc % m) && rnd3(i, fc, 7u).x < pg) {
-        p.pos  = u.emitPos + vec3f((h.x - 0.5) * 0.004, 0.0, (h.y - 0.5) * 0.004);
+      if ((i % m) == (fc % m) && rnd3(i, fc, 7).x < pg) {
+        p.pos  = u.emitPos + vec3f((h.x - 0.5) * 0.004, 0, (h.y - 0.5) * 0.004);
         // the stream inherits the bottle's drift, so it trails the wander instead of
         // falling dead straight from a moving point
         p.vel  = vec3f(u.evx, -0.35, u.evz) + (h - 0.5) * 0.015;
-        p.life = 9.0;
+        p.life = 9;
         born = true;
       }
     } else {
@@ -496,15 +496,15 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
         // CAS, not sub-then-add-back: a plain atomicSub underflows u32 and invents volume
         var took = false;
         for (var tries = 0; tries < 3; tries++) {
-          let cur = atomicLoad(&atom[A_GVOL + u32(NG + g)]);
+          let cur = atomicLoad(&atom[A_GVOL + (NG + g)]);
           if (cur < PV) { break; }
-          let r = atomicCompareExchangeWeak(&atom[A_GVOL + u32(NG + g)], cur, cur - PV);
+          let r = atomicCompareExchangeWeak(&atom[A_GVOL + (NG + g)], cur, cur - PV);
           if (r.exchanged) { took = true; break; }
         }
         if (took) {
           let a  = h.x * 6.2831853;
           let off = glassOff(g);
-          let h2 = rnd3(i, fc, 11u);
+          let h2 = rnd3(i, fc, 11);
           // Spill where the surface is actually highest. Picking a uniform azimuth makes
           // the glass overflow evenly all the way round, which reads as a waterfall curtain
           // instead of the few wandering rivulets a real tower produces.
@@ -518,7 +518,7 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
           let a2 = aa + (h2.z - 0.5) * 0.5;
           p.pos = off + vec3f(cos(a2) * RIM_R * 0.99, RIM_Y + 0.001, sin(a2) * RIM_R * 0.99);
           p.vel = vec3f(cos(a2) * 0.05, -0.02, sin(a2) * 0.05) + (h2 - 0.5) * 0.07;
-          p.life = 6.0;
+          p.life = 6;
           born = true;
           break;
         }
@@ -532,15 +532,15 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
     // random fraction of the step - position and velocity, gravity included - makes the
     // emission continuous rather than stroboscopic. Over a full 1/60 s, not over the step:
     // in slow motion a cadence's drops are all born in the first short step of it.
-    let ts = h.z / 60.0;
-    p.vel += vec3f(0.0, -9.81 * ts, 0.0);
+    let ts = h.z / 60;
+    p.vel += vec3f(0, -9.81 * ts, 0);
     p.pos += p.vel * ts;
   }
 
   // substepped integration; the bowl is a POSITION constraint so it cannot be tunnelled
   let NSUB = 4;
   let dt = u.dt / f32(NSUB);
-  let c = vec3f(0.0, SPH_CY, 0.0);
+  let c = vec3f(0, SPH_CY, 0);
   for (var s = 0; s < NSUB; s++) {
     p.vel.y -= 9.81 * dt;
     var np = p.pos + p.vel * dt;
@@ -557,13 +557,13 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
       // once it reaches the bottom (the lowest a drop's centre gets is a radius above it)
       let top = max(Y0 + vecs[V_GLASS + g].x + sampleWave(g, q.xz).x, Y0 + 1.5 * u.prad);
       if (q.y <= top) {
-        atomicAdd(&atom[A_GVOL + u32(g)], PV);
-        let t  = (q.xz / (2.0 * RIM_R) + 0.5) * f32(WN);
+        atomicAdd(&atom[A_GVOL + g], PV);
+        let t  = (q.xz / (2 * RIM_R) + 0.5) * f32(WN);
         let hit = vec2i(t);
-        atomicAdd(&atom[A_WIMP + wIdx(g, hit)], u32(i32(clamp(-p.vel.y, 0.0, 3.0) * 0.00035 / WUNIT)));
+        atomicAdd(&atom[A_WIMP + wIdx(g, hit)], u32((clamp(-p.vel.y, 0.0, 3.0) * 0.00035 / WUNIT)));
         // mousse: CO2 foam is generated by the impact itself
-        atomicAdd(&atom[A_WIMP + wIdx(g, hit) + NWCELL], u32(i32(clamp(-p.vel.y, 0.15, 4.0) * 0.02 / FUNIT)));
-        p.life = 0.0;
+        atomicAdd(&atom[A_WIMP + wIdx(g, hit) + NWCELL], u32((clamp(-p.vel.y, 0.15, 4.0) * 0.02 / FUNIT)));
+        p.life = 0;
         parts[i] = p;
         return;
       }
@@ -578,7 +578,7 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
         let n = rel / d;
         np = off + c + n * (R_IN - u.prad);
         let vn = dot(p.vel, n);
-        if (vn > 0.0) { p.vel -= n * vn * 1.25; }
+        if (vn > 0) { p.vel -= n * vn * 1.25; }
         p.vel *= 0.80;
       }
     }
@@ -587,7 +587,7 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
       // field of its own: ~1.3% of the pixels from above for ~500 bytes - cut for size).
       // At the table's height wherever it is: with it raised, the tiers below get no
       // spill - drops would otherwise pour visibly INTO the table to fill hidden glasses.
-      p.life = 0.0;
+      p.life = 0;
       parts[i] = p;
       return;
     }
@@ -611,40 +611,40 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
 // cap volume V = pi h^2 (R - h/3): with h = R (1 - c), c^3 - 3c + 2 - 3V/(pi R^3) = 0,
 // solved by the trigonometric root that runs from c = 1 (empty) to 0 (a hemisphere).
 fn glassUpdate(g: i32) {
-  let inflow = f32(atomicExchange(&atom[A_GVOL + u32(g)], 0u)) * VUNIT;
+  let inflow = f32(atomicExchange(&atom[A_GVOL + g], 0)) * VUNIT;
 //#D{
-  if (u.fillOv >= 0.0) {
+  if (u.fillOv >= 0) {
     let h = u.fillOv * LMAX;
-    vecs[V_GLASS + g] = vec4f(h, PI * h * h * (R_IN - h / 3.0), 0.0, 0.0);
+    vecs[V_GLASS + g] = vec4f(h, PI * h * h * (R_IN - h / 3), 0, 0);
     return;
   }
 //#D}
-  let VM = PI * LMAX * LMAX * (R_IN - LMAX / 3.0);    // what a glass holds at the spill level
+  let VM = PI * LMAX * LMAX * (R_IN - LMAX / 3);    // what a glass holds at the spill level
   var V = vecs[V_GLASS + g].y + inflow;
   if (V > VM) {
-    atomicAdd(&atom[A_GVOL + u32(NG + g)], u32((V - VM) / VUNIT));
+    atomicAdd(&atom[A_GVOL + (NG + g)], u32((V - VM) / VUNIT));
     V = VM;
   }
-  let c = 2.0 * cos(acos(1.5 * V / (PI * R_IN * R_IN * R_IN) - 1.0) / 3.0 - 2.0943951);
-  vecs[V_GLASS + g] = vec4f(R_IN * (1.0 - c), V, 0.0, 0.0);
+  let c = 2 * cos(acos(1.5 * V / (PI * R_IN * R_IN * R_IN) - 1) / 3 - 2.0943951);
+  vecs[V_GLASS + g] = vec4f(R_IN * (1 - c), V, 0, 0);
 }
 
 // ── surface waves: 2D wave equation on each glass's disc ──
 @compute @workgroup_size(64)
 fn waveUpdate(@builtin(global_invocation_id) gi: vec3u, @builtin(num_workgroups) nw: vec3u) {
   let n = gi.x;
-  if (n >= u32(NG) * WN * WN || gi.y > 0u) { return; }
-  if (nw.y > 1u && n < u32(NG)) { glassUpdate(i32(n)); }
+  if (n >= u32(NG) * WN * WN || gi.y > 0) { return; }
+  if (nw.y > 1 && n < u32(NG)) { glassUpdate(i32(n)); }
   let g = i32(n / (WN * WN));
   let c = vec2i(i32(n % WN), i32((n / WN) % WN));
 
-  let imp = f32(i32(atomicExchange(&atom[A_WIMP + n], 0u))) * WUNIT;
-  let fin = f32(i32(atomicExchange(&atom[A_WIMP + n + NWCELL], 0u))) * FUNIT;
+  let imp = f32(i32(atomicExchange(&atom[A_WIMP + n], 0))) * WUNIT;
+  let fin = f32(i32(atomicExchange(&atom[A_WIMP + n + NWCELL], 0))) * FUNIT;
   let e   = vecs[V_WAVE + n];
   let eta = e.x;
 
   let lap = vecs[V_WAVE + wIdx(g, c + vec2i(1,0))].x + vecs[V_WAVE + wIdx(g, c - vec2i(1,0))].x
-          + vecs[V_WAVE + wIdx(g, c + vec2i(0,1))].x + vecs[V_WAVE + wIdx(g, c - vec2i(0,1))].x - 4.0 * eta;
+          + vecs[V_WAVE + wIdx(g, c + vec2i(0,1))].x + vecs[V_WAVE + wIdx(g, c - vec2i(0,1))].x - 4 * eta;
 
   // (eta1, not nw: nw is the grid size here - a local of the same name compiled in the
   // harness but the packer gave both one short name, and the release would not compile)
@@ -652,24 +652,24 @@ fn waveUpdate(@builtin(global_invocation_id) gi: vec3u, @builtin(num_workgroups)
   // standard substep, and q = dt / (1/60 s) scales the acceleration, the damping and the
   // advance. At q = 1 it is the leapfrog this replaced, eta' = 2 eta - old + ... A drop's
   // impulse is a velocity kick whatever the step.
-  let q = u.dt * 60.0;
-  var eta1 = eta + (e.y * (1.0 - 0.06 * q) + 0.25 * q * lap - imp) * q;
+  let q = u.dt * 60;
+  var eta1 = eta + (e.y * (1 - 0.06 * q) + 0.25 * q * lap - imp) * q;
 
   // damp to zero at the disc boundary
-  let rr = length((vec2f(c) + 0.5) / f32(WN) - 0.5) * 2.0;
+  let rr = length((vec2f(c) + 0.5) / f32(WN) - 0.5) * 2;
   if (rr > 0.94) { eta1 *= 0.2; }
   eta1 = clamp(eta1, -WMAX, WMAX);
 
-  let foam = clamp(e.z * (1.0 - 0.022 * q) + fin, 0.0, 1.6);   // mousse collapses over a few seconds
-  vecs[V_WAVE + n] = vec4f(eta1, (eta1 - eta) / q, foam, 0.0);
+  let foam = clamp(e.z * (1 - 0.022 * q) + fin, 0, 1.6);   // mousse collapses over a few seconds
+  vecs[V_WAVE + n] = vec4f(eta1, (eta1 - eta) / q, foam, 0);
 }
 
 // ── caustics: trace photons from the key light through glass+champagne onto the table ──
 @compute @workgroup_size(256)
 fn causticDecay(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
-  if (i >= CN * CN * 3u) { return; }
-  atomicStore(&atom[A_CAUST + i], (atomicLoad(&atom[A_CAUST + i]) * 236u) / 256u);   // temporal fade
+  if (i >= CN * CN * 3) { return; }
+  atomicStore(&atom[A_CAUST + i], (atomicLoad(&atom[A_CAUST + i]) * 236) / 256);   // temporal fade
 }
 
 @compute @workgroup_size(256)
@@ -677,18 +677,18 @@ fn causticBlur(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
   if (i >= CN * CN) { return; }
   let c = vec2i(i32(i % CN), i32(i / CN));
-  var sum = vec3f(0.0);
+  var sum = vec3f(0);
   for (var dy = -2; dy <= 2; dy++) {
     for (var dx = -2; dx <= 2; dx++) { sum += causFetch(c + vec2i(dx, dy)); }
   }
-  vecs[V_CAUSTF + i] = vec4f(sum / 25.0, 0.0);
+  vecs[V_CAUSTF + i] = vec4f(sum / 25, 0);
 }
 
 @compute @workgroup_size(64)
 fn photons(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
   if (i >= u32(u.nPhoton)) { return; }
-  var h = rnd3(i, u32(u.frame * 64.0), 5u);   // u.frame moves < 1 per frame in slow motion
+  var h = rnd3(i, u32(u.frame * 64), 5);   // u.frame moves < 1 per frame in slow motion
   // Random emission clumps and gaps: ~5 photons per blurred table cell a frame, so the
   // evenly lit table came out as crawling grain. The R2 low-discrepancy sequence (Roberts
   // 2018) spreads them evenly instead. In 32-bit fixed point, because in f32 a1 * i keeps
@@ -699,51 +699,51 @@ fn photons(@builtin(global_invocation_id) g: vec3u) {
     // each. No lattice to beat against the texels (the jitter is fresh every frame), and
     // no constants to ship.
     let n = u32(sqrt(u.nPhoton));
-    h = vec3f((vec2f(vec2u(i % n, i / n)) + h.xy) / f32(n), 0.0);
+    h = vec3f((vec2f(vec2u(i % n, i / n)) + h.xy) / f32(n), 0);
   } else if (u.strat > 0.5) {
-    let q = vec2u(i * 3242174889u, i * 2447445414u) + pcg3d(vec3u(7u, u32(u.frame * 64.0), 9u)).xy;
+    let q = vec2u(i * 3242174889, i * 2447445414) + pcg3d(vec3u(7, u32(u.frame * 64), 9)).xy;
     // Plain R2 sits almost on a lattice ~2 texels apart, which beats against the texel grid
     // as faint diagonal stripes. Jitter by about a lattice spacing (1/sqrt N) breaks it.
-    h = vec3f(fract(vec2f(q >> vec2u(8u)) / 16777216.0 + (h.xy - 0.5) * u.stratJit * inverseSqrt(u.nPhoton)), 0.0);
+    h = vec3f(fract(vec2f(q >> vec2u(8)) / 16777216 + (h.xy - 0.5) * u.stratJit * inverseSqrt(u.nPhoton)), 0);
   }
 
   let L  = lightDir();
-  let t1 = normalize(cross(L, vec3f(0.0, 1.0, 0.0)));
+  let t1 = normalize(cross(L, vec3f(0, 1, 0)));
   let t2 = cross(L, t1);
   let a  = h.x * 6.2831853;
   let rr = sqrt(h.y);
   let r  = rr * 0.38;                        // projects to a ~0.53 m semi-axis at this elevation
   // the emitter faces what stands on the table: centred higher when the table is raised
-  var p  = vec3f(0.0, 0.17 + u.tableY * 0.5, 0.0) + L * 0.75 + t1 * (cos(a) * r) + t2 * (sin(a) * r);
+  var p  = vec3f(0, 0.17 + u.tableY * 0.5, 0) + L * 0.75 + t1 * (cos(a) * r) + t2 * (sin(a) * r);
   // a photon starting under the table never reaches what is on it - with the table raised
   // and the light low, those lit the hidden tiers and showed through as rings
   if (p.y < u.tableY) { return; }
   var d  = -L;
   var med = 0;
   // window the emitter so the pool of light fades out instead of ending on a hard circle
-  var w   = vec3f(smoothstep(1.0, 0.50, rr));
+  var w   = vec3f(smoothstep(1, 0.50, rr));
 
   for (var b = 0; b < 4; b++) {
     let lg = leg(p, d, med);
-    if (lg.y == 0.0) { return; }
+    if (lg.y == 0) { return; }
     w *= exp(-sigmaOf(med) * lg.x);
     let hp = p + d * lg.x;
     // deposit on the table - reached directly, or through a marched surface
-    var tab = lg.y == 1.0;
+    var tab = lg.y == 1;
     var sf: Turn;
     if (!tab) { sf = turn(hp, d, med); tab = sf.medA == 3; }
     if (tab) {
-      let t = (hp.xz / (2.0 * CEXT) + 0.5) * f32(CN);
-      if (all(t >= vec2f(0.0)) && all(t < vec2f(f32(CN)))) {
+      let t = (hp.xz / (2 * CEXT) + 0.5) * f32(CN);
+      if (all(t >= vec2f(0)) && all(t < vec2f(f32(CN)))) {
         let k = causIdx(vec2i(t));
-        let e = w * CSCALE * clamp(-d.y, 0.0, 1.0);
-        atomicAdd(&atom[A_CAUST + k],      u32(max(e.x, 0.0)));
-        atomicAdd(&atom[A_CAUST + k + 1u], u32(max(e.y, 0.0)));
-        atomicAdd(&atom[A_CAUST + k + 2u], u32(max(e.z, 0.0)));
+        let e = w * CSCALE * clamp(-d.y, 0, 1);
+        atomicAdd(&atom[A_CAUST + k],      u32(max(e.x, 0)));
+        atomicAdd(&atom[A_CAUST + k + 1], u32(max(e.y, 0)));
+        atomicAdd(&atom[A_CAUST + k + 2], u32(max(e.z, 0)));
       }
       return;
     }
-    if (!sf.tir) { w *= (1.0 - sf.F); }
+    if (!sf.tir) { w *= (1 - sf.F); }
     d = sf.d; p = sf.p; med = sf.med;
     if (max(w.x, max(w.y, w.z)) < 0.02) { return; }
   }
@@ -751,7 +751,7 @@ fn photons(@builtin(global_invocation_id) g: vec3u) {
 
 // Two cells per thread, at the default 256-wide groups: one cell each would take 128 000
 // groups, past the 65 535 cap per dimension, and 512-wide groups need a raised limit.
-const FHALF = FINE * FINE * FINE / 2u;
+const FHALF = FINE * FINE * FINE / 2;
 @compute @workgroup_size(256)
 fn clearFine(@builtin(global_invocation_id) g: vec3u) {
   if (g.x >= FHALF) { return; }
@@ -759,8 +759,8 @@ fn clearFine(@builtin(global_invocation_id) g: vec3u) {
   atomicStore(&fine[g.x + FHALF], INFQ);
   // the coarse occupancy blocks and far-field seed keys, in the same dispatch
   if (g.x < COARSE * COARSE * COARSE) {
-    atomicStore(&atom[g.x], 0u);
-    atomicStore(&atom[COARSE * COARSE * COARSE + g.x], 0xFFFFFFFFu);
+    atomicStore(&atom[g.x], 0);
+    atomicStore(&atom[COARSE * COARSE * COARSE + g.x], 0xFFFFFFFF);
   }
 }
 
@@ -771,7 +771,7 @@ fn clearFine(@builtin(global_invocation_id) g: vec3u) {
 fn sdSeg(p: vec3f, a: vec3f, b: vec3f) -> f32 {
   let pa = p - a;
   let ba = b - a;
-  let h  = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-12), 0.0, 1.0);
+  let h  = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-12), 0, 1);
   return length(pa - ba * h);
 }
 
@@ -780,15 +780,15 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
   if (i >= u32(u.nPart)) { return; }
   let p = parts[i];
-  if (p.life <= 0.0) { return; }
+  if (p.life <= 0) { return; }
 
   // Far-field seed key for this particle's coarse cell (see the note on the coarse far
   // field below): nearest to the cell centre wins, so the choice is the same every frame.
   let sc = vec3i(floor((p.pos - DOM_LO) / CCELL));
   if (all(sc >= vec3i(0)) && all(sc < vec3i(i32(COARSE)))) {
     let cp = DOM_LO + (vec3f(sc) + 0.5) * CCELL;
-    let qd = u32(clamp(length(p.pos - cp) / CCELL, 0.0, 0.999) * 65535.0);
-    atomicMin(&atom[COARSE * COARSE * COARSE + cIdx(sc)], (qd << 16u) | (i & 0xFFFFu));
+    let qd = u32(clamp(length(p.pos - cp) / CCELL, 0, 0.999) * 65535);
+    atomicMin(&atom[COARSE * COARSE * COARSE + cIdx(sc)], (qd << 16) | (i & 0xFFFF));
   }
 
   var v = p.vel * u.shut;
@@ -802,9 +802,9 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
   let a = p.pos - v * 0.5;
   let b = p.pos + v * 0.5;
 
-  let lo = clamp(vec3i(floor((min(a, b) - vec3f(BAND) - DOM_LO) / FCELL)),
+  let lo = clamp(vec3i(floor((min(a, b) - BAND - DOM_LO) / FCELL)),
                  vec3i(0), vec3i(i32(FINE) - 1));
-  let hi = clamp(vec3i(ceil ((max(a, b) + vec3f(BAND) - DOM_LO) / FCELL)),
+  let hi = clamp(vec3i(ceil ((max(a, b) + BAND - DOM_LO) / FCELL)),
                  vec3i(0), vec3i(i32(FINE) - 1));
 
   for (var z = lo.z; z <= hi.z; z++) {
@@ -814,7 +814,7 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
         let cp = DOM_LO + (vec3f(cc) + 0.5) * FCELL;
         let d  = sdSeg(cp, a, b);
         if (d < BAND) {
-          atomicMin(&fine[fIdx(cc)], u32(clamp(d / BAND, 0.0, 1.0) * QMAX));
+          atomicMin(&fine[fIdx(cc)], u32(clamp(d / BAND, 0, 1) * QMAX));
         }
       }
     }
@@ -835,7 +835,7 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
   for (var z = blo.z; z <= bhi.z; z++) {
     for (var y = blo.y; y <= bhi.y; y++) {
       for (var x = blo.x; x <= bhi.x; x++) {
-        atomicStore(&atom[cIdx(vec3i(x, y, z))], 1u);
+        atomicStore(&atom[cIdx(vec3i(x, y, z))], 1);
       }
     }
   }
@@ -861,31 +861,31 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
 @compute @workgroup_size(64)
 fn jfaCoarse(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups) nw: vec3u) {
   let i = g.x;
-  if (i >= COARSE * COARSE * COARSE || g.y > 0u) { return; }
+  if (i >= COARSE * COARSE * COARSE || g.y > 0) { return; }
   // pass k of 5 (nw.y - 1): stride 16 >> k, and the ping-pong keys -> R1 -> R2 -> R1 -> R2
   // -> R1 between occ's regions, ending in R1, the one liquidDist reads
-  let k = nw.y - 1u;
-  let src = select(select(3u, 2u, k % 2u == 1u), 1u, k == 0u) * COARSE * COARSE * COARSE;
+  let k = nw.y - 1;
+  let src = select(select(3, 2u, k % 2 == 1), 1, k == 0) * COARSE * COARSE * COARSE;
   let c  = c3(i);
   let cp = DOM_LO + (vec3f(c) + 0.5) * CCELL;
   var best = atomicLoad(&atom[src + i]);
   var bd = 1e9;
-  if (best != 0xFFFFFFFFu) { bd = length(cp - parts[best & 0xFFFFu].pos); }
-  let st = i32(16u >> k);
+  if (best != 0xFFFFFFFF) { bd = length(cp - parts[best & 0xFFFF].pos); }
+  let st = i32(16 >> k);
   for (var dz = -1; dz <= 1; dz++) {
     for (var dy = -1; dy <= 1; dy++) {
       for (var dx = -1; dx <= 1; dx++) {
         let nc = c + vec3i(dx, dy, dz) * st;
         if (any(nc < vec3i(0)) || any(nc >= vec3i(i32(COARSE)))) { continue; }
         let v = atomicLoad(&atom[src + cIdx(nc)]);
-        if (v == 0xFFFFFFFFu) { continue; }
-        let dd = length(cp - parts[v & 0xFFFFu].pos);
+        if (v == 0xFFFFFFFF) { continue; }
+        let dd = length(cp - parts[v & 0xFFFF].pos);
         if (dd < bd) { bd = dd; best = v; }
       }
     }
   }
-  if (best != 0xFFFFFFFFu) { best = best & 0xFFFFu; }
-  atomicStore(&atom[select(2u, 3u, k % 2u == 1u) * COARSE * COARSE * COARSE + i], best);
+  if (best != 0xFFFFFFFF) { best = best & 0xFFFF; }
+  atomicStore(&atom[select(2, 3u, k % 2 == 1) * COARSE * COARSE * COARSE + i], best);
 }
 
 fn resolveCell(i: u32) {
@@ -902,10 +902,10 @@ fn resolveFine(@builtin(global_invocation_id) g: vec3u) {
   resolveCell(i + FHALF);         // two cells per thread, as in clearFine
   // and pack the coarse cells for the render (see the note above)
   if (i < COARSE * COARSE * COARSE) {
-    let qi = atomicLoad(&atom[2u * COARSE * COARSE * COARSE + i]);
-    var v = vec4f(0.0);
-    if (qi != 0xFFFFFFFFu) { v = vec4f(parts[qi].pos, 1.0); }
-    if (atomicLoad(&atom[i]) != 0u) { v.w += 2.0; }
+    let qi = atomicLoad(&atom[2 * COARSE * COARSE * COARSE + i]);
+    var v = vec4f(0);
+    if (qi != 0xFFFFFFFF) { v = vec4f(parts[qi].pos, 1); }
+    if (atomicLoad(&atom[i]) != 0) { v.w += 2; }
     vecs[i] = v;
   }
 }
@@ -916,7 +916,7 @@ fn fineAt(c: vec3i) -> f32 {
   return fineF[fIdx(cc)];
 }
 fn liquidDist(p: vec3f) -> f32 {
-  if (PROF) { pc[2] += 1u; profSprayD = 1e9; profBulkD = 1e9; }
+  if (PROF) { pc[2] += 1; profSprayD = 1e9; profBulkD = 1e9; }
   if (u.noliq > 0.5) { return 1e9; }          // debug: dry glass
   // the particle toggle must isolate ONLY the particle field - returning early here once
   // also disabled the table puddle, which made an earlier bisection point at the wrong thing
@@ -945,11 +945,11 @@ fn sprayDist(p: vec3f) -> f32 {
   // in a fragment shader an atomicLoad is not a cached load. Two of them per call plus the
   // dependent read of the seed particle cost 3.1 ms of tier2's 24.8 ms render, for values
   // that are bit-identical once packed.
-  let oc = vec3i(clamp(floor((p - DOM_LO) / CCELL), vec3f(0.0), vec3f(f32(COARSE) - 1.0)));
+  let oc = vec3i(clamp(floor((p - DOM_LO) / CCELL), vec3f(0), vec3f(f32(COARSE) - 1)));
   let cq = vecs[cIdx(oc)];                 // xyz seed particle, w: +1 seed, +2 occupied
   var tri = BAND;
   if (cq.w > 1.5) {
-    if (PROF) { pc[3] += 1u; }
+    if (PROF) { pc[3] += 1; }
     let gp = (p - DOM_LO) / FCELL - 0.5;
     let b  = floor(gp);
     let f  = gp - b;
@@ -960,13 +960,13 @@ fn sprayDist(p: vec3f) -> f32 {
     let x11 = mix(fineAt(c + vec3i(0,1,1)), fineAt(c + vec3i(1,1,1)), f.x);
     tri = mix(mix(x00, x10, f.y), mix(x01, x11, f.y), f.z);
 //#D{
-    if ((XC & 16u) != 0u) {
+    if ((XC & 16) != 0) {
       let c2 = vec3i(b + u._w2);
       let y00 = mix(fineAt(c2 + vec3i(0,0,0)), fineAt(c2 + vec3i(1,0,0)), f.x);
       let y10 = mix(fineAt(c2 + vec3i(0,1,0)), fineAt(c2 + vec3i(1,1,0)), f.x);
       let y01 = mix(fineAt(c2 + vec3i(0,0,1)), fineAt(c2 + vec3i(1,0,1)), f.x);
       let y11 = mix(fineAt(c2 + vec3i(0,1,1)), fineAt(c2 + vec3i(1,1,1)), f.x);
-      tri = min(tri, mix(mix(y00, y10, f.y), mix(y01, y11, f.y), f.z) + 1.0);
+      tri = min(tri, mix(mix(y00, y10, f.y), mix(y01, y11, f.y), f.z) + 1);
     }
 //#D}
   }
@@ -975,18 +975,18 @@ fn sprayDist(p: vec3f) -> f32 {
   var dc = 1.0;
   if (fract(cq.w * 0.5) > 0.25) { dc = (length(p - cq.xyz) - u.prad) * 0.85; }
 //#D{
-  if ((XC & 32u) != 0u) {
-    let c2 = vec3i(clamp(floor((p + u._w2 - DOM_LO) / CCELL), vec3f(0.0), vec3f(f32(COARSE) - 1.0)));
+  if ((XC & 32) != 0) {
+    let c2 = vec3i(clamp(floor((p + u._w2 - DOM_LO) / CCELL), vec3f(0), vec3f(f32(COARSE) - 1)));
     let q2 = vecs[cIdx(c2)];
-    if (fract(q2.w * 0.5) > 0.25) { dc = min(dc, (length(p - q2.xyz) - u.prad) * 0.85 + 1.0); }
+    if (fract(q2.w * 0.5) > 0.25) { dc = min(dc, (length(p - q2.xyz) - u.prad) * 0.85 + 1); }
   }
 //#D}
 
   var d = dc;
-  if (tri < BAND * 0.98) { d = tri - u.prad; if (PROF) { profSpraySrc = 0u; } }  // inside the exact band
+  if (tri < BAND * 0.98) { d = tri - u.prad; if (PROF) { profSpraySrc = 0; } }  // inside the exact band
   else {
     d = max(BAND - u.prad, dc);
-    if (PROF) { pc[4] += 1u; profSpraySrc = select(2u, 1u, dc > BAND - u.prad); }
+    if (PROF) { pc[4] += 1; profSpraySrc = select(2, 1u, dc > BAND - u.prad); }
   }
   return max(d, sdBoxDom(p));
 }
@@ -1013,21 +1013,21 @@ fn rotY(v: vec3f, a: f32) -> vec3f {
 // body 163, shoulder 67, neck 115.
 fn bottleR(y: f32) -> f32 {
   // the neck is slightly tapered, wider where it leaves the shoulder
-  let nr = mix(NECK_R + 0.0014, NECK_R, clamp((y - 0.275) / 0.060, 0.0, 1.0));
+  let nr = mix(NECK_R + 0.0014, NECK_R, clamp((y - 0.275) / 0.060, 0, 1));
   // Span 175 mm, not 115. Smootherstep is nearly flat at both ends, so only about 60% of
   // the span reads as curvature - the visible shoulder was coming out ~2/3 of the arc the
   // reference shows. The flat tails still leave a ~135 mm straight body and ~105 mm neck.
-  let t  = clamp((y - 0.100) / 0.175, 0.0, 1.0);
+  let t  = clamp((y - 0.100) / 0.175, 0, 1);
   // smootherstep, not smoothstep: smoothstep's second derivative jumps at each end, which
   // shows up as a crease where the shoulder meets the body. This is C2, so the silhouette
   // flows from neck to body with no seam.
-  let sm = t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+  let sm = t * t * t * (t * (t * 6 - 15) + 10);
   var r  = mix(BODY_R, nr, sm);
   // heel: 30% of the previous bevel, and eased rather than a straight chamfer so it does
   // not leave a crease where it meets the body
-  let hy = clamp(y / 0.0036, 0.0, 1.0);
-  let hs = hy * hy * hy * (hy * (hy * 6.0 - 15.0) + 10.0);
-  r = min(r, BODY_R - 0.0015 * (1.0 - hs));
+  let hy = clamp(y / 0.0036, 0, 1);
+  let hs = hy * hy * hy * (hy * (hy * 6 - 15) + 10);
+  r = min(r, BODY_R - 0.0015 * (1 - hs));
   return r;
 }
 fn sdBottleLocal(p: vec3f) -> f32 {
@@ -1043,7 +1043,7 @@ fn sdBottleLocal(p: vec3f) -> f32 {
   // view, and a flat 3 mm floor behind the thick round wall stacked the wall's repeated
   // reflections of the horizon into concentric rings. Divided by the radii, not scaled
   // inside length() - that makes the ellipsoid taller, not flatter (the old one was 72 mm).
-  let punt = (length((p - vec3f(0.0, -0.002, 0.0)) / vec3f(0.040, 0.022, 0.040)) - 1.0) * 0.022;
+  let punt = (length((p - vec3f(0, -0.002, 0)) / vec3f(0.040, 0.022, 0.040)) - 1) * 0.022;
   // blended into the flat base over puntSoft rather than meeting it in a crease: the two
   // meet near a right angle, so a smooth max rounds the corner without the bulge it gives
   // surfaces that already run alongside each other
@@ -1061,7 +1061,7 @@ fn sdBottle(p: vec3f) -> f32 {
     // table raised over its rim hides (shot 2). Sunk 1 mm into it, as the glass feet are:
     // a base exactly at the table's height is two coincident surfaces, and float rounding
     // picking between them showed as concentric rings in the bottom of the bottle
-    v = p - vec3f(0.0, u.tableY - 0.001, 0.0);
+    v = p - vec3f(0, u.tableY - 0.001, 0);
   } else {
     if (u.botTilt < 0.01) { return 1e9; }   // tilt 0: not in the scene
     // the mouth sits at the emitter, so the bottle follows the pour's wander for free
@@ -1072,22 +1072,22 @@ fn sdBottle(p: vec3f) -> f32 {
   }
   // cheap bounding sphere first: the full profile is a dozen primitives and this runs on
   // every raymarch step, but the bottle occupies a small part of the scene
-  let b = length(v - vec3f(0.0, BOT_H * 0.50, 0.0)) - 0.186;
+  let b = length(v - vec3f(0, BOT_H * 0.50, 0)) - 0.186;
   if (b > 0.015) { return b; }
-  if (PROF) { pc[8] += 1u; }
+  if (PROF) { pc[8] += 1; }
   return sdBottleLocal(v);
 }
 
 fn map(p: vec3f) -> f32 {
-  if (PROF) { pc[1] += 1u; }
+  if (PROF) { pc[1] += 1; }
 //#D{
-  if (XC != 0u) {
+  if (XC != 0) {
     var d = min(min(sdTower(p), liquidDist(p)), sdBottle(p));
-    let q = p + vec3f(u._w2);
-    if ((XC & 1u) != 0u) { d = min(d, sdTower(q) + 1.0); }
-    if ((XC & 2u) != 0u) { d = min(d, liquidDist(q) + 1.0); }
-    if ((XC & 4u) != 0u) { d = min(d, bulkSDF(q) + 1.0); }
-    if ((XC & 8u) != 0u) { d = min(d, sdBottle(q) + 1.0); }
+    let q = p + u._w2;
+    if ((XC & 1) != 0) { d = min(d, sdTower(q) + 1); }
+    if ((XC & 2) != 0) { d = min(d, liquidDist(q) + 1); }
+    if ((XC & 4) != 0) { d = min(d, bulkSDF(q) + 1); }
+    if ((XC & 8) != 0) { d = min(d, sdBottle(q) + 1); }
     return d;
   }
   if (PROF) {
@@ -1095,8 +1095,8 @@ fn map(p: vec3f) -> f32 {
   let dL = liquidDist(p);
   let dB = sdBottle(p);
   let m  = min(min(dT, dL), dB);
-  if (profMarchS != 0.0 && sdBoxDom(p) <= 0.0) {
-    if (profMarchS > 0.0) {
+  if (profMarchS != 0 && sdBoxDom(p) <= 0) {
+    if (profMarchS > 0) {
       // march steps in air inside the domain box, by what limited them:
       // 80..84 count  tower / spray / bulk liquid / (puddle, gone) / bottle
       // 85..89 summed step size of each, in 0.1 mm
@@ -1104,18 +1104,18 @@ fn map(p: vec3f) -> f32 {
       // 96/97/98 spray from the narrow band / far-field estimate / band floor
       // 100/101 tower from a coupe's bounding cylinder / its exact shape
       var k = 3u;
-      if (dB == m) { k = 4u; } else if (dT == m) { k = 0u; }
-      else if (profSprayD == m) { k = 1u; } else if (profBulkD == m) { k = 2u; }
-      pc[80u + k] += 1u;
-      pc[85u + k] += u32(clamp(m, 0.0, 1.0) * 1e4);
-      let mm = m * 1000.0;
+      if (dB == m) { k = 4; } else if (dT == m) { k = 0; }
+      else if (profSprayD == m) { k = 1; } else if (profBulkD == m) { k = 2; }
+      pc[80 + k] += 1;
+      pc[85 + k] += u32(clamp(m, 0, 1) * 1e4);
+      let mm = m * 1000;
       var hb = 4u;
-      if (mm < 0.25) { hb = 0u; } else if (mm < 1.0) { hb = 1u; } else if (mm < 4.0) { hb = 2u; } else if (mm < 16.0) { hb = 3u; }
-      pc[90u + hb] += 1u;
-      if (k == 1u) { pc[96u + profSpraySrc] += 1u; }
-      if (k == 0u) { pc[select(101u, 100u, profTowerB)] += 1u; }
+      if (mm < 0.25) { hb = 0; } else if (mm < 1) { hb = 1; } else if (mm < 4) { hb = 2; } else if (mm < 16) { hb = 3; }
+      pc[90 + hb] += 1;
+      if (k == 1) { pc[96 + profSpraySrc] += 1; }
+      if (k == 0) { pc[select(101, 100, profTowerB)] += 1; }
     } else {
-      pc[103] += 1u;    // steps inside a medium, inside the box
+      pc[103] += 1;    // steps inside a medium, inside the box
     }
   }
   return m;
@@ -1128,12 +1128,12 @@ fn map(p: vec3f) -> f32 {
 fn planeT(ro: vec3f, rd: vec3f) -> f32 {
   if (rd.y > -1e-6) { return 1e9; }
   let t = (u.tableY - ro.y) / rd.y;
-  if (t < 0.0) { return 1e9; }
+  if (t < 0) { return 1e9; }
   return t;
 }
 
 fn mapN(p: vec3f) -> vec3f {
-  if (PROF) { pc[14] += 1u; }
+  if (PROF) { pc[14] += 1; }
   // Both liquids live on grids interpolated in straight pieces, and a 0.2 mm stencil reads
   // every cell edge as a sharp turn. One control smooths both, in cells (nSmooth): the
   // glass, the bottle and the bowl side keep the fine normal - the glass wall is 1.4 mm.
@@ -1143,7 +1143,7 @@ fn mapN(p: vec3f) -> vec3f {
   if (u.pfield > 0.5 && u.noliq < 0.5 && u.nSmooth * FCELL > 0.00021) {
     let ds = sprayDist(p);
     if (ds < min(min(sdTower(p), sdBottle(p)), bulkSDF(p))) {
-      let w = vec2f(1.0, -1.0) * u.nSmooth * FCELL;
+      let w = vec2f(1, -1) * u.nSmooth * FCELL;
       return normalize( w.xyy * sprayDist(p + w.xyy) + w.yyx * sprayDist(p + w.yyx)
                       + w.yxy * sprayDist(p + w.yxy) + w.xxx * sprayDist(p + w.xxx) );
     }
@@ -1159,22 +1159,22 @@ fn mapN(p: vec3f) -> vec3f {
     if (L > 0.0002) {
       let q  = p - glassOff(g);
       let hs = q.y - (Y0 + L + sampleWave(g, q.xz).x);
-      if (abs(hs) < 0.0004 && hs > length(q - vec3f(0.0, SPH_CY, 0.0)) - R_LIQ &&
+      if (abs(hs) < 0.0004 && hs > length(q - vec3f(0, SPH_CY, 0)) - R_LIQ &&
           sdTower(p) > 0.0003) {
         let w = u.nSmooth * RIM_R / f32(WN);   // half a span: a wave cell is 2 RIM_R / WN
-        let hx = sampleWave(g, q.xz + vec2f(w, 0.0)).x - sampleWave(g, q.xz - vec2f(w, 0.0)).x;
-        let hz = sampleWave(g, q.xz + vec2f(0.0, w)).x - sampleWave(g, q.xz - vec2f(0.0, w)).x;
-        return normalize(vec3f(-hx, 2.0 * w, -hz));
+        let hx = sampleWave(g, q.xz + vec2f(w, 0)).x - sampleWave(g, q.xz - vec2f(w, 0)).x;
+        let hz = sampleWave(g, q.xz + vec2f(0, w)).x - sampleWave(g, q.xz - vec2f(0, w)).x;
+        return normalize(vec3f(-hx, 2 * w, -hz));
       }
     }
   }
-  let e = vec2f(1.0, -1.0) * 0.0002;
+  let e = vec2f(1, -1) * 0.0002;
   return normalize( e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx)
                   + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx) );
 }
 
 
-const FAR      = 14.0;   // the table runs to the horizon; a 4 m clip dropped it to env
+const FAR      = 14;   // the table runs to the horizon; a 4 m clip dropped it to env
 const SURF_EPS = 0.00025;
 const HIT_EPS  = 0.00012;
 
@@ -1194,29 +1194,29 @@ fn marchS(ro: vec3f, rd: vec3f, s: f32, tmax: f32) -> vec3f {
   var rPrev = 0.0;
   var stepL = 0.0;
   loop {
-    if (i >= u.maxSteps) { if (PROF && profPrim) { pc[79] += 1u; } break; }   // 79: primary hit the step cap
+    if (i >= u.maxSteps) { if (PROF && profPrim) { pc[79] += 1; } break; }   // 79: primary hit the step cap
     if (PROF && profPrim) {
       // 64 past the table plane, 65 outside the spray/tower domain box, 66 inside it
-      if (t > profTpl) { pc[64] += 1u; }
-      else if (sdBoxDom(ro + rd * t) > 0.0) { pc[65] += 1u; }
-      else { pc[66] += 1u; }
+      if (t > profTpl) { pc[64] += 1; }
+      else if (sdBoxDom(ro + rd * t) > 0) { pc[65] += 1; }
+      else { pc[66] += 1; }
     }
     if (PROF) { profMarchS = s; }
     let d = map(ro + rd * t) * s;
-    if (PROF) { profMarchS = 0.0; }
-    if (w > 1.0 && (d < 0.0 || d + rPrev < stepL)) {
-      if (PROF) { pc[11] += 1u; }
+    if (PROF) { profMarchS = 0; }
+    if (w > 1 && (d < 0 || d + rPrev < stepL)) {
+      if (PROF) { pc[11] += 1; }
       // Overshot: either the spheres don't overlap, so a surface could sit in the gap, or
       // the step landed INSIDE something - where the overlap test can still pass and the
       // hit would be reported millimetres under the surface. Back to the last safe point,
       // conservative from here on.
       w = 0.9;
       t = tPrev + max(rPrev * 0.9, 0.00006);
-      tPrev = t; rPrev = 0.0; stepL = 0.0;
-      i = i + 1.0;
+      tPrev = t; rPrev = 0; stepL = 0;
+      i = i + 1;
       continue;
     }
-    if (d < HIT_EPS) { return vec3f(t, i, 1.0); }
+    if (d < HIT_EPS) { return vec3f(t, i, 1); }
     tPrev = t; rPrev = d;
     // Past the table plane nothing can win - every caller replaces a farther hit with the
     // analytic table. Stop once the last PROVEN-empty sphere reaches it, not merely when t
@@ -1229,147 +1229,147 @@ fn marchS(ro: vec3f, rd: vec3f, s: f32, tmax: f32) -> vec3f {
     stepL = max(d * w, 0.00006);
     t = t + stepL;
     if (t > FAR) { break; }
-    i = i + 1.0;
+    i = i + 1;
   }
-  return vec3f(t, i, 0.0);
+  return vec3f(t, i, 0);
 }
-fn march(ro: vec3f, rd: vec3f) -> vec3f { return marchS(ro, rd, 1.0, 1e9); }
+fn march(ro: vec3f, rd: vec3f) -> vec3f { return marchS(ro, rd, 1, 1e9); }
 
 // 0 air · 1 glass · 2 champagne · 3 table (opaque).
 // Priority order resolves coincident glass/liquid surfaces — no double refraction.
 fn mediumAt(p: vec3f) -> i32 {
-  if (PROF) { pc[15] += 1u; }
+  if (PROF) { pc[15] += 1; }
   if (p.y < u.tableY) { return 3; }
-  if (sdBottle(p) < 0.0) { return 4; }
-  if (sdTower(p) < 0.0) { return 1; }
-  if (liquidDist(p) < 0.0) { return 2; }
+  if (sdBottle(p) < 0) { return 4; }
+  if (sdTower(p) < 0) { return 1; }
+  if (liquidDist(p) < 0) { return 2; }
   return 0;
 }
 // per medium: 0 air, 1 glass, 2 champagne, 3 table, 4 bottle glass
 fn iorOf(m: i32) -> f32 {
-  return array(1.0, 1.50, 1.34, 1.0, 1.52)[m];
+  return array(1, 1.50, 1.34, 1, 1.52)[m];
 }
 fn sigmaOf(m: i32) -> vec3f {           // absorption: faint green glass, Beer-Lambert gold, olive bottle
-  return array(vec3f(0.0), vec3f(0.6, 0.35, 0.6), vec3f(2.2, 5.5, 16.0), vec3f(0.0),
-               vec3f(260.0, 85.0, 310.0))[m];
+  return array(vec3f(0), vec3f(0.6, 0.35, 0.6), vec3f(2.2, 5.5, 16), vec3f(0),
+               vec3f(260, 85, 310))[m];
 }
 
 fn turbo(x: f32) -> vec3f {
-  let v = clamp(x, 0.0, 1.0);
-  return clamp(vec3f(2.0 * v - 0.4, 1.4 - abs(2.0 * v - 1.0) * 1.6, 1.3 - 2.2 * v),
-               vec3f(0.0), vec3f(1.0));
+  let v = clamp(x, 0, 1);
+  return clamp(vec3f(2 * v - 0.4, 1.4 - abs(2 * v - 1) * 1.6, 1.3 - 2.2 * v),
+               vec3f(0), vec3f(1));
 }
 // out-of-focus party lights: what makes refraction through glass worth looking at
 fn bokeh(rd: vec3f) -> vec3f {
-  let el = asin(clamp(rd.y, -1.0, 1.0));
+  let el = asin(clamp(rd.y, -1, 1));
   let g  = vec2f(atan2(rd.z, rd.x), el) / 0.20;
   let b  = floor(g);
-  var acc = vec3f(0.0);
+  var acc = vec3f(0);
   for (var i = -1; i <= 1; i++) {
     for (var k = -1; k <= 1; k++) {
       let id = b + vec2f(f32(i), f32(k));
-      let cx = u32(i32(id.x) + 2048);
-      let cy = u32(i32(id.y) + 2048);
-      var r  = rnd3(cx, cy, 17u);
+      let cx = u32(id.x + 2048);
+      let cy = u32(id.y + 2048);
+      var r  = rnd3(cx, cy, 17);
       var lf = 1.0;
       // Each cell lives through cycles of bkLife seconds, phase-shifted per cell, and every
       // cycle rolls it a new disc - or none - so discs fade out and come back elsewhere.
       // Brightness fades over the first and last ~21% of a cycle (6f(1-f) reaches 1 there).
-      if (u.bkLife > 0.0) {
-        let lt = u.time / u.bkLife + rnd3(cx, cy, 5u).x;
-        r  = rnd3(cx, cy, 17u + u32(lt));
+      if (u.bkLife > 0) {
+        let lt = u.time / u.bkLife + rnd3(cx, cy, 5).x;
+        r  = rnd3(cx, cy, 17 + u32(lt));
         let f = fract(lt);
-        lf = min(6.0 * f * (1.0 - f), 1.0);
+        lf = min(6 * f * (1 - f), 1);
       }
       if (r.z > 0.46) { continue; }
       let ctr = id + 0.5 + (r.xy - 0.5) * 0.7;
       // breathing: each disc at its own rate and phase. The 3x3 neighbourhood holds a disc
       // up to ~1.1 cells across, so the radius (0.26 at most) has room to grow 4x.
-      let rad = (0.11 + r.x * 0.15) * (1.0 + u.bkBreath * sin(u.time * u.bkSpeed * (0.7 + r.y * 0.6) + r.z * 13.7));
+      let rad = (0.11 + r.x * 0.15) * (1 + u.bkBreath * sin(u.time * u.bkSpeed * (0.7 + r.y * 0.6) + r.z * 13.7));
       let m   = smoothstep(rad, rad * 0.5, length(g - ctr));
-      acc += mix(vec3f(1.0, 0.66, 0.28), vec3f(0.50, 0.70, 1.0), r.y) * m * (0.45 + r.x * 2.2) * lf;
+      acc += mix(vec3f(1, 0.66, 0.28), vec3f(0.50, 0.70, 1), r.y) * m * (0.45 + r.x * 2.2) * lf;
     }
   }
   return acc * exp(-abs(el) * 1.9);
 }
 // lat-long test grid: makes it obvious WHICH direction a reflection or refraction samples
 fn envGrid(rd: vec3f) -> vec3f {
-  let el = asin(clamp(rd.y, -1.0, 1.0));
+  let el = asin(clamp(rd.y, -1, 1));
   let uv = vec2f(atan2(rd.z, rd.x) / 6.2831853 + 0.5, el / 3.14159265 + 0.5);
-  let g  = uv * vec2f(72.0, 36.0);
+  let g  = uv * vec2f(72, 36);
   let fr = abs(fract(g) - 0.5);
   let ln = smoothstep(0.42, 0.50, max(fr.x, fr.y));
-  let g2 = uv * vec2f(12.0, 6.0);
+  let g2 = uv * vec2f(12, 6);
   let f2 = abs(fract(g2) - 0.5);
   let l2 = smoothstep(0.45, 0.50, max(f2.x, f2.y));
-  var c = mix(vec3f(uv.x, uv.y, 0.35) * 0.9, vec3f(1.0), ln * 0.55);
-  c = mix(c, vec3f(1.0), l2);
-  if (abs(el) < 0.015) { c = vec3f(0.1, 1.0, 0.2); }          // horizon
-  if (abs(el) > 1.50)  { c = vec3f(1.0, 0.1, 0.9); }          // poles
-  if (dot(rd, lightDir()) > 0.995) { c = vec3f(1.0, 0.5, 0.0); } // key direction
+  var c = mix(vec3f(uv.x, uv.y, 0.35) * 0.9, vec3f(1), ln * 0.55);
+  c = mix(c, vec3f(1), l2);
+  if (abs(el) < 0.015) { c = vec3f(0.1, 1, 0.2); }          // horizon
+  if (abs(el) > 1.50)  { c = vec3f(1, 0.1, 0.9); }          // poles
+  if (dot(rd, lightDir()) > 0.995) { c = vec3f(1, 0.5, 0); } // key direction
   return c;
 }
 fn env(rd: vec3f) -> vec3f {
   if (u.envg > 0.5) { return envGrid(rd); }
-  let h = clamp(rd.y * 0.5 + 0.5, 0.0, 1.0);
+  let h = clamp(rd.y * 0.5 + 0.5, 0, 1);
   var c = mix(vec3f(0.007, 0.008, 0.013), vec3f(0.034, 0.034, 0.047), h);
-  let kd = clamp(dot(rd, lightDir()), 0.0, 1.0);
-  c += vec3f(1.00, 0.95, 0.86) * pow(kd,  14.0) *  1.0;    // broad softbox: long specular streaks
-  c += vec3f(1.00, 0.97, 0.90) * pow(kd, 420.0) * 34.0;    // hot core
-  c += vec3f(1.00, 0.60, 0.26) * pow(clamp(dot(rd, normalize(vec3f(-0.75, 0.10, 0.35))), 0.0, 1.0), 26.0) * 1.3;
-  c += vec3f(0.38, 0.52, 0.95) * pow(clamp(dot(rd, normalize(vec3f( 0.10,-0.20, 0.95))), 0.0, 1.0),  7.0) * 0.22;
+  let kd = clamp(dot(rd, lightDir()), 0, 1);
+  c += vec3f(1, 0.95, 0.86) * pow(kd,  14) *  1;    // broad softbox: long specular streaks
+  c += vec3f(1, 0.97, 0.90) * pow(kd, 420) * 34;    // hot core
+  c += vec3f(1, 0.60, 0.26) * pow(clamp(dot(rd, normalize(vec3f(-0.75, 0.10, 0.35))), 0, 1), 26) * 1.3;
+  c += vec3f(0.38, 0.52, 0.95) * pow(clamp(dot(rd, normalize(vec3f( 0.10,-0.20, 0.95))), 0, 1),  7) * 0.22;
   // all of it, key lobes too: with the light below the table they would still be seen in
   // the glass, which then looks lit while the table is dark
   return (c + bokeh(rd)) * u.envA;
 }
 fn sky(rd: vec3f) -> vec3f { return env(rd); }
-const CN     : u32 = 768u;
+const CN     : u32 = 768;
 const CEXT   = 0.55;        // half-extent (m); must contain the lit ellipse
-const CSCALE = 3000.0;      // photon energy fixed-point scale
+const CSCALE = 3000;      // photon energy fixed-point scale
 fn lightDir() -> vec3f {
   let ce = cos(u.ltEl);
   return normalize(vec3f(ce * cos(u.ltAz), sin(u.ltEl), ce * sin(u.ltAz)));
 }
 fn causIdx(c: vec2i) -> u32 {
   let q = clamp(c, vec2i(0), vec2i(i32(CN) - 1));
-  return (u32(q.y) * CN + u32(q.x)) * 3u;
+  return (u32(q.y) * CN + u32(q.x)) * 3;
 }
 fn causFetch(c: vec2i) -> vec3f {
   let k = causIdx(c);
-  return vec3f(f32(atomicLoad(&atom[A_CAUST + k])), f32(atomicLoad(&atom[A_CAUST + k + 1u])), f32(atomicLoad(&atom[A_CAUST + k + 2u])));
+  return vec3f(f32(atomicLoad(&atom[A_CAUST + k])), f32(atomicLoad(&atom[A_CAUST + k + 1])), f32(atomicLoad(&atom[A_CAUST + k + 2])));
 }
 fn causFetchF(c: vec2i) -> vec3f {
   let q = clamp(c, vec2i(0), vec2i(i32(CN) - 1));
   return vecs[V_CAUSTF + u32(q.y) * CN + u32(q.x)].xyz;
 }
 fn causticAt(xz: vec2f) -> vec3f {
-  let n = xz / (2.0 * CEXT) + 0.5;
+  let n = xz / (2 * CEXT) + 0.5;
   // clamping the fetch would smear the border texels to infinity as long streaks
-  if (any(n < vec2f(0.0)) || any(n > vec2f(1.0))) { return vec3f(0.0); }
+  if (any(n < vec2f(0)) || any(n > vec2f(1))) { return vec3f(0); }
   let t = n * f32(CN) - 0.5;
   let b = floor(t);
   let f = t - b;
   let c = vec2i(b);
   let a0 = mix(causFetchF(c),               causFetchF(c + vec2i(1, 0)), f.x);
   let a1 = mix(causFetchF(c + vec2i(0, 1)), causFetchF(c + vec2i(1, 1)), f.x);
-  let e = min(min(n.x, n.y), min(1.0 - n.x, 1.0 - n.y));
-  return mix(a0, a1, f.y) / CSCALE * smoothstep(0.0, 0.02, e);
+  let e = min(min(n.x, n.y), min(1 - n.x, 1 - n.y));
+  return mix(a0, a1, f.y) / CSCALE * smoothstep(0, 0.02, e);
 }
 fn tableShade(p: vec3f) -> vec3f {
   let r = length(p.xz);
-  let fall = 1.0 - 0.55 * clamp(r * 1.5, 0.0, 1.0);
+  let fall = 1 - 0.55 * clamp(r * 1.5, 0, 1);
   let amb = vec3f(0.013, 0.013, 0.017);
   // direct light AND caustics both come from the photon map: shadows are free
   let c = causticAt(p.xz) * u.cgain;
   return (amb * u.envA + c) * fall * vec3f(0.97, 0.94, 0.90);
 }
 fn tonemap(x: vec3f) -> vec3f {
-  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3f(0.0), vec3f(1.0));
+  return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), vec3f(0), vec3f(1));
 }
 
 @vertex fn vs(@builtin(vertex_index) i: u32) -> @builtin(position) vec4f {
-  var p = array<vec2f, 3>(vec2f(-1.0, -1.0), vec2f(3.0, -1.0), vec2f(-1.0, 3.0));
-  return vec4f(p[i], 0.0, 1.0);
+  var p = array<vec2f, 3>(vec2f(-1, -1), vec2f(3, -1), vec2f(-1, 3));
+  return vec4f(p[i], 0, 1);
 }
 
 // Short refraction-only walk used to COLOUR a reflection. Sampling env() for a reflection
@@ -1383,11 +1383,11 @@ fn leg(p: vec3f, d: vec3f, med: i32) -> vec3f {
   let tpl = planeT(p, d);
   if (PROF) { profTpl = tpl; }
   var s = 1.0;
-  if (med != 0) { s = -1.0; }
+  if (med != 0) { s = -1; }
   let h = marchS(p, d, s, tpl);
-  var r = vec3f(FAR, 0.0, h.y);
-  if (h.z > 0.5) { r = vec3f(h.x, 2.0, h.y); }
-  if (tpl < r.x) { r = vec3f(tpl, 1.0, h.y); }
+  var r = vec3f(FAR, 0, h.y);
+  if (h.z > 0.5) { r = vec3f(h.x, 2, h.y); }
+  if (tpl < r.x) { r = vec3f(tpl, 1, h.y); }
   return r;
 }
 // turn: at the surface a leg ended on, the normal facing the ray, the medium beyond, the
@@ -1396,12 +1396,12 @@ fn leg(p: vec3f, d: vec3f, med: i32) -> vec3f {
 struct Turn { d: vec3f, F: f32, p: vec3f, med: i32, n: vec3f, medA: i32, tir: bool };
 fn turn(hp: vec3f, d: vec3f, med: i32) -> Turn {
   var n = mapN(hp);
-  if (dot(n, d) > 0.0) { n = -n; }
+  if (dot(n, d) > 0) { n = -n; }
   let medA = mediumAt(hp + d * SURF_EPS);
   let i1 = iorOf(med);
   let i2 = iorOf(medA);
-  let f0 = pow((i1 - i2) / (i1 + i2), 2.0);
-  let F  = f0 + (1.0 - f0) * pow(1.0 - clamp(dot(-d, n), 0.0, 1.0), 5.0);
+  let f0 = pow((i1 - i2) / (i1 + i2), 2);
+  let F  = f0 + (1 - f0) * pow(1 - clamp(dot(-d, n), 0, 1), 5);
   let rf = refract(d, n, i1 / i2);
   if (dot(rf, rf) < 1e-6) {
     let r = reflect(d, n);
@@ -1411,18 +1411,18 @@ fn turn(hp: vec3f, d: vec3f, med: i32) -> Turn {
 }
 
 fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
-  if (PROF) { pc[12] += 1u; }
+  if (PROF) { pc[12] += 1; }
   var p = p0; var d = d0; var med = med0;
-  var tp = vec3f(1.0);
-  var acc = vec3f(0.0);
+  var tp = vec3f(1);
+  var acc = vec3f(0);
   for (var b = 0; b < 3; b++) {
     let lg = leg(p, d, med);
     if (PROF) { pc[13] += u32(lg.z); }
-    if (med == 2) { acc += tp * vec3f(0.95, 0.60, 0.20) * (1.0 - exp(-lg.x * 7.0)) * 0.30; }
+    if (med == 2) { acc += tp * vec3f(0.95, 0.60, 0.20) * (1 - exp(-lg.x * 7)) * 0.30; }
     tp *= exp(-sigmaOf(med) * lg.x);
-    if (lg.y == 0.0) { return acc + tp * env(d); }
+    if (lg.y == 0) { return acc + tp * env(d); }
     let hp = p + d * lg.x;
-    var tab = lg.y == 1.0;
+    var tab = lg.y == 1;
     var sf: Turn;
     if (!tab) { sf = turn(hp, d, med); tab = sf.medA == 3; }
     if (tab) { return acc + tp * tableShade(hp); }
@@ -1432,24 +1432,24 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
 }
 
 @fragment fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
-  let uv = (fc.xy * 2.0 - u.res) / u.res.y;
+  let uv = (fc.xy * 2 - u.res) / u.res.y;
   let ro = u.camPos;
-  let fw = normalize(vec3f(0.0, u.tgtY, 0.0) - ro);
-  let rt = normalize(cross(fw, vec3f(0.0, 1.0, 0.0)));
+  let fw = normalize(vec3f(0, u.tgtY, 0) - ro);
+  let rt = normalize(cross(fw, vec3f(0, 1, 0)));
   let up = cross(rt, fw);
   let rd = normalize(uv.x * rt - uv.y * up + fw * u.fov);
 
   var p   = ro;
   var d   = rd;
   var med = 0;
-  var tp  = vec3f(1.0);        // throughput
-  var acc = vec3f(0.0);
+  var tp  = vec3f(1);        // throughput
+  var acc = vec3f(0);
   var fin = false;
 //#D{
   var steps = 0.0;                // for the steps, tir and normals views
   var tir = 0.0;
   var firstHit = 0.0;
-  var firstN = vec3f(0.0);
+  var firstN = vec3f(0);
 //#D}
 //#D{
   var pSpray = 0u; var pGlass = 0u; var pBulk = 0u;   // profiler: entries per ray
@@ -1463,39 +1463,39 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
 //#D{
     steps += lg.z;
 //#D}
-    if (PROF) { pc[9] += 1u; pc[10] += u32(lg.z); pc[31u + min(u32(b), 10u)] += u32(lg.z); }
+    if (PROF) { pc[9] += 1; pc[10] += u32(lg.z); pc[31 + min(u32(b), 10)] += u32(lg.z); }
     if (PROF && b == 0) {
       // 67/68/69 primary rays ending on the table / in the environment / at an object, and
       // 70/71/72 their march steps; 73..78 steps per primary ray <8 <16 <32 <64 <128 >=128
       var k = 69u;
-      if (lg.y == 1.0) { k = 67u; } else if (lg.y == 0.0) { k = 68u; }
-      pc[k] += 1u; pc[k + 3u] += u32(lg.z);
-      pc[73u + min(u32(log2(max(lg.z, 1.0) / 4.0)), 5u)] += 1u;
+      if (lg.y == 1) { k = 67; } else if (lg.y == 0) { k = 68; }
+      pc[k] += 1; pc[k + 3] += u32(lg.z);
+      pc[73 + min(u32(log2(max(lg.z, 1) / 4)), 5)] += 1;
     }
 
     // cheap single-scatter: champagne glows gold rather than going black in depth
-    if (med == 2) { acc += tp * vec3f(0.95, 0.60, 0.20) * (1.0 - exp(-ht * 7.0)) * 0.30; }
+    if (med == 2) { acc += tp * vec3f(0.95, 0.60, 0.20) * (1 - exp(-ht * 7)) * 0.30; }
     tp *= exp(-sigmaOf(med) * ht);           // absorption along the segment just travelled
 
-    if (lg.y == 0.0) {
-      if (PROF) { pc[16u + min(u32(b), 10u)] += 1u; pc[27] += 1u; }
+    if (lg.y == 0) {
+      if (PROF) { pc[16 + min(u32(b), 10)] += 1; pc[27] += 1; }
       acc += tp * env(d); fin = true; break;
     }
 
     let hp = p + d * ht;
     // The table can also be reached by a marched hit (a surface leading onto it), not only
     // by the analytic plane test; either way it is the table.
-    var tab = lg.y == 1.0;
+    var tab = lg.y == 1;
     var sf: Turn;
     if (!tab) {
       sf = turn(hp, d, med);
 //#D{
-      if (b == 0) { firstHit = 1.0; firstN = sf.n; }
+      if (b == 0) { firstHit = 1; firstN = sf.n; }
 //#D}
       tab = sf.medA == 3;
     }
     if (tab) {
-      if (PROF) { pc[16u + min(u32(b), 10u)] += 1u; pc[28] += 1u; }
+      if (PROF) { pc[16 + min(u32(b), 10)] += 1; pc[28] += 1; }
       acc += tp * tableShade(hp); fin = true; break;
     }
     let n = sf.n;
@@ -1503,17 +1503,17 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
     let F = sf.F;
 
     // mousse sits on the liquid's upward-facing surface: opaque, diffuse, not refractive
-    if (medA == 2 && n.y > 0.5 && u.foamG > 0.0) {
+    if (medA == 2 && n.y > 0.5 && u.foamG > 0) {
       let gi = glassIdx(hp);
       let fm = sampleWave(gi, (hp - glassOff(gi)).xz).z * u.foamG;
-      let w  = clamp(fm, 0.0, 1.0);
+      let w  = clamp(fm, 0, 1);
       if (w > 0.004) {
-        let l   = clamp(dot(n, lightDir()), 0.0, 1.0);
+        let l   = clamp(dot(n, lightDir()), 0, 1);
         let lit = vec3f(0.94, 0.92, 0.88) * (0.22 + 0.78 * l) + vec3f(0.35, 0.28, 0.16) * 0.25;
         acc += tp * lit * w;
-        tp *= (1.0 - w);
+        tp *= (1 - w);
         if (max(tp.x, max(tp.y, tp.z)) < 0.02) {
-          if (PROF) { pc[16u + min(u32(b), 10u)] += 1u; pc[29] += 1u; }
+          if (PROF) { pc[16 + min(u32(b), 10)] += 1; pc[29] += 1; }
           fin = true; break;
         }
       }
@@ -1537,16 +1537,16 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
     acc += tp * F * rcol * u.refl;
 
 //#D{
-    if (sf.tir) { tir = tir + 1.0; }
+    if (sf.tir) { tir = tir + 1; }
     else if (PROF && med == 0) {
-      if (medA == 1) { pGlass += 1u; }
-      if (medA == 2) { if (abs(bulkSDF(hp)) < 0.004) { pBulk += 1u; } else { pSpray += 1u; } }
+      if (medA == 1) { pGlass += 1; }
+      if (medA == 2) { if (abs(bulkSDF(hp)) < 0.004) { pBulk += 1; } else { pSpray += 1; } }
     }
 //#D}
-    if (!sf.tir) { tp *= (1.0 - F); }         // a refraction loses what Fresnel reflects
+    if (!sf.tir) { tp *= (1 - F); }         // a refraction loses what Fresnel reflects
     d = sf.d; p = sf.p; med = sf.med;
     if (max(tp.x, max(tp.y, tp.z)) < 0.02) {
-      if (PROF) { pc[16u + min(u32(b), 10u)] += 1u; pc[29] += 1u; }
+      if (PROF) { pc[16 + min(u32(b), 10)] += 1; pc[29] += 1; }
       fin = true; break;
     }
   }
@@ -1557,14 +1557,14 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
   // into concentric rings, which is what this replaced.)
   if (!fin) {
     if (PROF) {
-      pc[16u + min(u32(u.bounces), 10u)] += 1u; pc[30] += 1u;
+      pc[16 + min(u32(u.bounces), 10)] += 1; pc[30] += 1;
       // what the budget-exhausted rays were doing: 42 their TIR reflections; 44..47 their
       // remaining throughput <.25 <.5 <.75 >=.75; 48..52 the medium they ended in (air,
       // glass, liquid, -, bottle); 53/54/55 spray-drop / glass / bulk-liquid entries
       pc[42] += u32(tir);
       let mt = max(tp.x, max(tp.y, tp.z));
-      pc[44u + min(u32(mt * 4.0), 3u)] += 1u;
-      pc[48u + u32(clamp(med, 0, 4))] += 1u;
+      pc[44 + min(u32(mt * 4), 3)] += 1;
+      pc[48 + u32(clamp(med, 0, 4))] += 1;
 //#D{
       pc[53] += pSpray; pc[54] += pGlass; pc[55] += pBulk;
 //#D}
@@ -1580,9 +1580,9 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
 //#D{
   let v = u.view;
   if (v > 0.5 && v < 1.5) {
-    col = turbo(steps / (u.maxSteps * 2.0));
+    col = turbo(steps / (u.maxSteps * 2));
   } else if (v > 1.5 && v < 2.5) {
-    col = vec3f(0.0);
+    col = vec3f(0);
     if (firstHit > 0.5) { col = firstN * 0.5 + 0.5; }
   } else if (v > 6.5) {
     // solo: the bottle alone, upright at the origin, flat-lit for shape comparison
@@ -1590,23 +1590,23 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
     loop {
       if (i >= u.maxSteps) { break; }
       let d = sdBottleLocal(ro + rd * t);
-      if (d < 0.00010) { got = 1.0; break; }
+      if (d < 0.00010) { got = 1; break; }
       t = t + max(d * 0.85, 0.00006);
       if (t > FAR) { break; }
-      i = i + 1.0;
+      i = i + 1;
     }
     col = vec3f(0.90, 0.90, 0.91);
     if (got > 0.5) {
       let q = ro + rd * t;
-      let e = vec2f(1.0, -1.0) * 0.00018;
+      let e = vec2f(1, -1) * 0.00018;
       let n = normalize(e.xyy * sdBottleLocal(q + e.xyy) + e.yyx * sdBottleLocal(q + e.yyx)
                       + e.yxy * sdBottleLocal(q + e.yxy) + e.xxx * sdBottleLocal(q + e.xxx));
-      let l = clamp(dot(n, normalize(vec3f(-0.35, 0.45, 0.82))), 0.0, 1.0);
-      col = vec3f(0.07, 0.20, 0.09) * (0.22 + 1.0 * l) + vec3f(1.0) * pow(l, 42.0) * 0.75;
+      let l = clamp(dot(n, normalize(vec3f(-0.35, 0.45, 0.82))), 0, 1);
+      col = vec3f(0.07, 0.20, 0.09) * (0.22 + 1 * l) + 1.0 * pow(l, 42) * 0.75;
     }
   } else if (v > 5.5) {
     // red = this pixel's path underwent total internal reflection
-    col = mix(col * 0.25, vec3f(1.0, 0.1, 0.05), clamp(tir, 0.0, 1.0));
+    col = mix(col * 0.25, vec3f(1, 0.1, 0.05), clamp(tir, 0, 1));
   } else if (v > 3.5 && v < 5.5) {
     // isolate one field: 4 = liquid only, 5 = glass only
     var t = 0.0; var i = 0.0; var got = 0.0;
@@ -1615,15 +1615,15 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
       let q = ro + rd * t;
       var d = liquidDist(q);
       if (v > 4.5) { d = sdTower(q); }
-      if (d < 0.00015) { got = 1.0; break; }
+      if (d < 0.00015) { got = 1; break; }
       t = t + max(d * 0.9, 0.00008);
       if (t > FAR) { break; }
-      i = i + 1.0;
+      i = i + 1;
     }
     col = vec3f(0.025);
     if (got > 0.5) {
       let q = ro + rd * t;
-      let e = vec2f(1.0, -1.0) * 0.0003;
+      let e = vec2f(1, -1) * 0.0003;
       var n: vec3f;
       if (v > 4.5) {
         n = normalize(e.xyy * sdTower(q + e.xyy) + e.yyx * sdTower(q + e.yyx)
@@ -1634,7 +1634,7 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
       }
       var base = vec3f(0.95, 0.74, 0.30);
       if (v > 4.5) { base = vec3f(0.55, 0.72, 0.95); }
-      col = base * (0.15 + 0.85 * clamp(dot(n, lightDir()), 0.0, 1.0));
+      col = base * (0.15 + 0.85 * clamp(dot(n, lightDir()), 0, 1));
     }
   } else if (v > 2.5 && v < 3.5) {
     let hh = march(ro, rd);
@@ -1651,11 +1651,11 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
 //#D}
   col = pow(col, vec3f(0.4545));
   if (PROF) {
-    pc[0] = 1u;
-    let bank = ((u32(fc.x) * 7u + u32(fc.y) * 13u) & 63u) * 128u;
-    for (var k = 0u; k < 112u; k++) { if (pc[k] != 0u) { atomicAdd(&prof[bank + k], pc[k]); } }
+    pc[0] = 1;
+    let bank = ((u32(fc.x) * 7 + u32(fc.y) * 13) & 63) * 128;
+    for (var k = 0u; k < 112; k++) { if (pc[k] != 0) { atomicAdd(&prof[bank + k], pc[k]); } }
   }
-  return vec4f(col, 1.0);
+  return vec4f(col, 1);
 }
 </script>
 

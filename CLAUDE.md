@@ -467,12 +467,32 @@ it.** Setup longhand (15 bind-group entries spelled out, zero-fill uploads WebGP
 does, a uniform write per dead field, URL parsing that survived as dead calls) was 842 + 251
 bytes. Tables and generated layouts in the harness itself fixed it with one source of truth.
 
-**GLSL-minifier syntax tricks don't pay in WGSL under brotli - measured.** On the shipped
+**Most GLSL-minifier syntax tricks don't pay in WGSL - measured.** On the shipped
 payload: `vec3f(0.)` -> `vec3f()` 48 chars shorter, 0 bytes compressed; one-letter
-`alias` for vec2f/3f/4f +18; splatting equal constructor arguments +18; dropping the dot
-on integer float literals -16 at best (unchecked upper bound). Most of Shader Minifier's
-other transforms have no WGSL form (braces are mandatory, no comma operator, no ternary
-statements, no overloading). Don't spend time here.
+`alias` for vec2f/3f/4f +18; splatting equal constructor arguments +18. Most of Shader
+Minifier's other transforms have no WGSL form (braces are mandatory, no comma operator, no
+ternary statements, no overloading).
+
+**The exception: write literals sloppy - the harness WGSL does.** WGSL never converts
+between concrete types (an `i32` is never silently an `f32`, unlike C), but literals are
+*abstract* and take the type their context needs. So `x * 2` where x is f32, `n * 4` where
+n is u32, `clamp(v, 0, 1)`, `vec4f(col, 1)`. On 31 Oct, 520 such edits (dropped `.0` on
+integer-valued floats, dropped `u` suffixes; the few casts and splats were noise) took
+intro.cmd 9 319 -> 9 213: the float dots alone were -80 under Roadroller, against "-16 at
+best" estimated before it. Keep writing new code that way. Two rules, both paid for:
+- **Compiling proves the type, not the value.** `1./4294967296.` in the hash became
+  `1/4294967296` - integer division, 0, every random number 0 - and compiled clean. Keep
+  the dot wherever BOTH operands of `/` or `%` would be integers, and on a `const` whose
+  value is used that way.
+- **A declaration's literal IS its type.** `var t = 0.0;` -> `var t = 0;` makes `t` an
+  i32. The compiler catches it only if something later forces f32.
+The edits were found by compiling every candidate alone, combining greedily while the
+module still compiled, scanning for integer division, then a pixel-exact A/B (0 pixels).
+
+**The release's uniforms have no names.** `nameless_uniforms` (build.py) turns `struct U`
+into `array<vec4f,6>` and `u.time` into `u[0].z`, offsets unchanged - the JS fills the
+buffer positionally. -32 fair. A uniform field must be f32 or vecNf and must not straddle
+a 16-byte slot, or the build stops; the harness keeps its names.
 
 **The build runs Roadroller - Blueberry's fork - on the page's script, brotli on top.**
 Context mixing beats brotli alone: on 31 Oct, 10 306 -> 9 944 with stock 2.1.0 and
@@ -518,7 +538,7 @@ chain - brotli alone ranked `unsafe` second, Roadroller ranked it last.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 218 bytes. `intro.cmd` is **9 336** (31 Oct 2026), 1 144
+  stale. Our dropper header is 218 bytes. `intro.cmd` is **9 213** (31 Oct 2026), 1 021
   OVER, with the start screen, the sound engine and the lettering in but the score empty;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
