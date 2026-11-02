@@ -531,6 +531,16 @@ of another (`.94` -> `.95`, `1.52` -> `1.5`, `31` -> `32`, ...) read -33 with th
 state and +3 with the default one; subsets +15..+18 default. Not worth judging 41 look
 changes for - a perturbation of this size moves the result ±20 either way.
 
+**Exact micro-rewrites pay in bulk (2 Nov): 62 of them, -160 shipped, -156 fair, ~800
+chars of shader.** Each is a few bytes and none changes a pixel beyond reload noise:
+single-use `let`s and `var r; ...; return r` folded into the expression; clamps dropped
+where the range is proven (a distance is >= 0, an index already in range, a mask already
+applied by the flood); `loop { if (c) { break; } }` as `while`; `vec3u(v)` for three
+`u32()` calls; a `fin` flag replaced by zeroing the throughput; two small single-caller
+helpers (sprayDist, planeT) inlined. The whole list is in the 2 Nov commit. Not every
+candidate survives the packer: the hex float `0x1p-32` split into `0x1 p-32` and failed
+to compile - check the release after a batch like this.
+
 **Nine compute entry points are cheaper than one (2 Nov).** One `@compute fn` switching on
 an `@id(0) override K`, the JS making the nine pipelines with `constants: { 0: k }`,
 indices in the dispatch lists: +65 shipped, +87 with the default packer state. The nine
@@ -623,7 +633,7 @@ chain - brotli alone ranked `unsafe` second, Roadroller ranked it last.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 522** (2 Nov 2026), 330
+  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 362** (2 Nov 2026), 170
   OVER, with the start screen, the sound engine and the lettering in but the score empty;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
