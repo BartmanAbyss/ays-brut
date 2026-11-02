@@ -530,6 +530,10 @@ Merging near-equal shader literals likewise (2 Nov): all 41 single-use values wi
 of another (`.94` -> `.95`, `1.52` -> `1.5`, `31` -> `32`, ...) read -33 with the saved
 state and +3 with the default one; subsets +15..+18 default. Not worth judging 41 look
 changes for - a perturbation of this size moves the result ±20 either way.
+Exponent literals, the same (2 Nov): `.00006` -> `6e-5`, `.00025` -> `25e-5`, twelve
+literals each a character or two shorter, as a pass after wgslender: +12 shipped, +6
+fair. A run of `.000` is better predicted than a fresh `e-`. (`0.0` is already `0.`, and
+its dot must stay - it is the declaration's type.)
 
 **Exact micro-rewrites pay in bulk (2 Nov): 62 of them, -160 shipped, -156 fair, ~800
 chars of shader.** Each is a few bytes and none changes a pixel beyond reload noise:
@@ -633,7 +637,7 @@ chain - brotli alone ranked `unsafe` second, Roadroller ranked it last.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 362** (2 Nov 2026), 170
+  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 343** (2 Nov 2026), 151
   OVER, with the start screen, the sound engine and the lettering in but the score empty;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
