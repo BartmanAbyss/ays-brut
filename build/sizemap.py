@@ -73,13 +73,11 @@ JS = {
         cut('  const SCORE = [', '  // The whole soundtrack'),
         cut('    const r3 = rng(5);', '    const lb = bus = gain(1, out);')],
     '  audio: drips + splashes': [
-        cut('    const EV = [];', '    // ── the liquid: the bubble model ──'),
-        cut('    for (const [t, drip, nr, pan] of EV) {', '    // the pour: a dense population')],
+        cut('    // drips and splashes, as many as the spray', '    // the pour: a dense population')],
     '  audio: cork pop': [cut('    for (let i = 0, ph = 0, tp = 0, lo = 0, i0 = ', '    for (const b of bx) {')],
     '  audio: reverbs': [cut('    for (const [from, len, mix] of [[pb, ', '    const b = await o.startRendering();')],
     '  audio: pour glugs': [cut('    const glugP = t => {', '    // fizz: CO2 bubbles')],
-    '  audio: fizz': [cut('    for (let t = 0; t < SHOW_END; t -= Math.log(1 - r2()) / 300)',
-                          '    // The cork, before any picture')],
+    '  audio: fizz': [cut('    // fizz: CO2 bubbles bursting', '    // The cork, before any picture')],
     'lettering (stroke font, SVG, fades)': [
         ('PAGE', ''),
         cut('  // [from, to] for each line', '  // The show at time t, as a function'),
@@ -114,11 +112,11 @@ JS_REGIONS = [
     ('timeline evaluation (showAt)', '  // The show at time t, as a function'),
     ('audio: context, buses', '  const SCORE = ['),
     ('audio: pad synth', '    const r3 = rng(5);'),
-    ('audio: drip/splash timing', '    const lb = bus = gain(1, out);'),
+    ('audio: liquid on the timeline (ramps, loudness, each)', '    const lb = bus = gain(1, out);'),
     ('audio: bubble model (bub, pop)', '    const r2 = rnd;'),
-    ('audio: drips + splashes', '    for (const [t, drip, nr, pan] of EV) {'),
+    ('audio: drips + splashes', '    // drips and splashes, as many as the spray'),
     ('audio: pour glugs', '    const glugP = t => {'),
-    ('audio: fizz', '    for (let t = 0; t < SHOW_END; t -= Math.log(1 - r2()) / 300)'),
+    ('audio: fizz', '    // fizz: CO2 bubbles bursting'),
     ('audio: cork pop', '    for (let i = 0, ph = 0, tp = 0, lo = 0, i0 = '),
     ('audio: mix, reverbs, offline render', '    for (const b of bx) {'),
     ('start screen, audio start', '  let ac, tA;'),
@@ -127,7 +125,7 @@ JS_SPANS = [
     ('bottle wander', '    const wob = tt =>', '    canvas.nextSibling.style.opacity = fade;'),
     ('lettering', '    canvas.nextSibling.style.opacity = fade;', '    const V = shotVals(showT);'),
     ('lettering', '    drawText(showT);', '    const enc = device.createCommandEncoder();'),
-    ('frame: show clock, locked to the audio', '    let nShow;', '    for (let i = 0; i < nShow; i++) {'),
+    ('frame: show clock, locked to the audio', '    let nShow;', '    let big = false;'),
 ]
 
 
@@ -156,7 +154,8 @@ def js_line_map(js, jmin, ren):
     tmp, out = os.path.join(ROOT, '_sm_in.js'), os.path.join(ROOT, '_sm_out.js')
     try:
         open(tmp, 'wb').write(js.encode())
-        B.run_tool('terser', [tmp, '--compress', '--mangle', '--module',
+        # the build's own options exactly, or the JS differs and the map is refused
+        B.run_tool('terser', [tmp, '--compress', 'passes=2', '--mangle', '--module',
                               '--source-map', 'url=_sm_out.js.map', '-o', out])
         code = open(out, encoding='utf-8').read()
         smap = json.load(open(out + '.map', encoding='utf-8'))

@@ -1465,14 +1465,16 @@ repeated chunks at runtime buys much - only code that genuinely goes away does. 
 changes with the packer's DEFAULT state on both sides: the saved search state is tuned to
 the shader it was searched on and flatters it by ~100 bytes against any edit.
 
-#### The size map (30 Oct, `python build/sizemap.py`)
+#### The size map (2 Nov, `python build/sizemap.py`)
 
-Measured through the real build, so it can be re-run after any change. **intro.cmd 10 507
-= dropper 310 + shader 6 203 + JS and page 3 994.**
+Measured through the real build, so it can be re-run after any change. It measures the
+pipeline up to brotli and leaves Roadroller out, so its total is ~770 above the shipped
+`intro.cmd` (9 055): **brotli alone 9 820 = dropper 218 + shader 5 961 + JS and page 3 641**
+(10 165 with the packer's default state). The proportions still say where the bytes are;
+what a cut saves under Roadroller differs.
 
-- **share**: the shader in shipped order, item by item, each charged what brotli adds for
-  it. Adds up exactly to 6 203, but order matters: code that echoes something earlier
-  comes cheap.
+- **share**: in shipped order, item by item, each charged what brotli adds for it. Adds up
+  exactly to the total, but order matters: code that echoes something earlier comes cheap.
 - **cut**: remove the system, rebuild, and the difference is what cutting it would save.
   Shader cuts leave call sites in other functions, so they slightly undercount.
 - **cut/def**: the same with the packer's default state, a check that the saved state is
@@ -1482,70 +1484,68 @@ Run to run, the noise is about ±40 bytes.
 
 | shader system | share | cut | cut/def |
 |---|---|---|---|
-| render core (`fs`, march, normals, `leg`/`turn`, `reflColour`, tonemap) | 1 358 | 1 292 | 1 492 |
-| spray grids (narrow band, JFA far field: 4 kernels) | 976 | 753 | 805 |
-| particle sim (`simParticles`) | 757 | 682 | 720 |
-| photons + caustic map | 641 | 497 | 587 |
-| coupe + tower | 490 | 335 | 427 |
-| environment + bokeh (bokeh alone: cut 242) | 421 | 372 | 360 |
-| bottle | 388 | 323 | 354 |
-| plumbing (uniform struct, buffers, hashes) | 337 | 139 | 184 |
-| spray SDF in the render (`sprayDist`) | 239 | 176 | 216 |
-| bulk champagne SDF | 230 | 133 | 216 |
-| waves + foam | 218 | 255 | 297 |
-| glass volumes + overflow | 82 | 106 | 89 |
-| bubbles | 66 | 44 | 39 |
+| render core (`fs`, march, normals, `leg`/`turn`, `reflColour`, `tableShade`, tonemap) | 1 593 | 1 219 | 1 477 |
+| spray grids (narrow band, JFA far field) | 874 | 658 | 761 |
+| particle sim (`simParticles`) | 768 | 638 | 696 |
+| photons + caustic map | 514 | 448 | 539 |
+| coupe + tower | 408 | 279 | 393 |
+| plumbing (uniforms, buffers, hashes) | 309 | 76 | 137 |
+| environment + bokeh | 296 | 246 | 302 |
+| waves + foam | 285 | 207 | 242 |
+| bottle | 262 | 217 | 284 |
+| bulk champagne SDF | 261 | 123 | 157 |
+| spray SDF in the render (`sprayDist`) | 227 | 142 | 181 |
+| bubbles | 97 | 47 | 58 |
+| glass volumes + overflow | 51 | 86 | 53 |
+
+**Render core per function (share):** `fs` 406, `reflColour` 174, `mapN` 173, `marchS` 152,
+`turn` 127, `tableShade` 115, `leg` 90, `lightDir` 67, `vs` 66, `sigmaOf` 59, `map` 56,
+`tonemap` 38, `planeT` 38, the rest under 25. **Plumbing:** `pcg3d` 56, buffer declarations
+~140, `Particle` 36, `PI` 36, `rnd3` 35, the rest ~0 (the uniforms have no struct since
+`nameless_uniforms`).
 
 | JS system | cut | cut/def |
 |---|---|---|
-| audio, all of it (synth, liquid sound, audio clock) | 1 159 | 1 188 |
-| - pad synth (plays nothing: the score is empty) | 296 | 284 |
-| - drips + splashes | 144 | 150 |
-| - cork pop | 124 | 102 |
-| - reverbs | 93 | 83 |
-| - pour glugs | 49 | 54 |
-| - fizz | 16 | 29 |
-| lettering (stroke font, SVG, fades) | 728 | 724 |
-| timeline keys (40 `SHOW` rows) | 311 | 279 |
-| shot table (`SHOT_V`) | 62 | 59 |
-| bottle wander | 38 | 39 |
-| core: WebGPU setup, frame loop and clock, uniforms, start, page (the rest) | 1 696 | |
+| audio, all of it (synth, liquid sound, audio clock) | 1 250 | 1 207 |
+| - pad synth (plays nothing: the score is empty) | 304 | 296 |
+| - drips + splashes | 113 | 62 |
+| - cork pop | 67 | 118 |
+| - pour glugs | 54 | 16 |
+| - reverbs | 47 | 75 |
+| - fizz | 22 | 21 |
+| lettering (stroke font, SVG, fades) | 557 | 557 |
+| timeline keys (`SHOW` rows) | 268 | 273 |
+| shot table (`SHOT_V`) | 2 | 32 |
+| bottle wander | 8 | 3 |
+| core: WebGPU setup, frame loop and clock, uniforms, start, page (the rest) | 1 556 | |
 
-The audio's parts add up to 722 of its 1 159. The rest is what they share: the bubble
-model, the offline render and the clock that follows the audio.
+The audio's parts add up to ~610 of its 1 250. The rest is what they share: the bubble
+model, the liquid's timeline helpers, buses, the offline render and the clock that
+follows the audio.
 
 **JS share by region.** Terser's source map ties each minified character to its source line;
-charged a prefix at a time like the shader, the shares add up exactly to 3 994.
+charged a prefix at a time like the shader, the shares add up exactly to 3 641.
 
 | JS region | share | | JS region | share |
 |---|---|---|---|---|
-| lettering | 735 | | audio: pad synth | 299 |
-| timeline keys (`SHOW` rows) | 388 | | audio: bubble model (`bub`, `pop`) | 205 |
-| frame: dispatches + render pass | 268 | | audio: context, buses | 130 |
-| uniforms (`writeUniforms`) | 221 | | audio: cork pop | 125 |
-| frame: sim stepping on the clock | 212 | | audio: mix, reverbs, offline render | 113 |
-| timeline evaluation (`evalShow`) | 172 | | audio: drip/splash timing | 99 |
-| buffers + bind group | 168 | | audio: drips + splashes | 88 |
-| start screen, audio start | 134 | | audio: pour glugs | 81 |
-| device, canvas context, shader module | 127 | | audio: fizz | 4 |
-| pipelines | 92 | | shot table (`SHOT_V`) | 67 |
-| clock state | 63 | | bottle wander | 65 |
-| constants | 49 | | page and glue | 42 |
-| frame: submit, loop | 44 | | frame: show clock, locked to the audio | 3 |
+| lettering | 617 | | audio: pad synth | 288 |
+| timeline keys (`SHOW` rows) | 316 | | audio: bubble model (`bub`, `pop`) | 198 |
+| frame: dispatches + render pass | 270 | | audio: liquid on the timeline (ramps, loudness, `each`) | 145 |
+| uniforms (`writeUniforms`) | 232 | | audio: mix, reverbs, offline render | 136 |
+| buffers + bind group | 156 | | audio: context, buses | 118 |
+| device, canvas context, shader module | 152 | | audio: cork pop | 118 |
+| start screen, audio start | 123 | | audio: drips + splashes | 108 |
+| pipelines | 99 | | audio: pour glugs | 68 |
+| shot table (`SHOT_V`) | 96 | | audio: fizz | 28 |
+| frame: sim stepping on the clock | 88 | | bottle wander | 35 |
+| timeline evaluation (`showAt`) | 78 | | constants | 30 |
+| clock state | 45 | | page and glue | 24 |
+| frame: show clock, locked to the audio | 39 | | frame: submit, loop | 34 |
 
-Where a region has a cut figure too, the two agree within ~10 bytes, except the timeline
-keys (share 388, cut 311).
-
-Harness-only state still in the release's frame loop: the fast-forward and seek bursts
-(`ffSteps`, `burstSteps`), `redrawOnly`, and the HUD's fps counters. The release never
-changes them, but terser cannot prove that. The build now pins them to their constant
-values (`REWRITES` in `build/build.py`): **10 507 -> 10 464**. The tables above are from
-before that change.
-
-**Render core per function (share):** `fs` 409, `mapN` 188, `reflColour` 150, `marchS` 120,
-`turn` 111, `tableShade` 90, `leg` 65, `vs` 55, `iorOf` 41, `lightDir` 39, `tonemap` 36,
-`map` 27, `sigmaOf` 16, the rest ~0. **Plumbing:** `pcg3d` 81, uniform struct 50, buffer
-declarations ~115, `rnd3` 27, the rest ~0.
+Since 30 Oct (10 507 brotli alone, dropper 310): the dropper -92, the shader -242 (sloppy
+literals, nameless uniforms, the solid flat-based bottle, the leaner bokeh), the JS and
+page -353 (`showAt` instead of named fields, the trimmed keys, the simpler clock, the frame
+loop's leftovers pinned) - and Roadroller on top of all of it.
 
 ### Brotli, by serving rather than decompressing
 

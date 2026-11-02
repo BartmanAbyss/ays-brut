@@ -552,6 +552,10 @@ def pretty_page(payload, pj, pw):
     head, rest = payload.split('<script>', 1)
     head = re.sub(r'<(/canvas|svg|path|/svg)\b', lambda m: '\n' + ('  ' if m.group(1) == 'path' else '') + '<' + m.group(1), head)
     var = re.search(r';var (\w+)=`', rest).group(1)
+    # the shader lookup as assemble ships it: a one-letter variable, not getElementById
+    import pack
+    assert pj.count(pack.SHADER_LOOKUP) == 1, 'pretty JS no longer reads the shader by id'
+    pj = pj.replace(pack.SHADER_LOOKUP, var)
     return (head.strip() + '\n<script>\n' + pj.rstrip() + '\n;var ' + var + ' = `\n' + pw.rstrip() +
             '\n`</script>\n')
 
