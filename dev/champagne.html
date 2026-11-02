@@ -972,8 +972,9 @@ fn rotY(v: vec3f, a: f32) -> vec3f {
 // a wide smooth-min rounds away entirely. Measured off the reference, of 345 mm:
 // body 163, shoulder 67, neck 115.
 fn bottleR(y: f32) -> f32 {
-  // the neck is slightly tapered, wider where it leaves the shoulder
-  let nr = mix(NECK_R + 0.0014, NECK_R, clamp((y - 0.275) / 0.060, 0, 1));
+  // Body to neck in one smootherstep - no neck taper and no heel bevel since 2 Nov (-34
+  // bytes): the taper (1.4 mm wider at the shoulder) never showed, and the bevel's only
+  // trace was a bright ring and a crisper edge at the base in shot 2.
   // Span 175 mm, not 115. Smootherstep is nearly flat at both ends, so only about 60% of
   // the span reads as curvature - the visible shoulder was coming out ~2/3 of the arc the
   // reference shows. The flat tails still leave a ~135 mm straight body and ~105 mm neck.
@@ -982,13 +983,7 @@ fn bottleR(y: f32) -> f32 {
   // shows up as a crease where the shoulder meets the body. This is C2, so the silhouette
   // flows from neck to body with no seam.
   let sm = t * t * t * (t * (t * 6 - 15) + 10);
-  var r  = mix(BODY_R, nr, sm);
-  // heel: 30% of the previous bevel, and eased rather than a straight chamfer so it does
-  // not leave a crease where it meets the body
-  let hy = clamp(y / 0.0036, 0, 1);
-  let hs = hy * hy * hy * (hy * (hy * 6 - 15) + 10);
-  r = min(r, BODY_R - 0.0015 * (1 - hs));
-  return r;
+  return mix(BODY_R, NECK_R, sm);
 }
 fn sdBottleLocal(p: vec3f) -> f32 {
   // 0.70 keeps the estimate conservative where the shoulder is steepest
