@@ -51,7 +51,7 @@ SHADER = {
     'bottle': 'BOT_H BODY_R NECK_R BOT_W rotX rotY bottleR sdBottleLocal sdBottle',
     'environment + bokeh': 'env bokeh',
     'render core (fs, march, normals, light path)': 'fs vs map mapN marchS planeT leg turn Turn mediumAt '
-                                                    'iorOf sigmaOf reflColour tonemap tableShade lightDir '
+                                                    'iorOf sigmaOf tonemap tableShade lightDir '
                                                     'FAR SURF_EPS HIT_EPS',
     'plumbing (uniforms, buffers, hashes)': 'U Particle u parts fine fineF atom vecs A_GVOL A_WIMP '
                                             'V_GLASS V_WAVE pcg3d rnd3 PI VUNIT NG WN',

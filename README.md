@@ -564,9 +564,8 @@ recording it as a point makes a pour read as a string of frozen beads.
   atomically splatted into a 768² table map, blurred, with temporal decay. These carry the
   *direct* light too, so shadows come free — and `cgain = 0` leaves the table ambient-only.
 - Bubbles are carved out of the liquid SDF as real geometry, so light refracts through each.
-- Reflections trace a real ray only off the bulk champagne surface (`rtrace` 1), where
-  near-grazing liquid would otherwise mirror the sky as an opaque disc. Glass and drops use
-  the environment lookup (*The traced reflection*).
+- Reflections are the environment lookup. A traced reflection off the bulk champagne
+  surface and the bottle was dropped on 2 Nov (*The traced reflection*).
 
 ### Pass graph
 
@@ -803,6 +802,12 @@ was never comparable to the budget at all.
 
 ### The traced reflection
 
+> Dropped on 2 Nov 2026, with its `rtrace` control: -87 bytes shipped (-125 with the packer's
+> default state) and render time. By then it traced only off the bulk champagne and the
+> bottle, and switching it off changed 0.05-0.8% of a shot's pixels by more than 4 levels -
+> the bottle's edges (shot 2, the most), the far rim of the champagne surface at grazing,
+> drops landing on it. The history below is why it existed.
+
 Measured in the spill state (autofill, tower overflowing), 1920×1080, RTX 4070:
 
 | shot | glass + drops traced (before) | bulk liquid only (`rtrace` 1) |
@@ -984,7 +989,7 @@ The isolation views are the debugging workhorses: `liquid`/`glass` show one fiel
 
 **Camera presets** — `tower · pour · macro · tier2 · top · bottl`.
 
-**Sliders/toggles** — `spin, angle, dist, camY, tgtY, lightAz, lightEl, gridEnv, rtrace,
+**Sliders/toggles** — `spin, angle, dist, camY, tgtY, lightAz, lightEl, gridEnv,
 drops, bubbles, waves, reflect, autofill, fill, pourRate, dropVol, dropRad, foam,
 bottle, botTilt, botAz, pourWander, wanderSpd, shutter, bounces, simSpeed, expo, cgain`.
 
@@ -1266,8 +1271,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 841 bytes (2 Nov 2026), 649 OVER 8 192**, lettering in, score
-empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57), a simpler coupe (-105).
+**`intro.cmd` is 8 754 bytes (2 Nov 2026), 562 OVER 8 192**, lettering in, score
+empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57), a simpler coupe (-105), the traced reflection dropped (-87).
 Before them, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
 Roadroller searches (-> 9 319); sloppy literals in the WGSL (-> 9 213): 520 places where

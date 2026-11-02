@@ -139,7 +139,6 @@ struct U {
   refl     : f32,
   fillOv   : f32,
   envg     : f32,
-  rtrace   : f32,
   ltAz     : f32,
   prad     : f32,
   foamG    : f32,
@@ -153,7 +152,7 @@ struct U {
   nSmooth  : f32,          // span normals are measured over, in grid cells (0 = fine)
   stemK    : f32,          // the coupe's fillets, m: stem into bowl
   footK    : f32,          // ...and stem into foot
-  _w2      : f32,          // buffer is 240 bytes = 60 floats; 56 used
+  _w2      : f32,          // buffer is 240 bytes = 60 floats; 55 used
 //#D}
 };
 
@@ -1347,10 +1346,9 @@ fn tableShade(p: vec3f, d: vec3f) -> vec3f {
   return vec4f(vec2f(f32(i % 2), f32(i / 2)) * 4 - 1, 0, 1);
 }
 
-// Short refraction-only walk used to COLOUR a reflection. Sampling env() for a reflection
-// that actually hits nearby geometry is what paints flat discs on near-grazing surfaces.
-// The render, the traced reflection and the photons follow light the same way and differ
-// only in what they do with its energy, so the mechanics are shared - it was three copies.
+// The render and the photons follow light the same way and differ only in what they do
+// with its energy, so the mechanics are shared (the traced reflection made it three copies
+// until it was dropped).
 // leg: march from p along d through medium med, stopped by the analytic table plane.
 // x = distance travelled; y = what ended it, 0 nothing (escaped), 1 the table, 2 a surface;
 // z = march steps, for the profiler.
@@ -1383,27 +1381,6 @@ fn turn(hp: vec3f, d: vec3f, med: i32) -> Turn {
     return Turn(r, F, hp + r * SURF_EPS, med, n, medA, true);
   }
   return Turn(rf, F, hp + rf * SURF_EPS, medA, n, medA, false);
-}
-
-fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
-  if (PROF) { pc[12] += 1; }
-  var p = p0; var d = d0; var med = med0;
-  var tp = vec3f(1);
-  var acc = vec3f(0);
-  for (var b = 0; b < 3; b++) {
-    let lg = leg(p, d, med);
-    if (PROF) { pc[13] += u32(lg.z); }
-    if (med == 2) { acc += tp * vec3f(0.95, 0.60, 0.20) * (1 - exp(-lg.x * 7)) * 0.30; }
-    tp *= exp(-sigmaOf(med) * lg.x);
-    if (lg.y == 0) { return acc + tp * env(d); }
-    let hp = p + d * lg.x;
-    var tab = lg.y == 1;
-    var sf: Turn;
-    if (!tab) { sf = turn(hp, d, med); tab = sf.medA == 3; }
-    if (tab) { return acc + tp * tableShade(hp, d); }
-    d = sf.d; p = sf.p; med = sf.med;
-  }
-  return acc + tp * env(d);
 }
 
 @fragment fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
@@ -1494,22 +1471,13 @@ fn reflColour(p0: vec3f, d0: vec3f, med0: i32) -> vec3f {
       }
     }
 
-    let rdir = reflect(d, n);
-    var rcol = env(rdir);
-    // The traced reflection is the most expensive thing in the frame - up to three more
-    // full marches per pixel, at two bounces, on every surface past ~53 degrees. Measured on
-    // the pour shot it was 41% of the render pass. It exists for one artefact: the
-    // champagne's free surface, seen from air near grazing, mirroring the sky as an opaque
-    // disc. So by default (rtrace 1) it runs where it is visible as a reflection: air
-    // meeting the bulk liquid - including a 4 mm zone above it, where the pour lands and
-    // drops merge into the surface as a dimple - and air meeting the BOTTLE, one large
-    // glossy surface whose reflections read. Not drops in flight (a 2 mm drop mirroring the
-    // environment is fine, and the spill curtain is thousands of them) and not the coupes.
-    // rtrace 2 traces everything, as it used to, kept for A/B.
-    let wantTrace = (u.rtrace > 1.5) || (u.rtrace > 0.5 && med == 0 &&
-                    ((medA == 2 && abs(bulkSDF(hp)) < 0.004) || medA == 4));
-    if (wantTrace && b < 2 && F > 0.05) { rcol = reflColour(hp + rdir * SURF_EPS, rdir, med); }
-    acc += tp * F * rcol * u.refl;
+    // Reflections show the environment. A traced reflection (reflColour, the rtrace control)
+    // followed them where air met the bulk champagne or the bottle - it existed for the
+    // champagne's surface seen near grazing, mirroring the sky as an opaque disc, and had
+    // been 41% of the render pass when it still ran on the glasses too. Dropped on 2 Nov for
+    // 87 bytes and render time: by then it changed 0.05-0.8% of a shot's pixels (the
+    // bottle's edges, the far rim of the surface, drops landing on it).
+    acc += tp * F * env(reflect(d, n)) * u.refl;
 
 //#D{
     if (sf.tir) { tir = tir + 1; }
@@ -1997,7 +1965,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     f32.set([ui.view, 1.6, cfg.steps,
              cfg.npart, ui.dropVol * 1e-9, cfg.nphoton, ui.cgain, cfg.single ? 1 : 0, cfg.noliq ? 1 : 0,
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
-             ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
+             ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
              ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkLife, ui.strat, ui.stratJit, ui.smooth,
              ui.stemK * 0.001, ui.footK * 0.001], 24);
@@ -2721,7 +2689,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['smooth',   'range', 1,    0,    3,    0.05, 2],
     ['stemK',    'range', 12,   1,    40,   0.5,  1],
     ['footK',    'range', 18,   1,    30,   0.5,  1],
-    ['rtrace',   'range', 1,    0,    2,    1,    0],
     ['drops',    'check', true],
     ['bubbles',  'check', true],
     ['waves',    'check', true],
@@ -2824,7 +2791,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     stratJit: 'With strat: random nudge of each photon, in lattice spacings. 0 is plain R2, which shows faint diagonal stripes on the table (the near-lattice beating against the texel grid); ~1 breaks them up. Large values approach random emission.',
     strat: 'How the photons are spread over the light: 0 random points (the lit table comes out grainy), 1 the R2 low-discrepancy sequence shifted per frame (stratJit breaks its faint stripes), 2 a jittered grid, one random photon per cell. Same photon count and cost.',
     gridEnv: 'Swap the environment for a lat-long UV test grid: green horizon, magenta poles, orange dot at the key light. Shows which direction a reflection or refraction samples.',
-    rtrace: 'Traced reflections. 0 = environment lookup only (cheapest; near-grazing champagne turns into a flat bright disc). 1 = trace where air meets the champagne surface (and the splash zone just above it) and the bottle - where reflections read. 2 = trace glass reflections too - how it used to be, and on the pour shot about 40% of the render pass.',
     drops: 'Render the particle field: pour stream, splashes and droplets. Off leaves only the bulk liquid, but the simulation keeps running so the glasses still fill.',
     bubbles: 'Rising CO2 bubbles, carved out of the liquid as real geometry, so light refracts through every one.',
     waves: 'Surface ripples from the per-glass wave equation. Off gives a perfectly flat liquid surface.',

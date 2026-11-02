@@ -216,7 +216,7 @@ def release_uniforms(ui):
         'cgain': f('cgain'), 'single': 0.0, 'noliq': 0.0, 'bub': on('bubbles'),
         'expo': f('expo'), 'wav': on('waves'), 'pfield': on('drops'), 'bounces': f('bounces'),
         'refl': on('reflect'), 'fillOv': -1.0 if ui['autofill'] == 'true' else f('fill') / 100,
-        'envg': on('gridEnv'), 'rtrace': f('rtrace'),
+        'envg': on('gridEnv'),
         'ltAz': f('lightAz') * rad,
         'prad': f('dropRad') * 0.001, 'foamG': f('foam'), 'glug': f('glug'), 'glugHz': f('glugHz'),
         'botAz': f('botAz') * rad,
