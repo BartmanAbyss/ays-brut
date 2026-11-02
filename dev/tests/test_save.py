@@ -122,12 +122,12 @@ class Table(unittest.TestCase):
             {'name': 'd', 'dur': 1.0, 'ov': {'pourRate': 900.0}, 'keys': [black(0), black(1)]},
         ]
         self.assertEqual(T.shot_table(shots, d), [
-            [0.0, 0.5, 120.0, 0.17, 1.0],
+            [0.0, 0.5, 120.0, 1.0],
             # b is black: the look-only values carry over, so no row; c changes the shutter
             # and drops the standing bottle; d is black, keeps c's look, but its pour rate
             # runs the simulation, so it gets a row
-            [6.0, 1.0, 120.0, 0.17, 0.0],
-            [9.0, 1.0, 900.0, 0.17, 0.0],
+            [6.0, 1.0, 120.0, 0.0],
+            [9.0, 1.0, 900.0, 0.0],
         ])
 
     def test_release_carries_the_harness_shot_values(self):

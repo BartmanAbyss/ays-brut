@@ -35,7 +35,7 @@ SLIDER_COL = {'angle': 1, 'dist': 2, 'camY': 3, 'tgtY': 4, 'speed': 5, 'lightEl'
 # shots before it set, which the editor's kept start states account for. Same list as the
 # editor's PER_SHOT in the harness (a test checks they agree).
 PER_SHOT = ['lightAz', 'expo', 'cgain', 'shutter', 'bkLife',
-            'pourWander', 'wanderSpd', 'pourRate', 'botShare', 'botStand']
+            'pourWander', 'wanderSpd', 'pourRate', 'botStand']
 
 
 class TimelineError(ValueError):
@@ -287,11 +287,11 @@ def js_array(flat):
 
 
 # the per-shot values the release carries, in SHOT_V's order after the start time
-SHOT_KEYS = ['shutter', 'pourRate', 'botShare', 'botStand']
+SHOT_KEYS = ['shutter', 'pourRate', 'botStand']
 
 
 def shot_table(shots, defaults):
-    """[from, shutter, pourRate, botShare, botStand] per shot - its own value, else the
+    """[from, shutter, pourRate, botStand] per shot - its own value, else the
     global default - with a row only where something changes."""
     def val(k, v):
         if isinstance(v, str):

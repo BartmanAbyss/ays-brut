@@ -76,7 +76,7 @@ Free-falling liquid has no pressure gradient, so it needs no solver. The split:
 
 | Part | Method |
 |---|---|
-| Stream, splash, spill, droplets | ballistic particles (65 536), no neighbour search |
+| Stream, splash, spill, droplets | ballistic particles (32 768), no neighbour search |
 | Liquid at rest in each glass | volume per glass (`dV/dt = inflow − overflow`), level its exact inverse + 2D wave field |
 | Spill on the table | ends where it lands (a 384² height-field puddle was cut for size) |
 | Mousse | foam deposited by impact into the per-glass grid, decaying |
@@ -148,8 +148,8 @@ fade length (`fade`) and its own values for a few look sliders (`ov`). `flattenS
 them end to end into `SHOW`, the key list the show reads; a shot whose first key repeats the
 previous shot's last one runs on from it without a cut. The build does the same flattening
 in Python (`build/timeline.py`), so the release ships the same key list. The values a shot
-sets for itself that the release carries - `shutter`, `pourRate`, `botShare`, `botStand` -
-go into `SHOT_V`, `[from, shutter, pourRate, botShare, botStand]` with a row wherever they
+sets for itself that the release carries - `shutter`, `pourRate`, `botStand` -
+go into `SHOT_V`, `[from, shutter, pourRate, botStand]` with a row wherever they
 change (in a shot that is black throughout, the look-only ones carry over from the shot
 before: a row fewer each). The release picks the current row each frame; three of them are
 live uniforms there. Any other per-shot value, and a shot's `fade` length, is still
@@ -275,7 +275,7 @@ in the editor at all, and the show is on.
   by the move, so a camera move keeps its shape; `speed` multiplies them instead (0.25 -> 0.5
   doubles every key of the shot, a ramp keeps its shape); the look sliders a shot may set for itself
   (lightAz, expo, cgain, shutter, bkLife) and the bottle's wander
-  (pourWander, wanderSpd) and flow (pourRate, botShare) - `ED.PER_SHOT` - become the shot's
+  (pourWander, wanderSpd) and flow (pourRate) - `ED.PER_SHOT` - become the shot's
   own values. Everything else is global, rec or not: anything that changes the simulation
   would make a shot's start depend on the shots before it, and the debug switches are not
   looks. With rec off, the timeline still drives its own sliders.
@@ -703,13 +703,20 @@ the release's 1600×900, GPU ms per frame, for its own `pourRate`:
 | 500 | 19.0–19.9 | 19.5–21.8 | 23.9 |
 | **250** (now) | 18.5–19.1 | 18.5–19.1 | 19.7 |
 
-Above ~1900 drops a step the bottle's slice (`botShare` 0.5 of 65 536, a drop holding its
-particle ~17 steps) is the limit, so 5000 never applied; 1000 halved the stream and cost
+Above ~1900 drops a step the bottle's slice (then `botShare` 0.5 of 65 536, a drop holding
+its particle ~17 steps) was the limit, so 5000 never applied; 1000 halved the stream and cost
 the same. The jump at ~88 s is the bottom tier overflowing onto the table near the camera:
 render 11 -> 16 ms, photons 6 -> 7.6. At 250 enough volume never arrives for that, and the
 spray is ~6 200 drops instead of ~21 000. 250 is also about the floor of this lever: the
 shot costs ~18.5 ms with little spray (render ~10.3, photons ~6, build ~2), so it sits on
 the 19 ms line, not under it.
+
+With the pour fixed, the counts settled the pool (2 Nov). A natural `det=1` run peaks at
+~1 900 drops in the stream and ~6 800 in the spill, so 65 536 particles were four times
+what any shot uses: the pool is 32 768 and `botShare` one global 0.17 (~5 570 for the
+bottle, a stream of up to ~330 drops a step). Run again at that size, every glass
+reached the same level within a millimetre at the same second, and the spill and
+stream peaks matched. -6 bytes for the shot table's column; half the particle buffer.
 
 ### Exporting a video
 
@@ -1271,8 +1278,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 543 bytes (2 Nov 2026), 351 OVER 8 192**, lettering in, score
-empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57), a simpler coupe (-105), the traced reflection dropped (-87), the bottle without heel bevel and neck taper (-43), one smoothed normal for all liquid (-56), the bottle held from 180 degrees (-32), its helpers inlined (-29), more single-call functions inlined (-51).
+**`intro.cmd` is 8 537 bytes (2 Nov 2026), 345 OVER 8 192**, lettering in, score
+empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57), a simpler coupe (-105), the traced reflection dropped (-87), the bottle without heel bevel and neck taper (-43), one smoothed normal for all liquid (-56), the bottle held from 180 degrees (-32), its helpers inlined (-29), more single-call functions inlined (-51), `botShare` global, the pool halved and the integer consts untyped (-6).
 Before them, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
 Roadroller searches (-> 9 319); sloppy literals in the WGSL (-> 9 213): 520 places where
