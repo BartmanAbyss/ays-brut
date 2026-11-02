@@ -314,8 +314,12 @@ while keeping the picture, which is what the skip finally was.
   so when a size optimisation is held back by a harness-only parameter, view or toggle,
   remove that instead of preserving it (the bottle view and its `solo` flag went so
   `sdBottle` could take its helpers inline). The user said they won't be tweaking much.
-- **Inline a function that has one call site** in the release: ~8 bytes each, measured
-  (rotX, bottleR and sdBottleLocal into sdBottle: -26 shipped, -26 fair). Rewriting
+- **Inline a SMALL function that has one call site** in the release: ~8 bytes each,
+  measured (rotX, bottleR and sdBottleLocal into sdBottle: -26 shipped, -26 fair; c3,
+  pcg3d, sdSeg, causFetch, bubbleSDF: -51 / -35). Not a big body into a big function:
+  bokeh into env (+11 / -15), glassUpdate into waveUpdate (+20 / -7), causticAt and
+  tableShade into fs (+36 / +16) - the packer names locals per function, shortest first,
+  and the extra locals push the caller's onto two-letter names. Rewriting
   `d = ...; d = max(d, ...); return d;` into one expression alone was noise (-5 / +7).
 - Comment *why*, especially where a value encodes a trap above. Several of these bugs were
   reintroduced because the original reasoning wasn't written down.
