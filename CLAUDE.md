@@ -521,6 +521,12 @@ blocks and seeds, one thread per cell - now also clears them and fades the photo
 `clearFine` and `causticDecay` are gone: -52 shipped, -24 fair, ~1 ms faster. Fusion only
 works where no thread needs another's result in the same dispatch (no global barrier).
 
+**Size reserves: measured, kept for now, for the last few bytes.** Each saves bytes at a
+visible cost the user chose not to pay yet:
+- The photons' jittered grid (`strat` 2 -> 0, random emission): -8 shipped, -30 fair
+  (2 Nov). Even at 2.36 M photons random leaves a fine speckle on the lit table (5.3% of
+  pixels > 4 levels on a frozen frame), which crawls in playback at about a third of that.
+
 **The exception: write literals sloppy - the harness WGSL does.** WGSL never converts
 between concrete types (an `i32` is never silently an `f32`, unlike C), but literals are
 *abstract* and take the type their context needs. So `x * 2` where x is f32, `n * 4` where
