@@ -1263,8 +1263,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 003 bytes (2 Nov 2026), 811 OVER 8 192**, lettering in, score
-empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52).
+**`intro.cmd` is 8 946 bytes (2 Nov 2026), 754 OVER 8 192**, lettering in, score
+empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57).
 Before them, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
 Roadroller searches (-> 9 319); sloppy literals in the WGSL (-> 9 213): 520 places where
