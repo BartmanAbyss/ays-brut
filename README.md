@@ -1134,7 +1134,7 @@ the debug panel used to supply, minifies, packs, and writes:
 
 It needs **Python 3 with `brotli`** and **Node.js 16+** on PATH (*Setting up a machine*).
 That is all: wgslender 1.5.1, terser 5.51.2, esbuild 0.28.2 and Closure Compiler v20261015 (native Windows x64 builds) are vendored in `build/vendor/node_modules`
-(committed, 5.5 MB, plain JS and WebAssembly, so the same files on every OS) and run with
+(committed, ~62 MB; the two native ones make the build Windows-only) and run with
 `node` from there - no npm, no npx, no network. A fresh clone builds the same `intro.cmd`,
 byte for byte, or the build stops with `BUILD FAILED` and the reason. There are no
 fallbacks: a missing Node, a missing tool, or a tool or the packer failing ends the build
