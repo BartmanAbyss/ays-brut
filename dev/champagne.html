@@ -958,42 +958,8 @@ fn sprayDist(p: vec3f) -> f32 {
 const BOT_H   = 0.345;
 const BODY_R  = 0.060;                   // height/width 2.87, matching the reference
 const NECK_R  = 0.0150;
-fn rotX(v: vec3f, a: f32) -> vec3f {
-  let c = cos(a); let s = sin(a);
-  return vec3f(v.x, c * v.y - s * v.z, s * v.y + c * v.z);
-}
-// The silhouette as radius-vs-height. A champagne shoulder is an S-curve - convex as it
-// leaves the body, concave as it meets the neck - which a straight cone cannot produce and
-// a wide smooth-min rounds away entirely. Measured off the reference, of 345 mm:
-// body 163, shoulder 67, neck 115.
-fn bottleR(y: f32) -> f32 {
-  // Body to neck in one smootherstep - no neck taper and no heel bevel since 2 Nov (-34
-  // bytes): the taper (1.4 mm wider at the shoulder) never showed, and the bevel's only
-  // trace was a bright ring and a crisper edge at the base in shot 2.
-  // Span 175 mm, not 115. Smootherstep is nearly flat at both ends, so only about 60% of
-  // the span reads as curvature - the visible shoulder was coming out ~2/3 of the arc the
-  // reference shows. The flat tails still leave a ~135 mm straight body and ~105 mm neck.
-  let t  = clamp((y - 0.100) / 0.175, 0, 1);
-  // smootherstep, not smoothstep: smoothstep's second derivative jumps at each end, which
-  // shows up as a crease where the shoulder meets the body. This is C2, so the silhouette
-  // flows from neck to body with no seam.
-  let sm = t * t * t * (t * (t * 6 - 15) + 10);
-  return mix(BODY_R, NECK_R, sm);
-}
-fn sdBottleLocal(p: vec3f) -> f32 {
-  // 0.70 keeps the estimate conservative where the shoulder is steepest
-  var d = (length(p.xz) - bottleR(p.y)) * 0.70;
-  d = max(d, p.y - BOT_H);
-  d = max(d, -p.y);
-  // lip ring below the mouth
-  let lip = sdCyl(p, NECK_R + 0.0019, BOT_H - 0.013, BOT_H - 0.003) - 0.0011;
-  d = min(d, lip);
-  // Solid glass, not a hollow shell: a photon crosses two surfaces instead of four and
-  // reaches the table within its 4 legs (hollow, the fifth leg was always one too many - a
-  // black shadow), rays through it take two bounces fewer, and dark solid glass reads as a
-  // full bottle. Its absorption is scaled to the ~7 cm a ray crosses (sigmaOf).
-  return d;
-}
+// The magnum. Its three helpers (rotX, the radius profile bottleR, the local SDF) were
+// inlined here on 2 Nov, each having this one call site: -26 bytes, about 8 a function.
 fn sdBottle(p: vec3f) -> f32 {
   if (u.botOn < 0.5) { return 1e9; }
   var v: vec3f;
@@ -1009,16 +975,38 @@ fn sdBottle(p: vec3f) -> f32 {
     v = p - u.emitPos;
     // Held from 180 degrees, which needs no azimuth turn: the bottle is round, so turning it
     // by pi about its axis and tilting by -t is the same shape as tilting by +t. (It was held
-    // from 205 degrees, a slider of its own; 2 Nov, for ~25 bytes.)
-    v = rotX(v, u.botTilt);
-    v.y += BOT_H;
+    // from 205 degrees, a slider of its own; 2 Nov, for ~25 bytes.) The tilt about x:
+    let c = cos(u.botTilt); let s = sin(u.botTilt);
+    v = vec3f(v.x, c * v.y - s * v.z + BOT_H, s * v.y + c * v.z);
   }
   // cheap bounding sphere first: the full profile is a dozen primitives and this runs on
   // every raymarch step, but the bottle occupies a small part of the scene
   let b = length(v - vec3f(0, BOT_H * 0.50, 0)) - 0.186;
   if (b > 0.015) { return b; }
   if (PROF) { pc[8] += 1; }
-  return sdBottleLocal(v);
+  // The silhouette as radius-vs-height. A champagne shoulder is an S-curve - convex as it
+  // leaves the body, concave as it meets the neck - which a straight cone cannot produce and
+  // a wide smooth-min rounds away entirely. Measured off the reference, of 345 mm:
+  // body 163, shoulder 67, neck 115.
+  // Body to neck in one smootherstep - no neck taper and no heel bevel since 2 Nov (-34
+  // bytes): the taper (1.4 mm wider at the shoulder) never showed, and the bevel's only
+  // trace was a bright ring and a crisper edge at the base in shot 2.
+  // Span 175 mm, not 115. Smootherstep is nearly flat at both ends, so only about 60% of
+  // the span reads as curvature - the visible shoulder was coming out ~2/3 of the arc the
+  // reference shows. The flat tails still leave a ~135 mm straight body and ~105 mm neck.
+  // Smootherstep, not smoothstep: smoothstep's second derivative jumps at each end, which
+  // shows up as a crease where the shoulder meets the body. This is C2, so the silhouette
+  // flows from neck to body with no seam.
+  let t = clamp((v.y - 0.100) / 0.175, 0, 1);
+  // 0.70 keeps the estimate conservative where the shoulder is steepest; then the flat top
+  // and base, and the lip ring below the mouth.
+  // Solid glass, not a hollow shell: a photon crosses two surfaces instead of four and
+  // reaches the table within its 4 legs (hollow, the fifth leg was always one too many - a
+  // black shadow), rays through it take two bounces fewer, and dark solid glass reads as a
+  // full bottle. Its absorption is scaled to the ~7 cm a ray crosses (sigmaOf).
+  return min(max(max((length(v.xz) - mix(BODY_R, NECK_R, t * t * t * (t * (t * 6 - 15) + 10))) * 0.70,
+                     v.y - BOT_H), -v.y),
+             sdCyl(v, NECK_R + 0.0019, BOT_H - 0.013, BOT_H - 0.003) - 0.0011);
 }
 
 fn map(p: vec3f) -> f32 {
@@ -1512,26 +1500,6 @@ fn turn(hp: vec3f, d: vec3f, med: i32) -> Turn {
   } else if (v > 1.5 && v < 2.5) {
     col = vec3f(0);
     if (firstHit > 0.5) { col = firstN * 0.5 + 0.5; }
-  } else if (v > 6.5) {
-    // solo: the bottle alone, upright at the origin, flat-lit for shape comparison
-    var t = 0.0; var i = 0.0; var got = 0.0;
-    loop {
-      if (i >= u.maxSteps) { break; }
-      let d = sdBottleLocal(ro + rd * t);
-      if (d < 0.00010) { got = 1; break; }
-      t = t + max(d * 0.85, 0.00006);
-      if (t > FAR) { break; }
-      i = i + 1;
-    }
-    col = vec3f(0.90, 0.90, 0.91);
-    if (got > 0.5) {
-      let q = ro + rd * t;
-      let e = vec2f(1, -1) * 0.00018;
-      let n = normalize(e.xyy * sdBottleLocal(q + e.xyy) + e.yyx * sdBottleLocal(q + e.yyx)
-                      + e.yxy * sdBottleLocal(q + e.yxy) + e.xxx * sdBottleLocal(q + e.xxx));
-      let l = clamp(dot(n, normalize(vec3f(-0.35, 0.45, 0.82))), 0, 1);
-      col = vec3f(0.07, 0.20, 0.09) * (0.22 + 1 * l) + 1.0 * pow(l, 42) * 0.75;
-    }
   } else if (v > 5.5) {
     // red = this pixel's path underwent total internal reflection
     col = mix(col * 0.25, vec3f(1, 0.1, 0.05), clamp(tir, 0, 1));
@@ -1593,7 +1561,7 @@ fn turn(hp: vec3f, d: vec3f, med: i32) -> Turn {
 const Q  = new URLSearchParams(location.search);
 const qf = (k, d) => { const v = parseFloat(Q.get(k)); return Number.isFinite(v) ? v : d; };
 
-const VIEWS = { beauty: 0, steps: 1, normals: 2, medium: 3, liquid: 4, glass: 5, tir: 6, bottle: 7 };
+const VIEWS = { beauty: 0, steps: 1, normals: 2, medium: 3, liquid: 4, glass: 5, tir: 6 };
 const cfg = {
   t:        Q.has('t') ? qf('t', 0) : null,
   w:        qf('w', 0),
@@ -2744,7 +2712,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   ];
   const PRESET = {
     tower: { dist: 0.800, camY: 0.440, tgtY: 0.260, angle: 39 },
-    bottl: { dist: 0.520, camY: 0.175, tgtY: 0.175, angle: 0 },     // solo bottle, use view=bottle
     pour:  { dist: 0.170, camY: 0.565, tgtY: 0.495, angle: 39 },   // top glass + incoming stream
     macro: { dist: 0.180, camY: 0.520, tgtY: 0.480, angle: 39 },   // top glass close-up
     tier2: { dist: 0.260, camY: 0.400, tgtY: 0.320, angle: 39 },   // middle tier
@@ -2871,7 +2838,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   {
     const bar = document.createElement('div'); bar.className = 'cams';
     bar.title = TIPS.cams;
-    for (const name of ['tower', 'pour', 'macro', 'tier2', 'top', 'bottl']) {
+    for (const name of ['tower', 'pour', 'macro', 'tier2', 'top']) {
       const b = document.createElement('button');
       b.textContent = name;
       b.onclick = () => {

@@ -310,7 +310,13 @@ while keeping the picture, which is what the skip finally was.
 - WGSL and JS in one file; keep the dev scaffolding separable, since the build will strip it.
 - Every tunable gets a slider **and** a URL param **and** a tooltip. The user drives this
   thing by hand and judges it by eye; a constant buried in a shader is a constant nobody
-  can evaluate.
+  can evaluate. **Except now (from 2 Nov, the size squeeze):** the look is nearly frozen,
+  so when a size optimisation is held back by a harness-only parameter, view or toggle,
+  remove that instead of preserving it (the bottle view and its `solo` flag went so
+  `sdBottle` could take its helpers inline). The user said they won't be tweaking much.
+- **Inline a function that has one call site** in the release: ~8 bytes each, measured
+  (rotX, bottleR and sdBottleLocal into sdBottle: -26 shipped, -26 fair). Rewriting
+  `d = ...; d = max(d, ...); return d;` into one expression alone was noise (-5 / +7).
 - Comment *why*, especially where a value encodes a trap above. Several of these bugs were
   reintroduced because the original reasoning wasn't written down.
 - Prefer analytic intersection to marching where exact: the table is a plane and ray/plane
@@ -613,7 +619,7 @@ chain - brotli alone ranked `unsafe` second, Roadroller ranked it last.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 623** (2 Nov 2026), 431
+  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 594** (2 Nov 2026), 402
   OVER, with the start screen, the sound engine and the lettering in but the score empty;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
