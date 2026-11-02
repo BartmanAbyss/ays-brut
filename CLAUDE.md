@@ -543,7 +543,12 @@ applied by the flood); `loop { if (c) { break; } }` as `while`; `vec3u(v)` for t
 `u32()` calls; a `fin` flag replaced by zeroing the throughput; two small single-caller
 helpers (sprayDist, planeT) inlined. The whole list is in the 2 Nov commit. Not every
 candidate survives the packer: the hex float `0x1p-32` split into `0x1 p-32` and failed
-to compile - check the release after a batch like this.
+to compile - check the release after a batch like this. A second batch (23, -32 shipped,
+-39 fair) went into the march and the narrow band: the band stored as f32 BITS (for
+d >= 0 the bit patterns order like the values, so atomicMin keeps the exact nearest
+distance with no quantising and no conversions), marchS returning a distance with FAR
+for no hit (the step count goes to a harness-only private), the flood's ping-pong as
+one expression, and abstract-int consts used without casts.
 
 **Nine compute entry points are cheaper than one (2 Nov).** One `@compute fn` switching on
 an `@id(0) override K`, the JS making the nine pipelines with `constants: { 0: k }`,
@@ -661,8 +666,8 @@ terser `keep_fnames` +42. The scripts are not kept; the numbers are the result.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 213** (2 Nov 2026), 21
-  OVER, with the start screen, the sound engine and the lettering in but the score empty;
+  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 181** (2 Nov 2026), 11
+  UNDER, with the start screen, the sound engine and the lettering in but the score empty;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
   README (*Where it lands today*) has the size map by feature and function.

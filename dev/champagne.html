@@ -195,6 +195,7 @@ var<private> profTowerB : bool = false;   // ...and so did the coupe sdTower's m
 // primary-ray step accounting (profiler only): set by fs around the bounce-0 march
 var<private> profPrim : bool = false;
 var<private> profTpl : f32 = 0;
+var<private> mSteps : f32 = 0;           // march steps of the last marchS (harness only)
 
 // ── glass geometry (metres) ───────────────────────────────
 // Proportions taken from the reference coupe, as ratios of the rim diameter D:
@@ -231,8 +232,9 @@ const BAND   = 0.00625;           // KR * FCELL
 // A droplet smaller than the grid's cell half-diagonal (FCELL*sqrt(3)/2 = 1.68mm at
 // FINE=320) only registers when it lands near a cell centre, so a dense stream renders
 // as a few scattered drops. Keep u.prad above that.
-const QMAX   = 1000000;
-const INFQ   = 4294967295;
+// The band is stored as f32 BITS: for d >= 0 the bit patterns order like the values, so
+// atomicMin on bitcast<u32>(d) keeps the exact nearest distance (it was quantised to
+// BAND / 1e6 and converted twice), and a cell is emptied by storing BAND's bits.
 
 // ── bulk liquid ───────────────────────────────────────────
 const PI    = 3.14159265;
@@ -695,11 +697,11 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
   // Far-field seed key for this particle's coarse cell (see the note on the coarse far
   // field below): nearest to the cell centre wins, so the choice is the same every frame.
   let sc = vec3i(floor((p.pos - DOM_LO) / CCELL));
-  if (all(sc >= vec3i(0)) && all(sc < vec3i(i32(COARSE)))) {
+  if (all(sc >= vec3i(0)) && all(sc < vec3i(COARSE))) {
     // The distance to the centre of the cell p lies in is at most the half-diagonal, 0.87
     // cells: no clamp needed to keep it in 16 bits, under 0xFFFF in the top half (so a key is
     // never the empty 0xFFFFFFFF).
-    atomicMin(&atom[COARSE * COARSE * COARSE + cIdx(sc)],
+    atomicMin(&atom[3 * COARSE * COARSE * COARSE + cIdx(sc)],
               (u32(length(p.pos - (DOM_LO + (vec3f(sc) + 0.5) * CCELL)) / CCELL * 65535) << 16) | (i & 0xFFFF));
   }
 
@@ -715,9 +717,9 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
   let b = p.pos + v * 0.5;
 
   let lo = clamp(vec3i(floor((min(a, b) - BAND - DOM_LO) / FCELL)),
-                 vec3i(0), vec3i(i32(FINE) - 1));
+                 vec3i(0), vec3i(FINE - 1));
   let hi = clamp(vec3i(ceil ((max(a, b) + BAND - DOM_LO) / FCELL)),
-                 vec3i(0), vec3i(i32(FINE) - 1));
+                 vec3i(0), vec3i(FINE - 1));
 
   for (var z = lo.z; z <= hi.z; z++) {
     for (var y = lo.y; y <= hi.y; y++) {
@@ -727,7 +729,7 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
         let pa = DOM_LO + (vec3f(cc) + 0.5) * FCELL - a;
         let d  = length(pa - (b - a) * clamp(dot(pa, b - a) / max(dot(b - a, b - a), 1e-12), 0, 1));
         if (d < BAND) {
-          atomicMin(&fine[fIdx(cc)], u32(d / BAND * QMAX));   // 0 <= d < BAND: no clamp
+          atomicMin(&fine[fIdx(cc)], bitcast<u32>(d));   // d >= 0: bits order as values
         }
       }
     }
@@ -742,11 +744,11 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
   // around a band ~3 cells deep; 68% of the trilerps it let through landed outside the band.
   // Exact reach cuts trilerps 36% on heavy tier2 (identical picture) but buys only ~0.4 ms:
   // they are cheap, so a finer grid for the remaining half would not pay for its buffer.
-  let bs  = i32(FINE / COARSE);                 // 10 fine cells per block
+  let bs  = FINE / COARSE;                      // 10 fine cells per block (an i32)
   // lo, hi are in 0..FINE-1, so (lo - 1) / bs is 0..31 (i32 division truncates -1/10 to 0)
   // and only (hi + 1) / bs can reach 32
   let blo = (lo - 1) / bs;
-  let bhi = min((hi + 1) / bs, vec3i(i32(COARSE) - 1));
+  let bhi = min((hi + 1) / bs, vec3i(COARSE - 1));
   for (var z = blo.z; z <= bhi.z; z++) {
     for (var y = blo.y; y <= bhi.y; y++) {
       for (var x = blo.x; x <= bhi.x; x++) {
@@ -777,10 +779,11 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
 fn jfaCoarse(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups) nw: vec3u) {
   let i = g.x;
   if (i >= COARSE * COARSE * COARSE || g.y > 0) { return; }
-  // pass k of 5 (nw.y - 1): stride 16 >> k, and the ping-pong keys -> R1 -> R2 -> R1 -> R2
-  // -> R1 between occ's regions, ending in R1, the one liquidDist reads
+  // pass k of 5 (nw.y - 1): stride 16 >> k, ping-ponging between occ's regions 3 and 2 -
+  // the seed keys are written into region 3, so pass k reads 3 - k%2 and writes 2 + k%2,
+  // ending in region 2, the one resolveFine packs (region 1 is unused since 2 Nov)
   let k = nw.y - 1;
-  let src = select(select(3, 2u, k % 2 == 1), 1, k == 0) * COARSE * COARSE * COARSE;
+  let src = (3 - k % 2) * COARSE * COARSE * COARSE;
   let c  = vec3i(i32(i % COARSE), i32((i / COARSE) % COARSE), i32(i / (COARSE * COARSE)));
   let cp = DOM_LO + (vec3f(c) + 0.5) * CCELL;
   var best = 0xFFFFFFFFu;   // the stencil below includes the cell itself
@@ -790,7 +793,7 @@ fn jfaCoarse(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups) n
     for (var dy = -1; dy <= 1; dy++) {
       for (var dx = -1; dx <= 1; dx++) {
         let nc = c + vec3i(dx, dy, dz) * st;
-        if (any(nc < vec3i(0)) || any(nc >= vec3i(i32(COARSE)))) { continue; }
+        if (any(nc < vec3i(0)) || any(nc >= vec3i(COARSE))) { continue; }
         let v = atomicLoad(&atom[src + cIdx(nc)]);
         if (v == 0xFFFFFFFF) { continue; }
         let dd = length(cp - parts[v & 0xFFFF].pos);
@@ -799,12 +802,12 @@ fn jfaCoarse(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups) n
     }
   }
   // the key as found, distance bits and all: every reader masks the index out of it
-  atomicStore(&atom[select(2, 3u, k % 2 == 1) * COARSE * COARSE * COARSE + i], best);
+  atomicStore(&atom[(2 + k % 2) * COARSE * COARSE * COARSE + i], best);
 }
 
 fn resolveCell(i: u32) {
-  let q = atomicExchange(&fine[i], INFQ);   // read, and clear for the next frame
-  fineF[i] = select(f32(q) / QMAX * BAND, BAND, q == INFQ);
+  // read, and clear (to BAND) for the next frame
+  fineF[i] = bitcast<f32>(atomicExchange(&fine[i], bitcast<u32>(f32(BAND))));
 }
 // resolveFine is the last reader of the narrow band, the coarse blocks and the seed keys,
 // and every thread touches only its own cells - so it also clears them for the next frame
@@ -827,7 +830,7 @@ fn resolveFine(@builtin(global_invocation_id) g: vec3u) {
     if (qi != 0xFFFFFFFF) { v = vec4f(parts[qi & 0xFFFF].pos, 1); }
     if (atomicExchange(&atom[i], 0) != 0) { v.w += 2; }
     vecs[i] = v;
-    atomicStore(&atom[COARSE * COARSE * COARSE + i], 0xFFFFFFFF);   // the seed keys, cleared
+    atomicStore(&atom[3 * COARSE * COARSE * COARSE + i], 0xFFFFFFFF);   // the seed keys, cleared
   }
   // the photon map's temporal fade, before this frame's photons land
   if (i < CN * CN * 3) { atomicStore(&atom[A_CAUST + i], atomicLoad(&atom[A_CAUST + i]) * 236 / 256); }
@@ -835,7 +838,7 @@ fn resolveFine(@builtin(global_invocation_id) g: vec3u) {
 
 // ═══════════════ liquid distance field ═══════════════
 fn fineAt(c: vec3i) -> f32 {
-  return fineF[fIdx(clamp(c, vec3i(0), vec3i(i32(FINE) - 1)))];
+  return fineF[fIdx(clamp(c, vec3i(0), vec3i(FINE - 1)))];
 }
 fn liquidDist(p: vec3f) -> f32 {
   if (PROF) { pc[2] += 1; profSprayD = 1e9; profBulkD = 1e9; }
@@ -856,7 +859,7 @@ fn liquidDist(p: vec3f) -> f32 {
   // in a fragment shader an atomicLoad is not a cached load. Two of them per call plus the
   // dependent read of the seed particle cost 3.1 ms of tier2's 24.8 ms render, for values
   // that are bit-identical once packed.
-  let oc = vec3i(clamp(floor((p - DOM_LO) / CCELL), vec3f(0), vec3f(f32(COARSE) - 1)));
+  let oc = vec3i(clamp(floor((p - DOM_LO) / CCELL), vec3f(0), vec3f(COARSE - 1)));
   let cq = vecs[cIdx(oc)];                 // xyz seed particle, w: +1 seed, +2 occupied
   var tri = BAND;
   if (cq.w > 1.5) {
@@ -1064,8 +1067,9 @@ const HIT_EPS  = 0.00012;
 // last safe point and march conservatively for the rest of the ray. Long approaches through
 // open air get cheaper; near thin shells the fallback trips and it behaves as before.
 // tmax: where the caller's analytic table plane would win anyway (see below)
-// returns (distance, steps, 1 if it hit)
-fn marchS(ro: vec3f, rd: vec3f, s: f32, tmax: f32) -> vec3f {
+// returns the distance of the hit, or FAR if there was none (nothing stands at 14 m, so a
+// hit there cannot happen); the step count goes to mSteps for the harness
+fn marchS(ro: vec3f, rd: vec3f, s: f32, tmax: f32) -> f32 {
   var t = 0.0;
   var i = 0.0;
   var w = 1.4;
@@ -1099,7 +1103,12 @@ fn marchS(ro: vec3f, rd: vec3f, s: f32, tmax: f32) -> vec3f {
     // wider still on the bottle, whose field is scaled by 0.7 - so the march stopped at once
     // on the surface it had just left: a turn with the same medium both sides, a leg lost.
     // (rPrev starts at 0: the first step never stops.)
-    if (d < HIT_EPS && d < rPrev) { return vec3f(t, i, 1); }
+    if (d < HIT_EPS && d < rPrev) {
+//#D{
+      mSteps = i;
+//#D}
+      return t;
+    }
     tPrev = t; rPrev = d;
     // Past the table plane nothing can win - every caller replaces a farther hit with the
     // analytic table. Stop once the last PROVEN-empty sphere reaches it, not merely when t
@@ -1117,9 +1126,12 @@ fn marchS(ro: vec3f, rd: vec3f, s: f32, tmax: f32) -> vec3f {
   // 79: primary hit the step cap. The other exits leave before i is counted, so i reaches
   // the cap only through the loop's condition.
   if (PROF && profPrim && i >= u.maxSteps) { pc[79] += 1; }
-  return vec3f(t, i, 0);
+//#D{
+  mSteps = i;
+//#D}
+  return FAR;
 }
-fn march(ro: vec3f, rd: vec3f) -> vec3f { return marchS(ro, rd, 1, 1e9); }
+fn march(ro: vec3f, rd: vec3f) -> f32 { return marchS(ro, rd, 1, 1e9); }
 
 // 0 air · 1 glass · 2 champagne · 3 table (opaque).
 // Priority order resolves coincident glass/liquid surfaces — no double refraction.
@@ -1274,20 +1286,18 @@ fn tableShade(p: vec3f, d: vec3f) -> vec3f {
 // with its energy, so the mechanics are shared (the traced reflection made it three copies
 // until it was dropped).
 // leg: march from p along d through medium med, stopped by the analytic table plane.
-// x = distance travelled; y = what ended it, 0 nothing (escaped), 1 the table, 2 a surface;
-// z = march steps, for the profiler.
-fn leg(p: vec3f, d: vec3f, med: i32) -> vec3f {
+// x = distance travelled; y = what ended it, 0 nothing (escaped), 1 the table, 2 a surface.
+// (The march steps, for the profiler and the steps view, are in mSteps.)
+fn leg(p: vec3f, d: vec3f, med: i32) -> vec2f {
   // The table is the plane y = tableY. Raised to a tier's base it hides the tiers below
   // for free: every ray stops at the plane, so nothing under it is ever marched. (planeT,
   // inline: this was its one caller. A level or rising ray's quotient is discarded.)
   let pt = (u.tableY - p.y) / d.y;
   let tpl = select(pt, 1e9, d.y > -1e-6 || pt < 0);
   if (PROF) { profTpl = tpl; }
-  let h = marchS(p, d, select(1., -1., med != 0), tpl);   // +1 through air, -1 in a medium
-  var r = vec3f(FAR, 0, h.y);
-  if (h.z > 0.5) { r = vec3f(h.x, 2, h.y); }
-  if (tpl < r.x) { r = vec3f(tpl, 1, h.y); }
-  return r;
+  let t = marchS(p, d, select(1., -1., med != 0), tpl);   // +1 through air, -1 in a medium
+  // a surface where the march hit (t < FAR), else escaped at FAR; the table where it is nearer
+  return select(vec2f(t, f32(t < FAR) * 2), vec2f(tpl, 1), tpl < t);
 }
 // turn: at the surface a leg ended on, the normal facing the ray, the medium beyond, the
 // Fresnel reflectance, and the ray that carries on - refracted into the medium beyond, or
@@ -1337,16 +1347,16 @@ fn turn(hp: vec3f, d: vec3f, med: i32) -> Turn {
     let lg = leg(p, d, med);
     if (PROF) { profPrim = false; }
 //#D{
-    steps += lg.z;
+    steps += mSteps;
 //#D}
-    if (PROF) { pc[9] += 1; pc[10] += u32(lg.z); pc[31 + min(u32(b), 10)] += u32(lg.z); }
+    if (PROF) { pc[9] += 1; pc[10] += u32(mSteps); pc[31 + min(u32(b), 10)] += u32(mSteps); }
     if (PROF && b == 0) {
       // 67/68/69 primary rays ending on the table / in the environment / at an object, and
       // 70/71/72 their march steps; 73..78 steps per primary ray <8 <16 <32 <64 <128 >=128
       var k = 69u;
       if (lg.y == 1) { k = 67; } else if (lg.y == 0) { k = 68; }
-      pc[k] += 1; pc[k + 3] += u32(lg.z);
-      pc[73 + min(u32(log2(max(lg.z, 1) / 4)), 5)] += 1;
+      pc[k] += 1; pc[k + 3] += u32(mSteps);
+      pc[73 + min(u32(log2(max(mSteps, 1) / 4)), 5)] += 1;
     }
 
     // cheap single-scatter: champagne glows gold rather than going black in depth
@@ -1488,8 +1498,8 @@ fn turn(hp: vec3f, d: vec3f, med: i32) -> Turn {
   } else if (v > 2.5 && v < 3.5) {
     let hh = march(ro, rd);
     col = vec3f(0.02);
-    if (hh.z > 0.5) {
-      let q = ro + rd * hh.x;
+    if (hh < FAR) {
+      let q = ro + rd * hh;
       let m = mediumAt(q + rd * SURF_EPS);
       if (m == 1) { col = vec3f(0.25, 0.55, 0.95); }
       if (m == 2) { col = vec3f(0.95, 0.72, 0.26); }
