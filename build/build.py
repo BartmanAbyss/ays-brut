@@ -581,7 +581,11 @@ def minify_js(js):
         out = run_tool('terser', [tmp, '--compress', 'passes=2', '--mangle', '--module'])
         if len(out) < 200:
             raise BuildError('terser produced no usable output (%d chars)' % len(out))
-        return out, 'terser 5.51.2 (vendored)'
+        # const -> let: the same program (nothing assigns a const - it would not have run),
+        # and one keyword where there were two: -11 shipped on 2 Nov. Not var, which
+        # changes scoping (closures in loops) and would need Closure-style analysis.
+        out = re.sub(r'(?<![\w$.])const(?=[\s\[{])', 'let', out)
+        return out, 'terser 5.51.2 (vendored), const -> let'
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
