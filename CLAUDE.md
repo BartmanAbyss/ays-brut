@@ -510,6 +510,13 @@ of another (`.94` -> `.95`, `1.52` -> `1.5`, `31` -> `32`, ...) read -33 with th
 state and +3 with the default one; subsets +15..+18 default. Not worth judging 41 look
 changes for - a perturbation of this size moves the result ±20 either way.
 
+**Nine compute entry points are cheaper than one (2 Nov).** One `@compute fn` switching on
+an `@id(0) override K`, the JS making the nine pipelines with `constants: { 0: k }`,
+indices in the dispatch lists: +65 shipped, +87 with the default packer state. The nine
+headers (`@compute@workgroup_size(64)fn Z4(@builtin(global_invocation_id)g:vec3u)`) are
+near-identical and compress to almost nothing; the switch is nine unique calls and case
+numbers. (Also: wgslender 1.5.1 wants `case 0: {` with the colon.)
+
 **The exception: write literals sloppy - the harness WGSL does.** WGSL never converts
 between concrete types (an `i32` is never silently an `f32`, unlike C), but literals are
 *abstract* and take the type their context needs. So `x * 2` where x is f32, `n * 4` where
