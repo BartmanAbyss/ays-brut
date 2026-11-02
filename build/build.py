@@ -219,7 +219,6 @@ def release_uniforms(ui):
         'envg': on('gridEnv'),
         'ltAz': f('lightAz') * rad,
         'prad': f('dropRad') * 0.001, 'foamG': f('foam'), 'glug': f('glug'), 'glugHz': f('glugHz'),
-        'botAz': f('botAz') * rad,
         'botOn': on('bottle'),
         'bkLife': f('bkLife'),
         'strat': f('strat'), 'stratJit': f('stratJit'), 'nSmooth': f('smooth'),

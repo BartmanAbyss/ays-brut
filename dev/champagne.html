@@ -144,7 +144,6 @@ struct U {
   foamG    : f32,
   glug     : f32,
   glugHz   : f32,
-  botAz    : f32,
   botOn    : f32,
   bkLife   : f32,
   strat    : f32,
@@ -152,7 +151,7 @@ struct U {
   nSmooth  : f32,          // span normals are measured over, in grid cells (0 = fine)
   stemK    : f32,          // the coupe's fillets, m: stem into bowl
   footK    : f32,          // ...and stem into foot
-  _w2      : f32,          // buffer is 240 bytes = 60 floats; 55 used
+  _w2      : f32,          // buffer is 240 bytes = 60 floats; 54 used
 //#D}
 };
 
@@ -963,10 +962,6 @@ fn rotX(v: vec3f, a: f32) -> vec3f {
   let c = cos(a); let s = sin(a);
   return vec3f(v.x, c * v.y - s * v.z, s * v.y + c * v.z);
 }
-fn rotY(v: vec3f, a: f32) -> vec3f {
-  let c = cos(a); let s = sin(a);
-  return vec3f(c * v.x + s * v.z, v.y, -s * v.x + c * v.z);
-}
 // The silhouette as radius-vs-height. A champagne shoulder is an S-curve - convex as it
 // leaves the body, concave as it meets the neck - which a straight cone cannot produce and
 // a wide smooth-min rounds away entirely. Measured off the reference, of 345 mm:
@@ -1012,8 +1007,10 @@ fn sdBottle(p: vec3f) -> f32 {
     if (u.botTilt < 0.01) { return 1e9; }   // tilt 0: not in the scene
     // the mouth sits at the emitter, so the bottle follows the pour's wander for free
     v = p - u.emitPos;
-    v = rotY(v, -u.botAz);
-    v = rotX(v, -u.botTilt);
+    // Held from 180 degrees, which needs no azimuth turn: the bottle is round, so turning it
+    // by pi about its axis and tilting by -t is the same shape as tilting by +t. (It was held
+    // from 205 degrees, a slider of its own; 2 Nov, for ~25 bytes.)
+    v = rotX(v, u.botTilt);
     v.y += BOT_H;
   }
   // cheap bounding sphere first: the full profile is a dozen primitives and this runs on
@@ -1952,7 +1949,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkLife, ui.strat, ui.stratJit, ui.smooth,
+             ui.bottle ? 1 : 0, ui.bkLife, ui.strat, ui.stratJit, ui.smooth,
              ui.stemK * 0.001, ui.footK * 0.001], 24);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
@@ -2243,7 +2240,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
                       'pourWander', 'wanderSpd', 'pourRate', 'botShare', 'botStand'];
     // the globals the simulation depends on: a loop's saved start state is stale once one moves
     const SIM = ['autofill', 'fill', 'pourRate', 'botShare', 'dropVol', 'dropRad', 'foam', 'glug', 'glugHz',
-                 'bottle', 'botAz', 'pourWander', 'wanderSpd', 'simSpeed', 'waves'];
+                 'bottle', 'pourWander', 'wanderSpd', 'simSpeed', 'waves'];
     // shot start times, plus the end of the show: n + 1 entries
     const starts = shots => { const a = [0]; for (const s of shots) a.push(r6(a[a.length - 1] + s.dur)); return a; };
     // the shots end to end, as SHOW: a key repeating the one before it exactly is dropped
@@ -2690,7 +2687,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['bottle',   'check', true],
     ['botStand', 'check', false],
     ['botTilt',  'range', 118,  0,    170,  1,    0],
-    ['botAz',    'range', 205, -180,  180,  1,    0],
     ['pourWander','range', 35,  0,    60,   0.5,  1],
     ['wanderSpd','range', 9,  0.2,  20,   0.1,  1],
     ['shutter',  'range', 0.5,  0.0,  2.5,  0.05, 2],
@@ -2788,7 +2784,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     botStand: 'The bottle stands upright on the table at the centre instead of pouring - where the top glass stands; raise the table over the glass\'s rim (tableY 0.511) to show the bottle alone. Per shot (shot 2).',
     bottle: 'Show the magnum. It is an analytic shape only - there is no fluid simulated inside it yet.',
     botTilt: 'Tilt from upright, in degrees. 0 is standing up; pouring needs to go past horizontal, so 110-130 is the useful range. The mouth stays at the pour point and the body swings around it.',
-    botAz: 'Which direction the magnum is held from, in degrees.',
     pourWander: 'How far the bottle drifts while pouring, in mm. A real pour is not perfectly aimed; the stream inherits the drift so it trails rather than falling dead straight. 0 is a perfectly steady pour.',
     shutter: 'Shutter length, in frames. Each drop is smeared into a streak along its own velocity, the way a camera records a moving liquid. 0 freezes every drop as a separate sphere; higher values turn fast spray into continuous ribbons.',
     glug: 'How unevenly the bottle pours: 0 is a steady stream; up to 1 the flow pulses between a trickle and a gush, as air glugging into the neck interrupts it. The average flow stays at pourRate. The pour sound follows it.',
