@@ -662,13 +662,6 @@ fn waveUpdate(@builtin(global_invocation_id) gi: vec3u, @builtin(num_workgroups)
 
 // ── caustics: trace photons from the key light through glass+champagne onto the table ──
 @compute @workgroup_size(256)
-fn causticDecay(@builtin(global_invocation_id) g: vec3u) {
-  let i = g.x;
-  if (i >= CN * CN * 3) { return; }
-  atomicStore(&atom[A_CAUST + i], (atomicLoad(&atom[A_CAUST + i]) * 236) / 256);   // temporal fade
-}
-
-@compute @workgroup_size(256)
 fn causticBlur(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
   if (i >= CN * CN) { return; }
@@ -748,17 +741,6 @@ fn photons(@builtin(global_invocation_id) g: vec3u) {
 // Two cells per thread, at the default 256-wide groups: one cell each would take 128 000
 // groups, past the 65 535 cap per dimension, and 512-wide groups need a raised limit.
 const FHALF = FINE * FINE * FINE / 2;
-@compute @workgroup_size(256)
-fn clearFine(@builtin(global_invocation_id) g: vec3u) {
-  if (g.x >= FHALF) { return; }
-  atomicStore(&fine[g.x], INFQ);
-  atomicStore(&fine[g.x + FHALF], INFQ);
-  // the coarse occupancy blocks and far-field seed keys, in the same dispatch
-  if (g.x < COARSE * COARSE * COARSE) {
-    atomicStore(&atom[g.x], 0);
-    atomicStore(&atom[COARSE * COARSE * COARSE + g.x], 0xFFFFFFFF);
-  }
-}
 
 
 // narrow-band exact scatter. Each particle deposits a swept CAPSULE, not a sphere: over
@@ -885,25 +867,36 @@ fn jfaCoarse(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups) n
 }
 
 fn resolveCell(i: u32) {
-  let q = atomicLoad(&fine[i]);
+  let q = atomicExchange(&fine[i], INFQ);   // read, and clear for the next frame
   var d = BAND;
   if (q != INFQ) { d = f32(q) / QMAX * BAND; }
   fineF[i] = d;
 }
+// resolveFine is the last reader of the narrow band, the coarse blocks and the seed keys,
+// and every thread touches only its own cells - so it also clears them for the next frame
+// (scatterFine needs them empty), and fades the photon map before this frame's photons.
+// Those were two kernels of their own, clearFine and causticDecay, and the clear a pass of
+// its own over the 128 MB band: -52 bytes shipped, -24 with the packer's default state,
+// ~1 ms less GPU (2 Nov), the picture identical. The buffers start zeroed, not empty, so
+// the very first frame's band reads 0 - harmless, since the zeroed blocks also say "no
+// particles" and nothing reads the band (bit-identical by frame 10).
 @compute @workgroup_size(256)
 fn resolveFine(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
   if (i >= FHALF) { return; }
   resolveCell(i);
-  resolveCell(i + FHALF);         // two cells per thread, as in clearFine
+  resolveCell(i + FHALF);         // two cells per thread (FHALF)
   // and pack the coarse cells for the render (see the note above)
   if (i < COARSE * COARSE * COARSE) {
     let qi = atomicLoad(&atom[2 * COARSE * COARSE * COARSE + i]);
     var v = vec4f(0);
     if (qi != 0xFFFFFFFF) { v = vec4f(parts[qi].pos, 1); }
-    if (atomicLoad(&atom[i]) != 0) { v.w += 2; }
+    if (atomicExchange(&atom[i], 0) != 0) { v.w += 2; }
     vecs[i] = v;
+    atomicStore(&atom[COARSE * COARSE * COARSE + i], 0xFFFFFFFF);   // the seed keys, cleared
   }
+  // the photon map's temporal fade, before this frame's photons land
+  if (i < CN * CN * 3) { atomicStore(&atom[A_CAUST + i], atomicLoad(&atom[A_CAUST + i]) * 236 / 256); }
 }
 
 // ═══════════════ liquid distance field ═══════════════
@@ -1831,8 +1824,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // music already played. Now that wait happens before "click" appears.
   const P = {};
   for (const n of ('simParticles waveUpdate ' +
-                   'clearFine scatterFine jfaCoarse resolveFine ' +
-                   'causticDecay photons causticBlur').split(' '))
+                   'scatterFine jfaCoarse resolveFine ' +
+                   'photons causticBlur').split(' '))
     P[n] = await device.createComputePipelineAsync({ layout, compute: { module, entryPoint: n } });
   const render = await device.createRenderPipelineAsync({ layout,
     vertex:   { module, entryPoint: 'vs' },
@@ -2224,15 +2217,14 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 
     // 2 — structures for rendering, from the final state, once per frame
     pass(1, [
-      ['clearFine', WG(FINE_N / 2, 256)], ['scatterFine', WG(cfg.npart, 64)],
+      ['scatterFine', WG(cfg.npart, 64)],
       ...JFA_STRIDES.map((_, k) => ['jfaCoarse', WG(COARSE_N, 64), k]),
       ['resolveFine', WG(FINE_N / 2, 256)],
     ]);
 
     // 2b — caustics: fade the photon map, shoot this frame's photons, blur. A redraw keeps
     // the photon map it already has.
-    pass(2, redrawOnly ? [] : [['causticDecay', WG(CN * CN * 3, 256)],
-                               ['photons', WG(cfg.nphoton, 64)], ['causticBlur', WG(CN * CN, 256)]]);
+    pass(2, redrawOnly ? [] : [['photons', WG(cfg.nphoton, 64)], ['causticBlur', WG(CN * CN, 256)]]);
 
     // 3 — render
     const rp = enc.beginRenderPass({

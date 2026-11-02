@@ -33,12 +33,12 @@ HEAD = 218   # the dropper header
 
 # shader systems as packer items; Z0.. are the compute kernels (short_entries renames them in
 # the order the JS lists them: see KERNELS)
-KERNELS = 'simParticles waveUpdate clearFine scatterFine jfaCoarse resolveFine causticDecay photons causticBlur'
+KERNELS = 'simParticles waveUpdate scatterFine jfaCoarse resolveFine photons causticBlur'
 SHADER = {
-    'photons + caustic map': 'causticDecay photons causticBlur causIdx causFetch causFetchF causticAt '
+    'photons + caustic map': 'photons causticBlur causIdx causFetch causFetchF causticAt '
                              'CN CEXT CSCALE A_CAUST V_CAUSTF',
     'particle sim': 'simParticles',
-    'spray grids (narrow band, far field)': 'clearFine scatterFine jfaCoarse resolveFine resolveCell fIdx '
+    'spray grids (narrow band, far field)': 'scatterFine jfaCoarse resolveFine resolveCell fIdx '
                                             'cIdx c3 FHALF BAND QMAX INFQ FINE COARSE DOM_LO DOM_SZ FCELL '
                                             'CCELL sdBoxDom',
     'spray SDF in the render': 'sprayDist sdSeg fineAt',

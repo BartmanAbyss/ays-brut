@@ -571,13 +571,14 @@ recording it as a point makes a pour read as a string of frozen beads.
 sim        N steps per frame, N from the clock — everything that advances state:
            simParticles → waveUpdate ×3 (the first one's first 14 threads: the glass volumes)
 build      once per frame — a rendering structure, needs only the final state:
-           clearFine (+ coarse clear) → scatterFine (+ far-field seeds) → jfaCoarse ×5
-           → resolveFine (+ packs the far field for the render)
-photon     causticDecay → photons → causticBlur
+           scatterFine (+ far-field seeds) → jfaCoarse ×5
+           → resolveFine (+ packs the far field for the render, clears the band, blocks
+             and seeds for the next frame, fades the photon map)
+photon     photons → causticBlur
 render     camera raymarch + post (one full-screen triangle)
 ```
 
-Nine compute entry points. Each dispatch passes its small index (sub-step, flood pass, the
+Seven compute entry points. Each dispatch passes its small index (sub-step, flood pass, the
 wave dispatch that also updates the glasses) as the height of its grid,
 `num_workgroups.y - 1`, so no per-dispatch uniforms exist.
 
@@ -961,7 +962,7 @@ defaults. That took three changes, since several defaults were close to biting:
   into 5 bindings (`parts`, `fine`, `fineF`, `atom`, `vecs`) at fixed offsets; the dev
   build adds the profiler's counter bank as a 6th. (A sixth, `flts`, held the puddle.)
 - **Workgroup size:** the default caps it at 256. 320³/256 would be 128 000 workgroups,
-  over the 65 535 per-dimension cap, so `clearFine` and `resolveFine` handle two cells per
+  over the 65 535 per-dimension cap, so `resolveFine` handles two cells per
   thread.
 - **Binding size:** 320³ × 4 B = 125 MiB per buffer, just under the 128 MiB default.
 
@@ -1262,8 +1263,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 055 bytes (2 Nov 2026), 863 OVER 8 192**, lettering in, score
-empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9).
+**`intro.cmd` is 9 003 bytes (2 Nov 2026), 811 OVER 8 192**, lettering in, score
+empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52).
 Before them, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
 Roadroller searches (-> 9 319); sloppy literals in the WGSL (-> 9 213): 520 places where

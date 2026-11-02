@@ -448,7 +448,7 @@ its analysis (`--no-mangle --no-whitespace`) and keeps our naming: 287 bytes bet
 either alone. `--no-whitespace` is required - globals are found with a line-anchored
 pattern that a one-line file defeats. Its validator also rejects our `atomicAdd` calls as
 `@must_use` where Dawn accepts them, so `wgslender validate` reports errors on a shader
-that compiles and runs. Re-check all 11 entry points (9 compute, `vs`, `fs`) survive tree-shaking after adding
+that compiles and runs. Re-check all 9 entry points (7 compute, `vs`, `fs`) survive tree-shaking after adding
 a compute pass.
 
 **wgslender tree-shakes; it does not constant-fold.** Inlining the release uniforms alone
@@ -515,7 +515,11 @@ an `@id(0) override K`, the JS making the nine pipelines with `constants: { 0: k
 indices in the dispatch lists: +65 shipped, +87 with the default packer state. The nine
 headers (`@compute@workgroup_size(64)fn Z4(@builtin(global_invocation_id)g:vec3u)`) are
 near-identical and compress to almost nothing; the switch is nine unique calls and case
-numbers. (Also: wgslender 1.5.1 wants `case 0: {` with the colon.)
+numbers. (Also: wgslender 1.5.1 wants `case 0: {` with the colon.) What did pay is
+fusing kernels where the data allows it: `resolveFine` - the last reader of the band,
+blocks and seeds, one thread per cell - now also clears them and fades the photon map, so
+`clearFine` and `causticDecay` are gone: -52 shipped, -24 fair, ~1 ms faster. Fusion only
+works where no thread needs another's result in the same dispatch (no global barrier).
 
 **The exception: write literals sloppy - the harness WGSL does.** WGSL never converts
 between concrete types (an `i32` is never silently an `f32`, unlike C), but literals are
@@ -588,7 +592,7 @@ chain - brotli alone ranked `unsafe` second, Roadroller ranked it last.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 218 bytes. `intro.cmd` is **9 055** (2 Nov 2026), 863
+  stale. Our dropper header is 218 bytes. `intro.cmd` is **9 003** (2 Nov 2026), 811
   OVER, with the start screen, the sound engine and the lettering in but the score empty;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
