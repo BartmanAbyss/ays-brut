@@ -526,6 +526,10 @@ visible cost the user chose not to pay yet:
 - The photons' jittered grid (`strat` 2 -> 0, random emission): -8 shipped, -30 fair
   (2 Nov). Even at 2.36 M photons random leaves a fine speckle on the lit table (5.3% of
   pixels > 4 levels on a frozen frame), which crawls in playback at about a third of that.
+- Caustics without the blur pass, on branch `reserve/caustics-4tap`: a 384^2 map read
+  with 4 bilinear taps, copied for the render in `resolveFine`. -7 shipped, -25 fair, and
+  0.9 ms less GPU per frame (2 Nov). Close-ups slightly more pixelated (shot 4's macro).
+  One tap alone was -46 but grainy; a 192^2 map -53 but stair-stepped.
 
 **The exception: write literals sloppy - the harness WGSL does.** WGSL never converts
 between concrete types (an `i32` is never silently an `f32`, unlike C), but literals are
