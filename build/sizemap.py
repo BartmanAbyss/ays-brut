@@ -46,7 +46,7 @@ SHADER = {
     'glass volumes + overflow': 'glassUpdate',
     'bubbles': 'bubbleSDF',
     'bulk champagne SDF': 'bulkSDF liquidDist R_LIQ R_IN Y0 LMAX TS0 TS1 glassIdx glassOff',
-    'coupe + tower': 'sdCoupe sdTower FOOT_R FLARE_H FLARE_R STEM_R GLASS_T RIM_R BOWL_D RIM_Y '
+    'coupe + tower': 'sdCoupe sdTower FOOT_R STEM_R GLASS_T RIM_R BOWL_D RIM_Y '
                      'BOWL_BOT SPH_R SPH_CY GH SP smin sdCyl',
     'bottle': 'BOT_H BODY_R NECK_R BOT_W rotX rotY bottleR sdBottleLocal sdBottle',
     'environment + bokeh': 'env bokeh',

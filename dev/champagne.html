@@ -151,7 +151,9 @@ struct U {
   strat    : f32,
   stratJit : f32,
   nSmooth  : f32,          // span normals are measured over, in grid cells (0 = fine)
-  _w2      : f32,          // buffer is 240 bytes = 60 floats; 54 used
+  stemK    : f32,          // the coupe's fillets, m: stem into bowl
+  footK    : f32,          // ...and stem into foot
+  _w2      : f32,          // buffer is 240 bytes = 60 floats; 56 used
 //#D}
 };
 
@@ -214,8 +216,6 @@ const GLASS_T  = 0.0007;                // wall half-thickness
 const STEM_R   = 0.0026;                // slender stem (0.04 D)
 const FOOT_R   = 0.0374;                // 0.67 D
 const FOOT_H   = 0.0077;
-const FLARE_H  = 0.015;                 // stem-to-foot trumpet: height
-const FLARE_R  = 0.011;                 // ...and radius where it meets the foot
 const GH       = RIM_Y;                 // tier spacing = glass height
 const SP       = 2 * RIM_R;           // rims touching
 
@@ -358,51 +358,23 @@ fn sdCoupe(p: vec3f) -> f32 {
   // be - safe for sphere tracing, a step can only get shorter - and the exact SDF is only
   // needed within a few mm of it. sdTower evaluates three coupes per sample and a point is
   // usually far from at least two of them: the tiers are 17 cm apart.
-  let bnd = max(length(p.xz) - (RIM_R + 0.002), max(-p.y - 0.002, p.y - (RIM_Y + 0.002)));
-  if (bnd > 0.004) { if (PROF) { profCoupeB = true; } return bnd; }
-  if (PROF) { pc[7] += 1; profCoupeB = false; }
-  // bowl: a spherical cap shell, cut at the rim and thinned towards it
-  // (solid: the cavity carve at the end is its inner face)
+  let bnd = sdCyl(p, RIM_R + 0.002, -0.002, RIM_Y + 0.002);
+  if (bnd > 0.004) { return bnd; }
+  // Three primitives and two fillets (2 Nov; -105 bytes against the shape before, render no
+  // slower). It replaced a stem profiled as a trumpet into the foot (one surface, scaled by
+  // its local slope) and an ellipsoid knuckle under the bowl: the 18 mm foot fillet brings
+  // the flare back, the 12 mm bowl fillet leaves a shorter neck than the knuckle did.
+  // - bowl: the sphere's outside, cut at the rim. Solid - the cavity carve at the end IS its
+  //   inner face, and removes whatever the fillets push into the bowl.
+  // - stem: an infinite cylinder. Above the bowl's bottom it is inside the cavity sphere up to
+  //   past the bound, so the carve ends it; below, the foot's cut does.
+  // - foot: a plate y = 0..2.2 mm with a 1 mm rounded rim.
+  // Both junctions are perpendicular, so smin is safe there - the collar trap (CLAUDE.md) is
+  // for surfaces meeting tangentially. -p.y last: it cuts the stem off at the table and
+  // flattens the smin's bulge under the foot.
   let cs = length(p - vec3f(0, SPH_CY, 0)) - SPH_R;
-  let bowl = max(cs - GLASS_T, p.y - RIM_Y);
-  // slender stem, and the solid glass knuckle the bowl sits on
-  // Stem, flaring into the foot like a trumpet as in the reference: ONE profiled surface,
-  // radius STEM_R + (FLARE_R - STEM_R)(1-t)^2.5 over FLARE_H. It used to be a separate flare
-  // primitive. smin-ing it to the stem inflated the near-coincident surfaces into a collar
-  // (up to k/4), and even with min its flat top cap, though never on the surface, bent the
-  // finite-difference normals just above it into a seam line. One surface has neither.
-  // (1-t)^2.5 brings slope AND curvature to zero at the top: no crease even in a highlight.
-  // The radial distance is scaled by the LOCAL steepness, 1/sqrt(1 + r'(y)^2), which is 1
-  // up the plain stem, so the long straight part marches at full speed.
-  let fr = length(p.xz);
-  let ft = clamp((p.y - 0.0030) / FLARE_H, 0, 1);
-  // x^2.5 and x^1.5 as products with one sqrt: pow() is exp(log()) and sdCoupe runs 3-4
-  // times per distance evaluation, millions of times a frame
-  let fx = 1 - ft;
-  let fq = fx * sqrt(fx);
-  let sr = STEM_R + (FLARE_R - STEM_R) * fx * fq;
-  let fk = 2.5 * (FLARE_R - STEM_R) / FLARE_H * fq;
-  let stem = max(max((fr - sr) / sqrt(1 + fk * fk), p.y - (BOWL_BOT + 0.005)), -p.y);
-  let knuc = length((p - vec3f(0, BOWL_BOT + 0.0045, 0)) * vec3f(1, 0.62, 1)) - 0.0080;
-  // Foot: a thin plate, 2.2 mm at the rim rising to 4.4 mm at the centre, flat underneath
-  // at y = 0, rim rounded. It used to be a rounded cylinder spanning y = -1.3..7.7 mm - a
-  // 9 mm puck, sunk 1.3 mm into the table - where the reference (a thin plate, photo 5) is
-  // a quarter of that. Cross-section: a capsule along r whose centre height and radius
-  // both taper linearly, so it is flat-bottomed and its top is a shallow cone.
-  let fs = clamp(fr / (FOOT_R - 0.0011), 0, 1);
-  let fh = mix(0.0022, 0.0011, fs);
-  let foot = (length(vec2f(max(fr - (FOOT_R - 0.0011), 0), p.y - fh)) - fh) * 0.95;
-  var d = smin(stem, knuc, 0.0070);
-  d = smin(d, bowl, 0.0045);
-  d = smin(d, foot, 0.0020);
-  // The knuckle and the top of the stem are blended into the shell for the fillet UNDER
-  // the bowl, but they reached up INTO it. Scaling y by 0.62 inside length() stretches the
-  // knuckle to 12.9 mm tall rather than squashing it, so it rose ~17 mm above the bowl
-  // bottom, and the stem itself ended 5 mm above it: a dome standing in the champagne.
-  // Carve the cavity back out, so the inside of the bowl is the spherical cap and nothing
-  // else, whatever the fillets and the knuckle do underneath. It coincides exactly with the
-  // shell's own inner face, which is fine within one SDF - the liquid's deliberate 0.5 mm
-  // overlap into the shell is unchanged.
+  var d = smin(length(p.xz) - STEM_R, max(cs - GLASS_T, p.y - RIM_Y), u.stemK);
+  d = max(smin(d, sdCyl(p, FOOT_R - 0.001, 0.001, 0.0012) - 0.001, u.footK), -p.y);
   return max(d, -cs - GLASS_T);
 }
 fn sdTower(p: vec3f) -> f32 {
@@ -2027,7 +1999,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0, ui.rtrace,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkLife, ui.strat, ui.stratJit, ui.smooth], 24);
+             ui.botAz * Math.PI / 180, ui.bottle ? 1 : 0, ui.bkLife, ui.strat, ui.stratJit, ui.smooth,
+             ui.stemK * 0.001, ui.footK * 0.001], 24);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
@@ -2746,6 +2719,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['strat',    'range', 2,    0,    2,    1,    0],
     ['stratJit', 'range', 1,    0,    3,    0.05, 2],
     ['smooth',   'range', 1,    0,    3,    0.05, 2],
+    ['stemK',    'range', 12,   1,    40,   0.5,  1],
+    ['footK',    'range', 18,   1,    30,   0.5,  1],
     ['rtrace',   'range', 1,    0,    2,    1,    0],
     ['drops',    'check', true],
     ['bubbles',  'check', true],
@@ -2843,6 +2818,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     envAmt: 'Environment brightness: the sky, the fill lights, the softbox seen in the glass, the haze and the table ambient. 0 leaves only what the key light lights through the photon map. A timeline column: shot 1 brings it up with the light.',
     tableY: 'Table height in m. Raised to a tier\'s base (0.17 = tier 2, 0.34 = the top glass) it hides the tiers below: the glasses stand on the table. Drops reaching it end there, so hidden tiers get no spill.',
     lightEl: 'Key light elevation in degrees above the horizon. Low is raking and dramatic, high is overhead.',
+    stemK: 'The coupe: the fillet where the stem meets the bowl, in mm (a smooth-min radius). It stands in for the solid knuckle the bowl used to sit on: larger is a longer, fuller taper from the stem into the bowl.',
+    footK: 'The coupe: the fillet where the stem meets the foot, in mm. It stands in for the trumpet flare the stem used to have: larger spreads the stem wider into the foot.',
     smooth: 'How smooth the liquid looks - the falling drops and the surface in the glasses - as the span its normals are measured over, in grid cells (1.94 mm for the drops, 3.5 mm for the surface). Both are built on grids interpolated in straight pieces; measured finer than a cell every edge shows as a crease: blocky dark patches in the stream, rectangular glints on the surface. 1 = one cell; more softens the ripples themselves; 0 = as before. Glass and bottle keep their fine normals.',
     stratJit: 'With strat: random nudge of each photon, in lattice spacings. 0 is plain R2, which shows faint diagonal stripes on the table (the near-lattice beating against the texel grid); ~1 breaks them up. Large values approach random emission.',
     strat: 'How the photons are spread over the light: 0 random points (the lit table comes out grainy), 1 the R2 low-discrepancy sequence shifted per frame (stratJit breaks its faint stripes), 2 a jittered grid, one random photon per cell. Same photon count and cost.',

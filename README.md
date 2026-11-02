@@ -53,11 +53,14 @@ is a spherical cap, so capacity fixes the depth analytically:
 V = π·h·(3R² + h²)/6    →   R = 56 mm, V = 280 ml  ⇒  h = 46.3 mm
 ```
 
-Slender 5.2 mm stem, a solid glass knuckle under the bowl (smooth-min), and a thin foot:
-a plate 2.2 mm at the rim rising to 4.4 mm at the centre, flat underneath, which the stem
-flares into as one surface, a concave trumpet 15 mm tall widening to 11 mm (`FLARE_H`,
-`FLARE_R`). The bowl's cavity is carved back out last, so nothing the fillets or the knuckle
-do underneath can show up inside the bowl. The tower is 1+4+9 = 14 glasses by SDF domain folding, 0.51 m tall, 0.336 m wide.
+Slender 5.2 mm stem and a thin foot, a plate 2.2 mm thick with a rounded rim, flat
+underneath. Since 2 Nov it is three primitives and two smooth-min fillets: the stem into
+the bowl (`stemK`, 12 mm) and into the foot (`footK`, 18 mm, which gives the flare), then
+cut flat at the table. It replaced a stem profiled as a concave trumpet into the foot and a
+solid ellipsoid knuckle under the bowl: -105 bytes, render no slower, the neck under the
+bowl shorter than the knuckle was. The bowl's cavity is carved back out last, and is also
+the bowl's inner face, so nothing the fillets do underneath can show up inside the bowl.
+The tower is 1+4+9 = 14 glasses by SDF domain folding, 0.51 m tall, 0.336 m wide.
 
 **Magnum** — 345 mm tall, 116 mm body, 30 mm neck, a flat base, **solid glass** since 31 Oct
 (it was a 3 mm shell with the bore opened through the neck, and a punt for shot 2): photons
@@ -1263,8 +1266,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 946 bytes (2 Nov 2026), 754 OVER 8 192**, lettering in, score
-empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57).
+**`intro.cmd` is 8 841 bytes (2 Nov 2026), 649 OVER 8 192**, lettering in, score
+empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57), a simpler coupe (-105).
 Before them, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
 Roadroller searches (-> 9 319); sloppy literals in the WGSL (-> 9 213): 520 places where
