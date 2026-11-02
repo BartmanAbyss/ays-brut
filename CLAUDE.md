@@ -501,7 +501,10 @@ ternary statements, no overloading). The JS twin: aliasing `Math.*` (2 Nov, 56 u
 `const{sin:e,min:t,...}=Math` before terser) cost +39 shipped for all eleven functions, +13
 for the top four - Roadroller and brotli predict `Math.` nearly for free, a fresh one-letter
 name less well. `with(Math)` was not tried: no `with` in a module, and slow lookups in the
-audio loops.
+audio loops. Also noise, both ways (2 Nov): folding literal products (`14*32*32` ->
+`14336`, nine of them) and writing `0xFFFFFFFF` as `~0u` (five; plain `~0` is -1 and no
+u32) read -16/-17 with the saved packer state and +15/+9 with the default one. Repeated
+small tokens (`32`, `0xFFFF...`) are what the compressors like; a unique `131072` is not.
 
 **The exception: write literals sloppy - the harness WGSL does.** WGSL never converts
 between concrete types (an `i32` is never silently an `f32`, unlike C), but literals are
