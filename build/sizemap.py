@@ -87,7 +87,7 @@ JS = {
         ('RE', r'const SHOW = \[\[.*?\]\];',
          'const SHOW = [[0,0,0.8,0.44,0.26,1,1,45,1,118,0,1],[96,0,0.8,0.44,0.26,1,1,45,1,118,0,1]];')],
     'shot table (SHOT_V)': [
-        cut('  const SHOT_V = [', '  // ── lettering ──', ins='  let shotVals = t => [0,0.5,120,0.17,0];\n')],
+        cut('  const SHOT_V = [', '  // ── lettering ──', ins='  let shotVals = t => [0,0.5,120];\n')],
     'bottle wander': [('RE', r'    const wob = tt => \[.*?\];\n', '    const wob = tt => [0, 0];\n')],
 }
 

@@ -21,7 +21,7 @@ OUT = os.path.join(ROOT, 'intro.html')
 # cfg.* defaults, except where the release deliberately differs (show on, paused off).
 CFG = {
     't': 'null', 'w': '0', 'h': '0', 'view': '0', 'still': 'false', 'selftest': 'false',
-    'steps': '160', 'npart': '32768', 'spawnMod': '1600', 'pvol': '2e-8', 'warm': '400',
+    'steps': '160', 'npart': '32768', 'pvol': '2e-8', 'warm': '400',
     'single': 'false', 'noliq': 'false', 'bub': 'true', 'expo': '1.45', 'wav': 'true',
     'pfield': 'true', 'bounces': '10', 'refl': '1.0', 'envg': 'false', 'fillQ': 'null',
     'nphoton': '2359296', 'cgain': '0.05', 'paused': 'false', 'det': 'false',

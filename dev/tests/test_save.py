@@ -89,7 +89,7 @@ class Table(unittest.TestCase):
         # on the harness's own table with its shot values taken out: the user saves into
         # it, so its contents are not fixed
         shots = [{k: v for k, v in s.items() if k not in ('ov', 'fade')} for s in T.read_shots(SRC)]
-        D = {'shutter': '0.5', 'pourRate': '120', 'botShare': '0.17', 'botStand': 'false'}
+        D = {'shutter': '0.5', 'pourRate': '120'}
         js, warn = T.emit_release(T.write_shots(SRC, shots), D)
         self.assertNotIn(T.FLAT_CALL, js)
         self.assertIn('const SHOW = ' + T.js_array(T.flatten(shots)) + ';', js)
@@ -113,25 +113,25 @@ class Table(unittest.TestCase):
         self.assertTrue(all(0 <= c[0] <= c[1] <= end for c in cues))
 
     def test_shot_table_rows_where_values_change(self):
-        d = {'shutter': '0.5', 'pourRate': '120', 'botShare': '0.17', 'botStand': 'false'}
+        d = {'shutter': '0.5', 'pourRate': '120'}
         black = lambda t: [t] + key(0)[1:6] + [0.0] + key(0)[7:]   # fade 0
         shots = [
-            {'name': 'a', 'dur': 4.0, 'ov': {'botStand': True}, 'keys': [key(0), key(4)]},
+            {'name': 'a', 'dur': 4.0, 'ov': {'shutter': 0.25}, 'keys': [key(0), key(4)]},
             {'name': 'b', 'dur': 2.0, 'ov': {}, 'keys': [black(0), black(2)]},       # black
             {'name': 'c', 'dur': 3.0, 'ov': {'shutter': 1.0}, 'keys': [key(0), key(3)]},
             {'name': 'd', 'dur': 1.0, 'ov': {'pourRate': 900.0}, 'keys': [black(0), black(1)]},
         ]
         self.assertEqual(T.shot_table(shots, d), [
-            [0.0, 0.5, 120.0, 1.0],
+            [0.0, 0.25, 120.0],
             # b is black: the look-only values carry over, so no row; c changes the shutter
-            # and drops the standing bottle; d is black, keeps c's look, but its pour rate
+            # (a's 0.25 to 1); d is black, keeps c's look, but its pour rate
             # runs the simulation, so it gets a row
-            [6.0, 1.0, 120.0, 0.0],
-            [9.0, 1.0, 900.0, 0.0],
+            [6.0, 1.0, 120.0],
+            [9.0, 1.0, 900.0],
         ])
 
     def test_release_carries_the_harness_shot_values(self):
-        js, warn = T.emit_release(SRC, {'shutter': '0.5', 'pourRate': '120', 'botShare': '0.17', 'botStand': 'false'})
+        js, warn = T.emit_release(SRC, {'shutter': '0.5', 'pourRate': '120'})
         self.assertNotIn(T.TABLE_CALL, js)
         self.assertEqual([w for w in warn if 'fade' not in w and any(k in w for k in T.SHOT_KEYS)], [])
 
