@@ -497,7 +497,11 @@ bytes. Tables and generated layouts in the harness itself fixed it with one sour
 payload: `vec3f(0.)` -> `vec3f()` 48 chars shorter, 0 bytes compressed; one-letter
 `alias` for vec2f/3f/4f +18; splatting equal constructor arguments +18. Most of Shader
 Minifier's other transforms have no WGSL form (braces are mandatory, no comma operator, no
-ternary statements, no overloading).
+ternary statements, no overloading). The JS twin: aliasing `Math.*` (2 Nov, 56 uses,
+`const{sin:e,min:t,...}=Math` before terser) cost +39 shipped for all eleven functions, +13
+for the top four - Roadroller and brotli predict `Math.` nearly for free, a fresh one-letter
+name less well. `with(Math)` was not tried: no `with` in a module, and slow lookups in the
+audio loops.
 
 **The exception: write literals sloppy - the harness WGSL does.** WGSL never converts
 between concrete types (an `i32` is never silently an `f32`, unlike C), but literals are
