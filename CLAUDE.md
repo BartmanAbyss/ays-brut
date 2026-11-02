@@ -345,6 +345,17 @@ build's own output. Afterwards, check the file for bytes below 0x20 other than n
 `//#D}`; everything else the build decides by rule (see the README). Three things it has
 already cost, all of which look like success until you check:
 
+**To read what survives, use `python build/readable.py`** -> `build/stripped.wgsl`: the
+release's shader with the source's names and comments kept. It runs build.py's own passes
+(uniforms folded, dead ifs folded, wgslender's verdict on dead declarations) over text
+whose comments are masked by inert `/*~K~*/` tokens instead of deleted, then restores
+them, and checks the result by handing it back to wgslender. `min.pretty.wgsl` is what
+ships but every name is a letter; `dev/champagne.html` has the comments and all the debug
+code. This is the middle. It is NOT the shipped text - no packing, no nameless uniforms,
+no short entry points - so never measure size on it. **Run it after every shader change**
+(after `build.py`), so the user can read the result; it stops with FAILED if the stripped
+shader no longer parses or wgslender disagrees about what is dead.
+
 **A renamed entry point is a WARNING, not an error.** The minifier renamed `vs` and `fs`
 because `@vertex fn vs(` sits on one line and the guard pattern expected a newline. The
 shader compiled clean, the pipelines came back invalid, and WebGPU said so at warning level
