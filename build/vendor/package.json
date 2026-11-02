@@ -1,9 +1,11 @@
 {
   "name": "comparade26-build-tools",
   "private": true,
-  "description": "Build tools, vendored: node_modules is committed so the build needs no npm and no network. To change a version, edit it here, run `npm install --omit=dev --ignore-scripts` in this folder, delete node_modules/.bin, and commit node_modules with the lockfile.",
+  "description": "Build tools, vendored: node_modules is committed so the build needs no npm and no network. To change a version, edit it here, run `npm install --omit=dev --ignore-scripts` IN A COPY of this folder (npm prunes what the lockfile does not list, and roadroller - from a git fork, see its VENDORED.md - is not in it), then copy back the changed packages and the lockfile, without node_modules/.bin, and commit. esbuild and google-closure-compiler-windows are native Windows x64 executables.",
   "dependencies": {
     "terser": "5.51.2",
-    "wgslender": "1.5.1"
+    "wgslender": "1.5.1",
+    "esbuild": "0.28.2",
+    "google-closure-compiler-windows": "20261015.0.0"
   }
 }

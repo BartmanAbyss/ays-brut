@@ -27,6 +27,10 @@ import brotli
 ROOT = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, ROOT)
 import build as B   # noqa: E402
+# The map charges terser's output to source lines through its source map; Closure and
+# esbuild in front would need their maps chained too. So the map is of a terser-only
+# build: the shares hold, the total runs ~50 bytes over the shipped size.
+B.CLOSURE = False
 import pack         # noqa: E402
 
 HEAD = 218   # the dropper header
@@ -88,7 +92,6 @@ JS = {
          'const SHOW = [[0,0,0.8,0.44,0.26,1,1,45,1,118,0,1],[96,0,0.8,0.44,0.26,1,1,45,1,118,0,1]];')],
     'shot table (SHOT_V)': [
         cut('  const SHOT_V = [', '  // ── lettering ──', ins='  let shotVals = t => [0,0.5,120];\n')],
-    'bottle wander': [('RE', r'    const wob = tt => \[.*?\];\n', '    const wob = tt => [0, 0];\n')],
 }
 
 
@@ -122,7 +125,6 @@ JS_REGIONS = [
     ('start screen, audio start', '  let ac, tA;'),
 ]
 JS_SPANS = [
-    ('bottle wander', '    const wob = tt =>', '    canvas.nextSibling.style.opacity = fade;'),
     ('lettering', '    canvas.nextSibling.style.opacity = fade;', '    const V = shotVals(showT);'),
     ('lettering', '    drawText(showT);', '    const enc = device.createCommandEncoder();'),
     ('frame: show clock, locked to the audio', '    let nShow;', '    let big = false;'),
@@ -182,6 +184,14 @@ def js_line_map(js, jmin, ren):
     for (a, ln), nxt in zip(segs, segs[1:] + [(len(code), None)]):
         for i in range(a, min(nxt[0], len(code))):
             owner[i] = ln
+    # const -> let, as minify_js does it (two characters fewer, owned by the same line)
+    out_c, out_o, last = [], [], 0
+    for m in re.finditer(r'(?<![\w$.])const(?=[\s\[{])', code):
+        out_c.append(code[last:m.start()]); out_o.extend(owner[last:m.start()])
+        out_c.append('let'); out_o.extend([owner[m.start()]] * 3)
+        last = m.end()
+    out_c.append(code[last:]); out_o.extend(owner[last:])
+    code, owner = ''.join(out_c), out_o
     # the kernel renames, as short_entries does them; a new name takes the old one's line
     for old, new in ren.items():
         out_c, out_o, last = [], [], 0

@@ -623,9 +623,14 @@ Terser's `const` -> `let` afterwards: -11, now a build step (not `var`: it chang
 scoping). A renamer that re-runs terser's own mangler with a searched letter order: -17
 after 10-15 min of hill climbing, within the ±20 that small perturbations move things,
 and it decays as the code changes - not worth building. Google Closure SIMPLE before
-terser: -33, -45 with esbuild between; not from naming but from `const`/`let` -> `var`
-and reusing variables. Its output was never run, and it would vendor Java and a 13 MB
-jar: a reserve. Worse than terser alone: uglify-js +18, swc +19, esbuild +272,
+terser, esbuild between: in the build since 2 Nov, -44 and -5 on top of `const` -> `let`.
+Not from naming but from `const`/`let` -> `var` where its analysis allows, and one
+variable reused for several values. Verified by hashing the soundtrack the release
+renders offline (sample-for-sample the same) and running the show. Both are native
+Windows x64 executables in build/vendor, so the build is Windows-only now; Closure is
+pinned at v20261015 (two weeks old when vendored, not the newest). `build/sizemap.py`
+builds terser-only (`B.CLOSURE = False`): it charges terser's source map to source
+lines, so its total runs ~50 bytes over. Worse than terser alone: uglify-js +18, swc +19, esbuild +272,
 terser `keep_fnames` +42. The scripts are not kept; the numbers are the result.
 
 **Never rename a member access.** The substitution uses a `(?<![.\w])` guard so a rename of
@@ -647,7 +652,7 @@ terser `keep_fnames` +42. The scripts are not kept; the numbers are the result.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 262** (2 Nov 2026), 70
+  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 213** (2 Nov 2026), 21
   OVER, with the start screen, the sound engine and the lettering in but the score empty;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The

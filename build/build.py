@@ -68,6 +68,23 @@ def run_tool(tool, args):
     return r.stdout.decode()
 
 
+# Two native tools, vendored the same way (Windows x64 builds - the build runs on Windows).
+EXES = {'closure': os.path.join(VENDOR, 'google-closure-compiler-windows', 'compiler.exe'),
+        'esbuild': os.path.join(VENDOR, '@esbuild', 'win32-x64', 'esbuild.exe')}
+
+
+def run_exe(tool, args):
+    """Run a vendored native tool; return its stdout as text, or stop the build."""
+    if not os.path.exists(EXES[tool]):
+        raise BuildError('%s is missing from build/vendor/node_modules - it is committed; '
+                         'check out the whole repository' % tool)
+    r = subprocess.run([EXES[tool]] + args, capture_output=True, timeout=300)
+    if r.returncode != 0:
+        raise BuildError('%s failed (exit %d):\n%s' % (tool, r.returncode,
+                         r.stderr.decode(errors='replace')[:1500]))
+    return r.stdout.decode()
+
+
 def spec_defaults(js):
     """Pull the panel's default values straight out of SPEC so they cannot drift."""
     m = re.search(r'const SPEC = \[(.*?)\n  \];', js, re.S)
@@ -571,9 +588,28 @@ def pretty_js(js):
             os.remove(tmp)
 
 
+CLOSURE = True   # build/sizemap.py turns it off: it maps terser's output back to the source
+
+
 def minify_js(js):
     tmp = os.path.join(ROOT, '_min.js')
     try:
+        how = 'terser 5.51.2 (vendored), const -> let'
+        if CLOSURE:
+            # Google Closure Compiler (SIMPLE) first, then esbuild, then terser: -44 and -5
+            # shipped on 2 Nov. Not for its names: Closure turns const/let into var where
+            # its analysis allows and reuses one variable for several values, which terser
+            # does not. --assume_function_wrapper: the script is a module, nothing outside
+            # sees its top level. Checked: the soundtrack renders sample-for-sample the same.
+            io.open(tmp, 'wb').write(js.encode())
+            js = run_exe('closure', ['--js', tmp, '-O', 'SIMPLE', '--rewrite_polyfills=false',
+                                     '--inject_libraries=false', '--language_out', 'ECMASCRIPT_2021',
+                                     '--chunk_output_type', 'ES_MODULES', '--assume_function_wrapper'])
+            io.open(tmp, 'wb').write(js.encode())
+            js = run_exe('esbuild', [tmp, '--minify', '--format=esm'])
+            if len(js) < 200:
+                raise BuildError('closure + esbuild produced no usable output (%d chars)' % len(js))
+            how = 'closure v20261015 + esbuild 0.28.2 + ' + how
         io.open(tmp, 'wb').write(js.encode())
         # terser reads a FILE here: piping source through stdin fails on Windows.
         # passes=2: measured through Roadroller and brotli, -16 bytes shipped (31 Oct); a
@@ -585,7 +621,7 @@ def minify_js(js):
         # and one keyword where there were two: -11 shipped on 2 Nov. Not var, which
         # changes scoping (closures in loops) and would need Closure-style analysis.
         out = re.sub(r'(?<![\w$.])const(?=[\s\[{])', 'let', out)
-        return out, 'terser 5.51.2 (vendored), const -> let'
+        return out, how
     finally:
         if os.path.exists(tmp):
             os.remove(tmp)
