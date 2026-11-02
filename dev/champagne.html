@@ -147,11 +147,10 @@ struct U {
   botOn    : f32,
   bkLife   : f32,
   strat    : f32,
-  stratJit : f32,
   nSmooth  : f32,          // span normals are measured over, in grid cells (0 = fine)
   stemK    : f32,          // the coupe's fillets, m: stem into bowl
   footK    : f32,          // ...and stem into foot
-  _w2      : f32,          // buffer is 240 bytes = 60 floats; 54 used
+  _w2      : f32,          // buffer is 240 bytes = 60 floats; 53 used
 //#D}
 };
 
@@ -293,18 +292,6 @@ fn sampleWave(g: i32, xz: vec2f) -> vec4f {
   if (u.wav < 0.5) { r.x = 0; }               // waves off: a flat surface, foam kept
   return r;
 }
-// rising CO2 bubbles, as a lattice of spheres translated upward through glass-local space
-fn bubbleSDF(ql: vec3f) -> f32 {
-  let CB = 0.0055;
-  var p = ql;
-  p.y -= u.time * 0.085;
-  let id = floor(p / CB);
-  let r3 = rnd3(u32(id.x + 4096), u32(id.y + 4096), u32(id.z + 4096));
-  if (r3.z > 0.22) { return 1; }                       // most cells are empty
-  let rad = 0.00010 + r3.x * 0.00034;
-  let jit = (r3 - 0.5) * CB * 0.45;
-  return length(p - (id + 0.5) * CB - jit) - rad;
-}
 
 // liquid body of one glass: sphere-cap interior cut by the (wavy) surface plane
 fn bulkSDF(p: vec3f) -> f32 {
@@ -318,26 +305,33 @@ fn bulkSDF(p: vec3f) -> f32 {
   if (d0 > WMAX * 1.1) { return d0 - WMAX; }   // too far for a wave to matter: skip the fetch
   if (PROF) { pc[5] += 1; }
   let dl = max(dS, q.y - (Y0 + L + sampleWave(g, q.xz).x));
-  if (u.bub > 0.5 && dl < 0 && gl < 1) { if (PROF) { pc[43] += 1; } return max(dl, -bubbleSDF(q)); }
+  if (u.bub > 0.5 && dl < 0 && gl < 1) {
+    if (PROF) { pc[43] += 1; }
+    // Rising CO2 bubbles, as a lattice of spheres translated upward through glass-local
+    // space, carved out of the liquid. Most cells are empty (the liquid's own distance).
+    let CB = 0.0055;
+    var bq = q;
+    bq.y -= u.time * 0.085;
+    let id = floor(bq / CB);
+    let r3 = rnd3(u32(id.x + 4096), u32(id.y + 4096), u32(id.z + 4096));
+    if (r3.z <= 0.22) {
+      return max(dl, 0.00010 + r3.x * 0.00034 - length(bq - (id + 0.5) * CB - (r3 - 0.5) * CB * 0.45));
+    }
+  }
   return dl;
 }
 
 fn fIdx(c: vec3i) -> u32 { return u32(c.x) + u32(c.y) * FINE + u32(c.z) * FINE * FINE; }
 fn cIdx(c: vec3i) -> u32 { return u32(c.x) + u32(c.y) * COARSE + u32(c.z) * COARSE * COARSE; }
-fn c3(i: u32) -> vec3i {
-  return vec3i(i32(i % COARSE), i32((i / COARSE) % COARSE), i32(i / (COARSE * COARSE)));
-}
 // PCG3D. The sin()-based hash below loses all precision once the index is large
 // (dot() reaches ~3e7 for 262k photons), which shows up as correlated samples.
-fn pcg3d(vin: vec3u) -> vec3u {
-  var v = vin * 1664525 + 1013904223;
+fn rnd3(a: u32, b: u32, c: u32) -> vec3f {
+  // PCG3D (Jarzynski & Olano 2020), inline - rnd3 was its one caller
+  var v = vec3u(a, b, c) * 1664525 + 1013904223;
   v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
   v ^= v >> vec3u(16);
   v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
-  return v;
-}
-fn rnd3(a: u32, b: u32, c: u32) -> vec3f {
-  return vec3f(pcg3d(vec3u(a, b, c))) * (1.0 / 4294967296.0);
+  return vec3f(v) * (1.0 / 4294967296.0);
 }
 fn hash3(p: vec3f) -> vec3f {
   var q = vec3f(dot(p, vec3f(127.1, 311.7, 74.7)),
@@ -638,7 +632,10 @@ fn causticBlur(@builtin(global_invocation_id) g: vec3u) {
   let c = vec2i(i32(i % CN), i32(i / CN));
   var sum = vec3f(0);
   for (var dy = -2; dy <= 2; dy++) {
-    for (var dx = -2; dx <= 2; dx++) { sum += causFetch(c + vec2i(dx, dy)); }
+    for (var dx = -2; dx <= 2; dx++) {
+      let k = A_CAUST + causIdx(c + vec2i(dx, dy));
+      sum += vec3f(f32(atomicLoad(&atom[k])), f32(atomicLoad(&atom[k + 1])), f32(atomicLoad(&atom[k + 2])));
+    }
   }
   vecs[V_CAUSTF + i] = vec4f(sum / 25, 0);
 }
@@ -648,22 +645,15 @@ fn photons(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
   if (i >= u32(u.nPhoton)) { return; }
   var h = rnd3(i, u32(u.frame * 64), 5);   // u.frame moves < 1 per frame in slow motion
-  // Random emission clumps and gaps: ~5 photons per blurred table cell a frame, so the
-  // evenly lit table came out as crawling grain. The R2 low-discrepancy sequence (Roberts
-  // 2018) spreads them evenly instead. In 32-bit fixed point, because in f32 a1 * i keeps
-  // only ~6 bits of fraction at 262 144 photons; the whole set shifts by one random offset
-  // per frame (Cranley-Patterson rotation) so successive frames still average.
-  if (u.strat > 1.5) {
+  // Random emission clumps and gaps: ~5 photons per blurred table cell a frame (at 65 536),
+  // so the evenly lit table came out as crawling grain. (An R2 low-discrepancy option, with
+  // a jitter against its faint stripes, lost to the grid and was dropped on 2 Nov.)
+  if (u.strat > 0.5) {
     // jittered grid: the emitter split into sqrt(N) x sqrt(N) cells, one random photon in
     // each. No lattice to beat against the texels (the jitter is fresh every frame), and
     // no constants to ship.
     let n = u32(sqrt(u.nPhoton));
     h = vec3f((vec2f(vec2u(i % n, i / n)) + h.xy) / f32(n), 0);
-  } else if (u.strat > 0.5) {
-    let q = vec2u(i * 3242174889, i * 2447445414) + pcg3d(vec3u(7, u32(u.frame * 64), 9)).xy;
-    // Plain R2 sits almost on a lattice ~2 texels apart, which beats against the texel grid
-    // as faint diagonal stripes. Jitter by about a lattice spacing (1/sqrt N) breaks it.
-    h = vec3f(fract(vec2f(q >> vec2u(8)) / 16777216 + (h.xy - 0.5) * u.stratJit * inverseSqrt(u.nPhoton)), 0);
   }
 
   let L  = lightDir();
@@ -716,12 +706,6 @@ const FHALF = FINE * FINE * FINE / 2;
 // narrow-band exact scatter. Each particle deposits a swept CAPSULE, not a sphere: over
 // one shutter interval a falling drop traces a streak, and recording it as a point is what
 // makes a pour read as a string of frozen beads instead of liquid.
-fn sdSeg(p: vec3f, a: vec3f, b: vec3f) -> f32 {
-  let pa = p - a;
-  let ba = b - a;
-  let h  = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-12), 0, 1);
-  return length(pa - ba * h);
-}
 
 @compute @workgroup_size(64)
 fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
@@ -760,7 +744,9 @@ fn scatterFine(@builtin(global_invocation_id) g: vec3u) {
       for (var x = lo.x; x <= hi.x; x++) {
         let cc = vec3i(x, y, z);
         let cp = DOM_LO + (vec3f(cc) + 0.5) * FCELL;
-        let d  = sdSeg(cp, a, b);
+        // distance to the segment a-b (the streak)
+        let pa = cp - a;
+        let d  = length(pa - (b - a) * clamp(dot(pa, b - a) / max(dot(b - a, b - a), 1e-12), 0, 1));
         if (d < BAND) {
           atomicMin(&fine[fIdx(cc)], u32(clamp(d / BAND, 0, 1) * QMAX));
         }
@@ -814,7 +800,7 @@ fn jfaCoarse(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups) n
   // -> R1 between occ's regions, ending in R1, the one liquidDist reads
   let k = nw.y - 1;
   let src = select(select(3, 2u, k % 2 == 1), 1, k == 0) * COARSE * COARSE * COARSE;
-  let c  = c3(i);
+  let c  = vec3i(i32(i % COARSE), i32((i / COARSE) % COARSE), i32(i / (COARSE * COARSE)));
   let cp = DOM_LO + (vec3f(c) + 0.5) * CCELL;
   var best = 0xFFFFFFFFu;   // the stencil below includes the cell itself
   var bd = 1e9;
@@ -1269,10 +1255,6 @@ fn lightDir() -> vec3f {
 fn causIdx(c: vec2i) -> u32 {
   let q = clamp(c, vec2i(0), vec2i(i32(CN) - 1));
   return (u32(q.y) * CN + u32(q.x)) * 3;
-}
-fn causFetch(c: vec2i) -> vec3f {
-  let k = causIdx(c);
-  return vec3f(f32(atomicLoad(&atom[A_CAUST + k])), f32(atomicLoad(&atom[A_CAUST + k + 1])), f32(atomicLoad(&atom[A_CAUST + k + 2])));
 }
 fn causFetchF(c: vec2i) -> vec3f {
   let q = clamp(c, vec2i(0), vec2i(i32(CN) - 1));
@@ -1917,7 +1899,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              ui.bubbles ? 1 : 0, ui.expo, ui.waves ? 1 : 0, ui.drops ? 1 : 0, ui.bounces,
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
-             ui.bottle ? 1 : 0, ui.bkLife, ui.strat, ui.stratJit, ui.smooth,
+             ui.bottle ? 1 : 0, ui.bkLife, ui.strat, ui.smooth,
              ui.stemK * 0.001, ui.footK * 0.001], 24);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
@@ -2634,8 +2616,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['envAmt',   'range', 1,    0,    1,    0.01, 2],
     ['bkLife',   'range', 4,    0,    30,   0.5,  1],
     ['gridEnv',  'check', false],
-    ['strat',    'range', 2,    0,    2,    1,    0],
-    ['stratJit', 'range', 1,    0,    3,    0.05, 2],
+    ['strat',    'range', 1,    0,    1,    1,    0],
     ['smooth',   'range', 1,    0,    3,    0.05, 2],
     ['stemK',    'range', 12,   1,    40,   0.5,  1],
     ['footK',    'range', 18,   1,    30,   0.5,  1],
@@ -2736,8 +2717,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     stemK: 'The coupe: the fillet where the stem meets the bowl, in mm (a smooth-min radius). It stands in for the solid knuckle the bowl used to sit on: larger is a longer, fuller taper from the stem into the bowl.',
     footK: 'The coupe: the fillet where the stem meets the foot, in mm. It stands in for the trumpet flare the stem used to have: larger spreads the stem wider into the foot.',
     smooth: 'How smooth the liquid looks - the falling drops and the surface in the glasses - as the span its normals are measured over, in cells of the grid of the drops (1.94 mm), for the drops and the surface alike since 2 Nov (one stencil; the surface had a height-field normal of its own). At the rim, where the surface meets the glass, it darkens a thin contour. Both are built on grids interpolated in straight pieces; measured finer than a cell every edge shows as a crease: blocky dark patches in the stream, rectangular glints on the surface. 1 = one cell; more softens the ripples themselves; 0 = as before. Glass and bottle keep their fine normals.',
-    stratJit: 'With strat: random nudge of each photon, in lattice spacings. 0 is plain R2, which shows faint diagonal stripes on the table (the near-lattice beating against the texel grid); ~1 breaks them up. Large values approach random emission.',
-    strat: 'How the photons are spread over the light: 0 random points (the lit table comes out grainy), 1 the R2 low-discrepancy sequence shifted per frame (stratJit breaks its faint stripes), 2 a jittered grid, one random photon per cell. Same photon count and cost.',
+    strat: 'How the photons are spread over the light: 1 a jittered grid, one random photon per cell; 0 random points (the lit table comes out grainy - the size reserve in CLAUDE.md). Same photon count and cost.',
     gridEnv: 'Swap the environment for a lat-long UV test grid: green horizon, magenta poles, orange dot at the key light. Shows which direction a reflection or refraction samples.',
     drops: 'Render the particle field: pour stream, splashes and droplets. Off leaves only the bulk liquid, but the simulation keeps running so the glasses still fill.',
     bubbles: 'Rising CO2 bubbles, carved out of the liquid as real geometry, so light refracts through every one.',

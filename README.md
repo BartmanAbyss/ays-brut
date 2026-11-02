@@ -1271,8 +1271,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 594 bytes (2 Nov 2026), 402 OVER 8 192**, lettering in, score
-empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57), a simpler coupe (-105), the traced reflection dropped (-87), the bottle without heel bevel and neck taper (-43), one smoothed normal for all liquid (-56), the bottle held from 180 degrees (-32), its helpers inlined (-29).
+**`intro.cmd` is 8 543 bytes (2 Nov 2026), 351 OVER 8 192**, lettering in, score
+empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57), a simpler coupe (-105), the traced reflection dropped (-87), the bottle without heel bevel and neck taper (-43), one smoothed normal for all liquid (-56), the bottle held from 180 degrees (-32), its helpers inlined (-29), more single-call functions inlined (-51).
 Before them, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
 Roadroller searches (-> 9 319); sloppy literals in the WGSL (-> 9 213): 520 places where

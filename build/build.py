@@ -221,7 +221,7 @@ def release_uniforms(ui):
         'prad': f('dropRad') * 0.001, 'foamG': f('foam'), 'glug': f('glug'), 'glugHz': f('glugHz'),
         'botOn': on('bottle'),
         'bkLife': f('bkLife'),
-        'strat': f('strat'), 'stratJit': f('stratJit'), 'nSmooth': f('smooth'),
+        'strat': f('strat'), 'nSmooth': f('smooth'),
         'stemK': f('stemK') * 0.001, 'footK': f('footK') * 0.001,
     }
 
