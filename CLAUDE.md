@@ -566,6 +566,15 @@ visible cost the user chose not to pay yet:
   0.9 ms less GPU per frame (2 Nov). Close-ups slightly more pixelated (shot 4's macro).
   One tap alone was -46 but grainy; a 192^2 map -53 but stair-stepped.
 
+**Paid for, to buy back when bytes allow:** cuts already in, whose cost the user wants
+undone once there is room.
+- Foam from the wave impulse and drops absorbed at the bowl wall (commit d3f182d, -56
+  together: foam -28, wall -28). In motion the pour shot (4) shows a "funnel" that six
+  still frames side by side did not - the user saw it watching the whole intro. Not yet
+  known which of the two causes it; the wall is the likelier (the stream's drops used to
+  slide down the bowl and now vanish at it). Revert first when a couple of bytes are free.
+  Lesson: judge a change to the simulation in motion, not on stills.
+
 **The exception: write literals sloppy - the harness WGSL does.** WGSL never converts
 between concrete types (an `i32` is never silently an `f32`, unlike C), but literals are
 *abstract* and take the type their context needs. So `x * 2` where x is f32, `n * 4` where
