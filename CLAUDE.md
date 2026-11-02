@@ -505,6 +505,10 @@ audio loops. Also noise, both ways (2 Nov): folding literal products (`14*32*32`
 `14336`, nine of them) and writing `0xFFFFFFFF` as `~0u` (five; plain `~0` is -1 and no
 u32) read -16/-17 with the saved packer state and +15/+9 with the default one. Repeated
 small tokens (`32`, `0xFFFF...`) are what the compressors like; a unique `131072` is not.
+Merging near-equal shader literals likewise (2 Nov): all 41 single-use values within ~6%
+of another (`.94` -> `.95`, `1.52` -> `1.5`, `31` -> `32`, ...) read -33 with the saved
+state and +3 with the default one; subsets +15..+18 default. Not worth judging 41 look
+changes for - a perturbation of this size moves the result ±20 either way.
 
 **The exception: write literals sloppy - the harness WGSL does.** WGSL never converts
 between concrete types (an `i32` is never silently an `f32`, unlike C), but literals are
