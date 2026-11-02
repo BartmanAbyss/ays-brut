@@ -319,7 +319,7 @@ fn bulkSDF(p: vec3f) -> f32 {
   if (d0 > WMAX * 1.1) { return d0 - WMAX; }   // too far for a wave to matter: skip the fetch
   if (PROF) { pc[5] += 1; }
   let dl = max(dS, q.y - (Y0 + L + sampleWave(g, q.xz).x));
-  if (u.bub > 0.5 && dl < 0) { if (PROF) { pc[43] += 1; } return max(dl, -bubbleSDF(q)); }
+  if (u.bub > 0.5 && dl < 0 && gl < 1) { if (PROF) { pc[43] += 1; } return max(dl, -bubbleSDF(q)); }
   return dl;
 }
 
@@ -1081,39 +1081,28 @@ fn planeT(ro: vec3f, rd: vec3f) -> f32 {
 fn mapN(p: vec3f) -> vec3f {
   if (PROF) { pc[14] += 1; }
   // Both liquids live on grids interpolated in straight pieces, and a 0.2 mm stencil reads
-  // every cell edge as a sharp turn. One control smooths both, in cells (nSmooth): the
-  // glass, the bottle and the bowl side keep the fine normal - the glass wall is 1.4 mm.
-  // The drops: the trilinear narrow band, flat facets one 1.94 mm cell across. The stream
-  // refracted the dark far table in hard-edged blocks, one per facet; from the particle
-  // field alone over about a cell the creases average out.
+  // every cell edge as a sharp turn: the drops' trilinear narrow band (flat facets a 1.94 mm
+  // cell across - the stream refracted the far table in hard-edged blocks) and the top of
+  // the bulk, bilinear on a 3.5 mm wave grid (rectangular glints). One stencil nSmooth
+  // cells wide smooths both, where the liquid is the nearest surface. Not the glass, the
+  // bottle or the liquid against the glass (h ~ -0.5 mm there, the deliberate overlap):
+  // those keep the fine normal, the glass wall is 1.4 mm. The bubbles are switched off
+  // (gl) while it runs: carved just under the top, a wide stencil reached into them. A hit
+  // ON a bubble is far inside the bubble-less liquid, so it fails the test and keeps the
+  // fine normal, bubbles and all. (The top had a height-field normal of its own until
+  // 2 Nov, ~50 bytes.)
+  gl = 1;
   if (u.pfield > 0.5 && u.noliq < 0.5 && u.nSmooth > 0.1) {
-    let ds = sprayDist(p);
-    if (ds < min(min(sdTower(p), sdBottle(p)), bulkSDF(p))) {
+    let h = liquidDist(p);
+    if (abs(h) < 0.0003 && h < min(sdTower(p), sdBottle(p))) {
       let w = vec2f(1, -1) * u.nSmooth * FCELL;
-      return normalize( w.xyy * sprayDist(p + w.xyy) + w.yyx * sprayDist(p + w.yyx)
-                      + w.yxy * sprayDist(p + w.yxy) + w.xxx * sprayDist(p + w.xxx) );
+      let n = normalize( w.xyy * liquidDist(p + w.xyy) + w.yyx * liquidDist(p + w.yyx)
+                       + w.yxy * liquidDist(p + w.yxy) + w.xxx * liquidDist(p + w.xxx) );
+      gl = 0;
+      return n;
     }
   }
-  // The liquid's top in a glass: a height field, bilinear on a 3.5 mm wave grid, whose
-  // slope jumps at every cell edge - rectangular glints and blocks. Its slope comes from
-  // the wave heights half the span to either side, continuous across the edges. A height
-  // field, not the drops' 3D stencil: that would reach into the bubbles carved just
-  // below. Only on the top itself, not the bowl side or the bubbles.
-  if (u.nSmooth > 0.03) {
-    let g = glassIdx(p);
-    let L = vecs[V_GLASS + g].x;
-    if (L > 0.0002) {
-      let q  = p - glassOff(g);
-      let hs = q.y - (Y0 + L + sampleWave(g, q.xz).x);
-      if (abs(hs) < 0.0004 && hs > length(q - vec3f(0, SPH_CY, 0)) - R_LIQ &&
-          sdTower(p) > 0.0003) {
-        let w = u.nSmooth * RIM_R / f32(WN);   // half a span: a wave cell is 2 RIM_R / WN
-        let hx = sampleWave(g, q.xz + vec2f(w, 0)).x - sampleWave(g, q.xz - vec2f(w, 0)).x;
-        let hz = sampleWave(g, q.xz + vec2f(0, w)).x - sampleWave(g, q.xz - vec2f(0, w)).x;
-        return normalize(vec3f(-hx, 2 * w, -hz));
-      }
-    }
-  }
+  gl = 0;
   let e = vec2f(1, -1) * 0.0002;
   return normalize( e.xyy * map(p + e.xyy) + e.yyx * map(p + e.yyx)
                   + e.yxy * map(p + e.yxy) + e.xxx * map(p + e.xxx) );
@@ -1213,7 +1202,8 @@ fn turbo(x: f32) -> vec3f {
                vec3f(0), vec3f(1));
 }
 // out-of-focus party lights: what makes refraction through glass worth looking at
-var<private> gl: f32;   // 1 while tableShade looks up its glossy reflection, else 0
+var<private> gl: f32;   // 1 while tableShade looks up its glossy reflection (bokeh) or mapN
+                        // smooths a liquid normal (no bubbles), else 0
 fn bokeh(rd: vec3f) -> vec3f {
   // 32 cells round exactly (32 / 2pi), the hash index wrapped below: at 0.20 rad a cell it
   // was 31.4, and a part cell at the wrap showed as a seam. rd.y, not asin: ~5% off at 30 deg.
@@ -2782,7 +2772,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     lightEl: 'Key light elevation in degrees above the horizon. Low is raking and dramatic, high is overhead.',
     stemK: 'The coupe: the fillet where the stem meets the bowl, in mm (a smooth-min radius). It stands in for the solid knuckle the bowl used to sit on: larger is a longer, fuller taper from the stem into the bowl.',
     footK: 'The coupe: the fillet where the stem meets the foot, in mm. It stands in for the trumpet flare the stem used to have: larger spreads the stem wider into the foot.',
-    smooth: 'How smooth the liquid looks - the falling drops and the surface in the glasses - as the span its normals are measured over, in grid cells (1.94 mm for the drops, 3.5 mm for the surface). Both are built on grids interpolated in straight pieces; measured finer than a cell every edge shows as a crease: blocky dark patches in the stream, rectangular glints on the surface. 1 = one cell; more softens the ripples themselves; 0 = as before. Glass and bottle keep their fine normals.',
+    smooth: 'How smooth the liquid looks - the falling drops and the surface in the glasses - as the span its normals are measured over, in cells of the drops' grid (1.94 mm), for the drops and the surface alike since 2 Nov (one stencil; the surface had a height-field normal of its own). At the rim, where the surface meets the glass, it darkens a thin contour. Both are built on grids interpolated in straight pieces; measured finer than a cell every edge shows as a crease: blocky dark patches in the stream, rectangular glints on the surface. 1 = one cell; more softens the ripples themselves; 0 = as before. Glass and bottle keep their fine normals.',
     stratJit: 'With strat: random nudge of each photon, in lattice spacings. 0 is plain R2, which shows faint diagonal stripes on the table (the near-lattice beating against the texel grid); ~1 breaks them up. Large values approach random emission.',
     strat: 'How the photons are spread over the light: 0 random points (the lit table comes out grainy), 1 the R2 low-discrepancy sequence shifted per frame (stratJit breaks its faint stripes), 2 a jittered grid, one random photon per cell. Same photon count and cost.',
     gridEnv: 'Swap the environment for a lat-long UV test grid: green horizon, magenta poles, orange dot at the key light. Shows which direction a reflection or refraction samples.',
