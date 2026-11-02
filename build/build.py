@@ -222,7 +222,7 @@ def release_uniforms(ui):
         'botOn': on('bottle'),
         'bkLife': f('bkLife'),
         'strat': f('strat'), 'nSmooth': f('smooth'),
-        'stemK': f('stemK') * 0.001, 'footK': f('footK') * 0.001, 'botShare': f('botShare'),
+        'stemK': f('stemK') * 0.001, 'footK': f('footK') * 0.001, 'botShare': f('botShare'), 'wander': f('pourWander') * 0.001, 'wanderK': f('wanderSpd'),
     }
 
 

@@ -108,9 +108,6 @@ struct U {
   shut     : f32,
   dt       : f32,          // this frame's step: 1/60 s, less in slow motion
   tgtY     : f32,          // the camera looks at (0, tgtY, 0)
-  evx      : f32,
-  evz      : f32,
-  emitPos  : vec3f,
   fade     : f32,          // brightness multiplier for fades (1 = full)
   ltEl     : f32,          // key light elevation, rad - below 0 the table is unlit
   pour     : f32,          // share of the bottle's flow, 0..1 (0 = not pouring)
@@ -149,6 +146,8 @@ struct U {
   stemK    : f32,          // the coupe's fillets, m: stem into bowl
   footK    : f32,          // ...and stem into foot
   botShare : f32,          // the bottle's share of the particles (folded: no longer per shot)
+  wander   : f32,          // how far the bottle wanders, m (pourWander, mm)
+  wanderK  : f32,          // ...and how fast (wanderSpd)
   _w2      : f32,          // buffer is 240 bytes = 60 floats; 53 used
 //#D}
 };
@@ -439,10 +438,11 @@ fn simParticles(@builtin(global_invocation_id) g: vec3u, @builtin(num_workgroups
       let m = max(u32(u.nPart * u.botShare * 0.5 / u.pourRate), 1);
       let gt = 6.2831853 * u.glugHz * u.time;
       if ((i % m) == (fc % m) && rnd3(i, fc, 7).x < (0.5 + 0.5 * u.glug * sin(gt + 1.5 * sin(gt * 0.31)) * (0.6 + 0.4 * sin(gt * 0.13))) * u.pour) {
-        p.pos  = u.emitPos + vec3f(h.x - 0.5, 0, h.y - 0.5) * 0.004;
+        let ep = wob(u.time);
+        p.pos  = ep + vec3f(h.x - 0.5, 0, h.y - 0.5) * 0.004;
         // the stream inherits the bottle's drift, so it trails the wander instead of
         // falling dead straight from a moving point
-        p.vel  = vec3f(u.evx, -0.35, u.evz) + (h - 0.5) * 0.015;
+        p.vel  = (wob(u.time + 0.02) - ep) * 50 + vec3f(0, -0.35, 0) + (h - 0.5) * 0.015;
         p.life = 9;
         born = true;
       }
@@ -634,6 +634,7 @@ fn causticBlur(@builtin(global_invocation_id) g: vec3u) {
 fn photons(@builtin(global_invocation_id) g: vec3u) {
   let i = g.x;
   if (i >= u32(u.nPhoton)) { return; }
+  emit = wob(u.time);
   var h = rnd3(i, u32(u.frame * 64), 5).xy;   // u.frame moves < 1 per frame in slow motion
   // Random emission clumps and gaps: ~5 photons per blurred table cell a frame (at 65 536),
   // so the evenly lit table came out as crawling grain. (An R2 low-discrepancy option, with
@@ -925,6 +926,16 @@ fn liquidDist(p: vec3f) -> f32 {
 const BOT_H   = 0.345;
 const BODY_R  = 0.060;                   // height/width 2.87, matching the reference
 const NECK_R  = 0.0150;
+// The bottle's wander: a real pour is not perfectly aimed, so the mouth - the emitter -
+// drifts on a slow Lissajous. In the shader since 2 Nov (it was JS writing five uniforms,
+// the position and the drift velocity). On u.time, the show clock.
+fn wob(t: f32) -> vec3f {
+  let k = t * u.wanderK;
+  return vec3f((sin(k * 0.37) * 0.62 + sin(k * 0.91 + 1.3) * 0.38) * u.wander, 0.555,
+               (cos(k * 0.29 + 2.1) * 0.62 + sin(k * 0.73 + 0.7) * 0.38) * u.wander);
+}
+// fs and photons set it once; sdBottle reads it at every march step
+var<private> emit: vec3f;
 // The magnum. Its three helpers (rotX, the radius profile bottleR, the local SDF) were
 // inlined here on 2 Nov, each having this one call site: -26 bytes, about 8 a function.
 fn sdBottle(p: vec3f) -> f32 {
@@ -941,7 +952,7 @@ fn sdBottle(p: vec3f) -> f32 {
   } else {
     if (u.botTilt < 0.01) { return 1e9; }   // tilt 0: not in the scene
     // the mouth sits at the emitter, so the bottle follows the pour's wander for free
-    v = p - u.emitPos;
+    v = p - emit;
     // Held from 180 degrees, which needs no azimuth turn: the bottle is round, so turning it
     // by pi about its axis and tilting by -t is the same shape as tilting by +t. (It was held
     // from 205 degrees, a slider of its own; 2 Nov, for ~25 bytes.) The tilt about x:
@@ -1311,6 +1322,7 @@ fn turn(hp: vec3f, d: vec3f, med: i32) -> Turn {
 }
 
 @fragment fn fs(@builtin(position) fc: vec4f) -> @location(0) vec4f {
+  emit = wob(u.time);
   let uv = (fc.xy * 2 - u.res) / u.res.y;
   let ro = u.camPos;
   let fw = normalize(vec3f(0, u.tgtY, 0) - ro);
@@ -1847,19 +1859,12 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     }
     else if (ui.spin) { ang = time * 0.25; setUI('angle', (ang * 180 / Math.PI) % 360); }
     else              { ang = ui.angle * Math.PI / 180; }
-    // a real pour is not perfectly aimed: let the bottle wander on a slow Lissajous
-    const K = ui.wanderSpd;
-    const wob = tt => [Math.sin(tt * 0.37 * K) * 0.62 + Math.sin(tt * 0.91 * K + 1.3) * 0.38,
-                       Math.cos(tt * 0.29 * K + 2.1) * 0.62 + Math.sin(tt * 0.73 * K + 0.7) * 0.38];
-    const W = ui.pourWander * 0.001;
-    const w0 = wob(time), w1 = wob(time + 0.02);
     canvas.nextSibling.style.opacity = fade;   // the words go dark with the picture
     const V = shotVals(showT);
     // in struct U order: what the release keeps first...
     f32.set([canvas.width, canvas.height, time, simU,
              Math.sin(ang) * dist, camY, Math.cos(ang) * dist, V[1] * SIM_DT * frameSim,
-             stepDt, tgtY, (w1[0] - w0[0]) * W / 0.02, (w1[1] - w0[1]) * W / 0.02,   // bottle drift velocity
-             w0[0] * W, 0.555, w0[1] * W, fade,                 // emitter; fade
+             stepDt, tgtY, fade,   // the bottle's wander is the shader's (wob)
              el / 57.3, pour, tilt / 57.3, ty, en,
              V[2]]);   // the shot's own
 //#D{
@@ -1870,7 +1875,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
              ui.reflect ? 1 : 0, ui.autofill ? -1 : ui.fill / 100, ui.gridEnv ? 1 : 0,
              ui.lightAz * Math.PI / 180, ui.dropRad * 0.001, ui.foam, ui.glug, ui.glugHz,
              ui.bottle ? 1 : 0, ui.bkLife, ui.strat, ui.smooth,
-             ui.stemK * 0.001, ui.footK * 0.001, ui.botShare], 22);
+             ui.stemK * 0.001, ui.footK * 0.001, ui.botShare, ui.pourWander * 0.001, ui.wanderSpd], 17);
 //#D}
     device.queue.writeBuffer(bufs[0], 0, f32);
   }
