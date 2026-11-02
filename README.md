@@ -400,9 +400,9 @@ sounds the same every run. Three parts:
   the spill pool): nothing is poured before the bottle tips in (the pour column, 24.9 s),
   so shots 1-2 have only the pad and the cork; the top glass reaches its spill level at
   ~35 s (spray ~1600 drops), tier 2 at ~52 s (~3500), and shot 8, with its own
-  `pourRate`/`botShare`, sends 28x the stream and ~21 000 drops. The drips and splashes
-  follow that spray as 1.5 s ramps (x1, x2, x13), the pour the pour column (x28 in shot
-  8), the fizz one share per tier on the table once the pour has begun. Loudness follows
+  `pourRate` (250 since 2 Nov, *Shot 8's pour and the frame budget*), sends twice the
+  stream and ~6 200 drops. The drips and splashes follow that spray as 1.5 s ramps (x1, x2,
+  x4), the pour the pour column (x2 in shot 8), the fizz one share per tier on the table once the pour has begun. Loudness follows
   the camera's distance (1 on the macro shot, quieter on the wide ones) and the fade, so
   the liquid drops out in the blacks, where the sim runs at 8x. +45 bytes with the
   packer's default state on both sides (+43 shipped). Re-measure the ramp times when the
@@ -686,6 +686,27 @@ marked, the frame interval, both budget lines, a hover readout and a per-shot ta
 GPU times come from timestamp queries, one frame at a time - at 60 Hz a light frame leaves
 the GPU idle and it clocks down, so the light shots read a little high; the heavy ones are
 real.
+
+### Shot 8's pour and the frame budget
+
+On 2 Nov, shot 8 (25 s by then) was measured over whole deterministic runs (`det=1`) at
+the release's 1600×900, GPU ms per frame, for its own `pourRate`:
+
+| `pourRate` | median, first 12 s | median, last 12 s | worst p95 (2.5 s window) |
+|---|---|---|---|
+| 5000 (was) | 19.3–20.6 | 24–26 | 26.7 |
+| 2000 | 19.2–20.6 | 24–26 | 26.7 |
+| 1000 | 19.1–20.5 | 24–26 | 28.7 |
+| 500 | 19.0–19.9 | 19.5–21.8 | 23.9 |
+| **250** (now) | 18.5–19.1 | 18.5–19.1 | 19.7 |
+
+Above ~1900 drops a step the bottle's slice (`botShare` 0.5 of 65 536, a drop holding its
+particle ~17 steps) is the limit, so 5000 never applied; 1000 halved the stream and cost
+the same. The jump at ~88 s is the bottom tier overflowing onto the table near the camera:
+render 11 -> 16 ms, photons 6 -> 7.6. At 250 enough volume never arrives for that, and the
+spray is ~6 200 drops instead of ~21 000. 250 is also about the floor of this lever: the
+shot costs ~18.5 ms with little spray (render ~10.3, photons ~6, build ~2), so it sits on
+the 19 ms line, not under it.
 
 ### Exporting a video
 
@@ -1241,8 +1262,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 9 046 bytes (31 Oct 2026), 854 OVER 8 192**, lettering in, score
-empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11).
+**`intro.cmd` is 9 055 bytes (2 Nov 2026), 863 OVER 8 192**, lettering in, score
+empty; the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9).
 Before them, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
 Roadroller searches (-> 9 319); sloppy literals in the WGSL (-> 9 213): 520 places where

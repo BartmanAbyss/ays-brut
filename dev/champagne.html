@@ -2592,7 +2592,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         [    0, 216, 0.58,  0.6, 0.28,    8, 0, 45.6, 1, 118,     0,   1],
         [  1.5, 270,  0.4, 0.01, 0.21,    8, 0, 45.6, 1, 118,     0,   1],
       ] },
-    { name: '8', dur: 25, ov: {botShare: 0.5, pourRate: 5000, shutter: 1},
+    { name: '8', dur: 25, ov: {botShare: 0.5, pourRate: 250, shutter: 1},
       note: 'new: held on the last shot\'s final framing, no moves - to be designed',
       keys: [
         [    0, 270,  0.4, 0.01, 0.21, 0.25, 0, 45.6, 1, 118,     0,   1],
@@ -2894,7 +2894,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     verbMix: 'Audio: how much of the pad goes into its hall. Slow-motion footage usually sits in a big wet space.',
     fxVerbLen: 'Audio: the liquid\'s room, tail in seconds (to -60 dB). Short keeps the drips and splashes close and dry; the pad\'s 4 s hall made them sound like a cave.',
     fxVerbMix: 'Audio: how much of the liquid goes into its room.',
-    drips: 'Audio: drips and splashes per SIM second while the top glass alone spills (from ~35 s). The spray, measured, sets the rest: 2.2x once tier 2 spills too (~52 s), 13x in shot 8. Slow motion thins them out with the picture.',
+    drips: 'Audio: drips and splashes per SIM second while the top glass alone spills (from ~35 s). The spray, measured, sets the rest: 2.2x once tier 2 spills too (~52 s), 4x in shot 8. Slow motion thins them out with the picture.',
     trkPad: 'Audio track on/off, live (after "hear audio" and the click): the pad (PADsynth). Silent unless the score has chords or the URL has &testpad=1.',
     trkVerb: 'Audio on/off, live: both reverbs, the pad\'s hall and the liquid\'s room. Off is the dry mix.',
     trkDrips: 'Audio track on/off, live: bubble-model drips - one bubble per drip, and often one or two smaller ones as it breaks up.',
@@ -2913,7 +2913,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     splashN: 'Bubble splashes: bubbles per splash.',
     splashLen: 'Bubble splashes: seconds over which a splash\'s bubbles form, densest at the impact.',
     pourGain: 'Bubble pour: level, scaled by the camera distance like the rest.',
-    pourBub: 'Bubble pour: bubbles per SIM second while the bottle pours (the pour column of the timeline; 28x in shot 8, which sends 28x the stream). Up to ~1000 is dripping to an intimate stream, 10000 dense, 100000 a waterfall (van den Doel).',
+    pourBub: 'Bubble pour: bubbles per SIM second while the bottle pours (the pour column of the timeline; 2x in shot 8, which sends twice the stream). Up to ~1000 is dripping to an intimate stream, 10000 dense, 100000 a waterfall (van den Doel).',
     fizzGain: 'Fizz: level.',
     fizzRate: 'Fizz: bursts per SIM second for each tier holding champagne - none before the pour, then one tier per tier on the table.',
     fizzXi: 'Fizz: pitch rise of each burst - the cavity collapsing, rising until it is gone (Poujol et al. 2021).',
@@ -4094,12 +4094,12 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // the timeline's pour column); the spray was measured over a run of the show on the
     // audio clock (31 Oct, particles alive in the spill pool): none until the top glass
     // reaches its spill level at ~35 s, then ~1600 drops; ~3500 once tier 2 spills too
-    // (~52 s); ~21000 in shot 8, whose own pourRate and botShare send 28x the stream.
-    // So the spray is ramps of 1.5 s from those times, and the stream 1, then 28 - re-measure
-    // them when the shots change what the tower does when. (A table of breakpoints with its
-    // interpolation was ~40 bytes more.)
+    // (~52 s); ~6200 in shot 8, whose own pourRate (250, 2 Nov: down from 5000, for the
+    // frame budget) sends about twice the stream. So the spray is ramps of 1.5 s from those
+    // times, and the stream 1, then 2 - re-measure them when the shots change what the
+    // tower does when. (A table of breakpoints with its interpolation was ~40 bytes more.)
     const ramp = (t, a) => Math.min(1, Math.max(0, (t - a) / 1.5)),
-          spray = t => ramp(t, 35) + ramp(t, 51) + 11 * ramp(t, 76.25);
+          spray = t => ramp(t, 35) + ramp(t, 51) + 2 * ramp(t, 76.25);
     // Loudness: 1 at the macro shot's distance, quieter when wide; and with the picture -
     // the fade takes the liquid out in the blacks, where the sim runs at 8x.
     const near = t => { const k = showAt(t); return Math.min(1, 0.2 / k(2)) * k(6); };
@@ -4174,7 +4174,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       const g = 6.2831853 * ui.glugHz * t;
       return 0.5 + 0.5 * ui.glug * Math.sin(g + 1.5 * Math.sin(g * 0.31)) * (0.6 + 0.4 * Math.sin(g * 0.13));
     };
-    each(t => ui.pourBub * showAt(t)(8) * (1 + 27 * ramp(t, 76.25)),
+    each(t => ui.pourBub * showAt(t)(8) * (1 + ramp(t, 76.25)),
          t => pop(BX[2], t, ui.pourGain * near(t) * 2 * glugP(t), ui.bRmin, ui.bRmax, 0.3 + r2() * 0.4));
     // fizz: CO2 bubbles bursting at the surface of every filled glass - tiny (0.15-0.5 mm),
     // high, quick, rising in pitch as the cavity collapses (Poujol et al., "Sound of
