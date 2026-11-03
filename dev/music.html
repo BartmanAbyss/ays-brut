@@ -77,11 +77,13 @@
 const DEFAULT_SCORE = `// [start s, length s, notes...] - a note is a MIDI number or a name: 'A3', 'C#4', 'Bb2'
 // (C4 = 60). Changes apply on the next Play.
 // Open voicing: the root low, the 5th and the 10th above it, spread over two octaves.
+// chord(root, kind) writes one for you: ...chord('F2', 'maj7') - kinds '' 'm' plus 'maj7'
+// 'add9' 'sus2' 'sus4' (e.g. 'madd9', 'maj7add9').
 [
-  [0,  6, 'A2', 'E3', 'C4'],   // Am  vi
-  [6,  6, 'F2', 'C3', 'A3'],   // F   IV
-  [12, 6, 'C3', 'G3', 'E4'],   // C   I
-  [18, 6, 'G2', 'D3', 'B3'],   // G   V
+  [0,  6, ...chord('A2', 'm')],   // Am  vi   A2 E3 C4
+  [6,  6, ...chord('F2')],        // F   IV   F2 C3 A3
+  [12, 6, ...chord('C3')],        // C   I    C3 G3 E4
+  [18, 6, ...chord('G2')],        // G   V    G2 D3 B3
 ]`;
 
 // ── the pad's controls: names, ranges, defaults and tooltips as in champagne.html's SPEC ──
@@ -116,8 +118,24 @@ function midi(n) {
   for (const a of m[2]) v += a === '#' ? 1 : -1;
   return v;
 }
+// chord(root, kind): the notes of a chord in the sketch's open voicing - the root where
+// given, its 5th and 10th above, everything within two octaves. kind is '' or 'm' for the
+// triad, plus any of 'maj7' (the major 7th, between the 5th and the 10th), 'add9' (the 9th,
+// under the 10th), 'sus2' / 'sus4' (the 9th / the 11th instead of the 10th): 'm', 'maj7',
+// 'madd9', 'sus4', 'maj7add9'. In a score entry: [0, 6, ...chord('F2', 'maj7')].
+function chord(root, kind = '') {
+  const r = midi(root), minor = /^m(?!aj)/.test(kind);
+  const n = [r, r + 7];
+  if (kind.includes('maj7')) n.push(r + 11);
+  if (kind.includes('add9')) n.push(r + 14);
+  if (kind.includes('sus2')) n.push(r + 14);
+  else if (kind.includes('sus4')) n.push(r + 17);
+  else n.push(r + (minor ? 15 : 16));
+  if (!/^(m(?!aj))?(maj7)?(add9)?(sus[24])?$/.test(kind)) throw new Error('chord kind not known: ' + JSON.stringify(kind));
+  return n;
+}
 function parseScore() {
-  const raw = Function('"use strict"; return (' + $score.value + '\n);')();
+  const raw = Function('chord', '"use strict"; return (' + $score.value + '\n);')(chord);
   if (!Array.isArray(raw)) throw new Error('the score must be an array');
   return raw.map((e, i) => {
     if (!Array.isArray(e) || e.length < 3) throw new Error('entry ' + i + ': [start, length, notes...]');
@@ -284,6 +302,7 @@ addEventListener('keydown', e => {
 });
 drawRoll();
 // for checks from the harness tooling: render without playing, report the peak
+window.__chord = chord;
 window.__render = async () => { const r = await render(parseScore(), 48000, 1); return { secs: r.b.duration, peak: r.pk }; };
 </script>
 </body>
