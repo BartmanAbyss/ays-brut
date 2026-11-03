@@ -6,7 +6,7 @@ champagne tower).
 A realtime 3D fluid simulation of champagne filling a three-tier champagne tower, rendered
 entirely by SDF raymarching. Target: an **8192-byte PC intro** for **ComParade 2026**
 (Emmering/Munich, 6–8 Nov 2026), packaged the INCENDIUM way — WebGPU + a tiny PowerShell
-dropper — not a native exe.
+dropper.
 
 **Current state (3 Nov 2026):** complete. The renderer, the simulation, the timeline of
 eight shots, the lettering, the start screen ("patientez", then "cliquez") and the soundtrack - the score,
@@ -82,11 +82,11 @@ The tower is 1+4+9 = 14 glasses by SDF domain folding, 0.51 m tall, 0.336 m wide
 (it was a 3 mm shell with the bore opened through the neck, and a punt for shot 2): photons
 cross two surfaces instead of four, so its shadow carries a green caustic within their 4 legs,
 and dark solid glass reads as a full bottle. Its silhouette is a radius-vs-height function
-(`bottleR`), not a union of primitives: a champagne shoulder is an S-curve that a cone can't
+(`bottleR`): a champagne shoulder is an S-curve that a cone can't
 make and a wide smooth-min erases. Of 345 mm the body is ~140, shoulder ~175 (span), neck
 ~105. The mouth is pinned to the pour emitter, so the bottle inherits the pour's wander.
 
-### Simulation — hybrid, not Navier–Stokes
+### Simulation — hybrid
 
 Free-falling liquid has no pressure gradient, so it needs no solver. The split:
 
@@ -131,7 +131,7 @@ height), and reusing one would make two substeps share an RNG stream - the bug t
 to thin the pour. It only bites in the 8x blacks below ~30 fps, where the tower then
 fills a little less.
 
-**All** of the simulation steps on this clock, not just the particles. The per-glass volume
+**All** of the simulation steps on this clock. The per-glass volume
 ODE, the wave field and the table puddle (since cut) sat in the per-frame build pass until
 the timeline exposed it: a seek running 3000 steps in one frame filled exactly one glass,
 because the bulk had advanced one frame's worth. At 60 fps it hid perfectly, since frames
@@ -209,7 +209,7 @@ Keys are `[t, angle, dist, camY, tgtY, speed, fade, lightEl, pour, botTilt, tabl
   per show step, so the liquid moves every frame. It used to run whole 1/60 s steps less
   often - at 0.25 the same frame showed four times, motion at 15 fps. Everything sized per
   step scales with the step: the waves (in velocity form, so the step can change), the
-  mousse decay, the bottle's emission (its cadence counts sim time, not steps) and the
+  mousse decay, the bottle's emission (its cadence counts sim time) and the
   motion streak, which shortens the way a high-speed camera's exposure does. At speed 1 and
   above nothing changed: whole steps, more of them when faster. Checked with `det=1`: the
   same sim time at 0.25 and at 1 fills the glasses to within a few percent (top glass 29.6
@@ -245,7 +245,7 @@ replays up to the target (the editor's kept shot starts skip most of that). **A 
 replays the timeline** a quarter second of show time per frame (full steps, as many as
 needed): the pour, bottle and light reach the shader once per frame, and a seek that ran
 the whole sim in one frame poured from t = 0 with the target's values. A seek to 50 s takes
-a few seconds. It is representative, not bit-identical: spill azimuths differ by the RNG.
+a few seconds. It is representative: spill azimuths differ by the RNG.
 
 **The shot plan** (`SHOTS` in `dev/champagne.html`; 101.25 s, then a second of reverb):
 
@@ -372,7 +372,7 @@ letter's origin snaps to the grid before its own coordinates round, so every cop
 letter is the same string and brotli stores it once. Measured 31 Oct, intro.cmd:
 - MILLESIME added in the old per-word layout: 10 464 -> 10 480.
 - Groups with the positions baked into the paths, one cue per group: 10 470.
-- Half-turn arcs as one arc each (an O is two arcs, not four): 10 440.
+- Half-turn arcs as one arc each (an O is two arcs): 10 440.
 - The overlay's style is the canvas's own string (`position:fixed;inset:0;width:100%;
   height:100%`), which brotli stores once: 10 408. `pointer-events:none` is harness-only
   (its panels sit under the overlay). In the release a click on the overlay still bubbles
@@ -382,7 +382,7 @@ letter is the same string and brotli stores it once. Measured 31 Oct, intro.cmd:
 - No `stroke-miterlimit`: the default limit of 4 already mitres every corner these letters
   have (the sharpest, M's top corners at 35 degrees, need 3.3): 10 398. A new letter
   with a corner under ~29 degrees would get a flat tip; then it comes back.
-- Fullscreen goes on the body, not the canvas: fullscreen shows only that element and its
+- Fullscreen goes on the body: fullscreen shows only that element and its
   contents, and the overlay beside the canvas vanished in Chrome (10 400). The browser pane
   never goes fullscreen, so check text in the release in a real browser.
 - A 3x coarser grid at the same size on screen (`GRID` in the tool): most coordinates one
@@ -447,7 +447,7 @@ pad table's phases - and is the same piece. Three parts:
   (`fxVerbLen` 0.6 s, `fxVerbMix` 0.25): one 4 s hall for everything made the drips sound
   like a cave. +21 bytes for the second one.
 
-The level is a fixed `master` gain (0.9), not normalised: the harness shows the mix's peak
+The level is a fixed `master` gain (0.9): the harness shows the mix's peak
 in the audio column's header, red with "CLIPS" past 1 - then turn `master` down. (It was
 normalised to a 0.9 peak; scanning and scaling the 6 M rendered samples cost 25 bytes.)
 The release only builds the graph before "cliquez" and plays it live (the pad's table,
@@ -590,11 +590,11 @@ the same sample and resume together.
 ### Rendering
 
 Nearest-particle narrow-band distance field → sphere trace. Particles deposit a **swept
-capsule**, not a sphere: over one shutter interval a falling drop traces a streak, and
+capsule**: over one shutter interval a falling drop traces a streak, and
 recording it as a point makes a pour read as a string of frozen beads.
 
 - **Nested dielectrics** by medium priority (`mediumAt` → air / glass / champagne / table /
-  bottle glass), not by authoring separate interface surfaces. The liquid deliberately
+  bottle glass). The liquid deliberately
   **overlaps 0.5 mm into the glass shell**; coincident surfaces let float noise decide which
   medium wins, which bands into rings.
 - Beer–Lambert gold with a cheap single-scatter term so depth glows instead of going black.
@@ -654,7 +654,7 @@ The compo PC, confirmed 24 Oct 2026:
 Development is on an **RTX 4070**. Against it the 5070 brings +4% shaders, +1% clock, +6%
 FP32 and +33% memory bandwidth (GDDR7), plus a larger L2; reviews put it ~20% ahead at 1080p
 raster. This frame is mostly ALU with incoherent gathers out of a 125 MiB grid, so call it
-**15–20%** — an estimate from specifications, not a benchmark of this workload.
+**15–20%** — an estimate from specifications.
 
 That fixes the number to aim at: 16.6 ms on the 5070 is about **19 ms on the 4070**.
 
@@ -753,7 +753,7 @@ the same. The jump at ~88 s is the bottom tier overflowing onto the table near t
 render 11 -> 16 ms, photons 6 -> 7.6. At 250 enough volume never arrives for that, and the
 spray is ~6 200 drops instead of ~21 000. 250 is also about the floor of this lever: the
 shot costs ~18.5 ms with little spray (render ~10.3, photons ~6, build ~2), so it sits on
-the 19 ms line, not under it.
+the 19 ms line.
 
 With the pour fixed, the counts settled the pool (2 Nov). A natural `det=1` run peaks at
 ~1 900 drops in the stream and ~6 800 in the spill, so 65 536 particles were four times
@@ -779,7 +779,7 @@ It serves `dev/` on 127.0.0.1:8796 and opens the harness in the default browser 
 browser; `--no-open` prints the URL instead). The page renders the soundtrack first
 (`song()`, as a 16-bit WAV to `/audio`), then for each frame draws the 4K canvas down to
 1080p in a 2D canvas (smoothing 'high': at exactly 2:1 an even box filter), composites the
-lettering - it is an SVG overlay in the DOM, not in the canvas - from the overlay's own
+lettering - it is an SVG overlay in the DOM - from the overlay's own
 state, and sends the raw RGBA over a WebSocket on port 8797; the script pipes it into
 ffmpeg. The audio starts one frame in, since the page's frame k already shows show step
 k+1. RGB goes to YUV with the BT.709 matrix and is tagged so - swscale's default is BT.601,
@@ -794,7 +794,7 @@ timing, but a hidden tab may be throttled to a crawl. ffmpeg's warnings go to
 `build/intro.ffmpeg.log`.
 
 The frames go over a WebSocket because a `fetch()` POST of 8 MB took the browser
-150-500 ms to upload (curl: 4 ms), which made the upload, not the render, the export's
+150-500 ms to upload (curl: 4 ms), which made the upload the export's
 speed: 2.3 frames/s, against 13 with the socket on the light first shot.
 
 ### What each lever actually buys
@@ -816,14 +816,14 @@ Measured on `tier2` at fill 88, the worst shot. Baseline render 22.61, total 26.
 | `refl=0` | 22.68 | 26.48 | 0.0 |
 
 Four of those are worth knowing because they are **not** levers. Step count does nothing —
-the march is bounce-limited, not step-limited, so rays terminate on hits long before the cap
+the march is bounce-limited, so rays terminate on hits long before the cap
 and lowering it only risks artifacts. Reflections are free. Photons are nearly free, so the
 caustics cost almost nothing to keep.
 
 **`parts=0` is not a lever either, and reading it as one was a mistake.** It does not merely
 stop sampling the particle field: it removes the particle *geometry*, so rays no longer march
 around the stream or refract through droplets, and they finish in fewer bounces. That 8 ms is
-what the spray costs to draw, not overhead waiting to be optimised away.
+what the spray costs to draw.
 
 The test that settled it: a coarse occupancy grid (below) now skips the eight narrow-band
 fetches wherever the band is provably empty, leaving the geometry untouched. If the 8 ms had
@@ -904,7 +904,7 @@ steps; over-relaxation fallbacks are 3.8% of steps. Neither is a lever.
 
 **What each component costs**, measured by making `map()` evaluate it a second time at a
 point the compiler cannot prove equal (`__xc(bits)`; the picture does not change). These
-are a ranking, not a budget: duplicating also raises register pressure, so the deltas add
+are a ranking: duplicating also raises register pressure, so the deltas add
 up to more than the frame.
 
 | evaluated twice | render +ms |
@@ -931,8 +931,7 @@ of dilation on every side, up to 3×3×3 blocks (58 mm) around a band ~3 cells d
 exactly the blocks whose trilerps can reach a touched cell (one fine cell past each face)
 cut trilerps 70.9 M → 45.2 M with every other counter identical, and bought **0.4 ms**
 (render 22.1 → 21.7, same frozen frame, alternated twice). The remaining half of them are
-wasted too, but at that rate skipping all of them is worth ~0.35 ms more, not a finer grid
-and its buffer. The duplication test (+3.9 ms) overstated them: a repeated fetch of the
+wasted too, but at that rate skipping all of them is worth ~0.35 ms more. The duplication test (+3.9 ms) overstated them: a repeated fetch of the
 same eight cells is cache-hot, the first one is not, yet it is still cheap next to
 everything else in the lookup.
 
@@ -1179,7 +1178,7 @@ the debug panel used to supply, minifies, packs, and writes:
 |---|---|
 | `build/intro.cmd` | **the deliverable**: the dropper header plus the brotli payload - the page, its script packed by Roadroller (`build/roadroller.py`, settings in `build/roadroller.json`) |
 | `build/intro-compat.html` | the compatible version: the assembled page before Roadroller, plain (~23 KB) - no dropper, no Roadroller decoder; any OS, any WebGPU browser. Deployed as `release/ays-brut.uncompressed.html` |
-| `build/intro.html` | a local test copy that inflates itself (base64 + deflate), ~50% bigger - not the entry |
+| `build/intro.html` | a local test copy that inflates itself (base64 + deflate), ~50% bigger |
 | `build/min.wgsl`, `build/min.js` | what ships, as packed |
 | `build/min.pretty.wgsl`, `build/min.pretty.js` | the same, re-indented to read |
 | `build/min.pretty.html` | the whole page as it ships - canvas, the lettering's overlay, a path per line - with the readable JS and shader inlined |
@@ -1327,7 +1326,7 @@ in Python 3.9 ms (19%). So it is brotli-bound, and the Python could at best buy 
 fifth. Across cores it reaches 730 evaluations/s against 48/s on one core — 15× on a
 16-core, 32-thread Ryzen 9 9950X. It scales with physical cores and SMT adds nothing:
 brotli q11's optimal parsing saturates a core on its own. Faster search means fewer or
-smarter evaluations, not faster ones.
+smarter evaluations.
 
 ### Where it lands today
 
@@ -1679,10 +1678,10 @@ build tools in `build/vendor` are third-party code and keep their licences (belo
   PowerShell serving its own bytes as `Content-Encoding: br` - come from it. MIT.
 - **Roquefort** (Bercon) - 256³ WebGPU fluid. MIT.
 - Shadertoy work by **wyatt** and **michael0884** informed the nearest-particle-as-SDF idea.
-  Studied, not copied - Shadertoy defaults to CC BY-NC-SA.
+  Studied only - Shadertoy defaults to CC BY-NC-SA.
 - **Pakettic** (Veikko Sariola / pestis, MIT) - the model for `build/pack.py`: packing as a
   search over orderings and names, scored by compressed size, with late-acceptance hill
-  climbing. Reimplemented, not copied.
+  climbing. Reimplemented.
 - **Shader Minifier** (Laurent Le Brun / Ctrl-Alt-Test, Apache-2.0) - the trick of letting a
   local take the name of a global its function never touches. Idea only.
 
