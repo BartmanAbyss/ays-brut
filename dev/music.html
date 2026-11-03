@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Music Sketchpad</title>
+<!--
+  Music sketchpad: the intro's pad, without the intro. Write the score, press Play
+  (or Space), hear it in a second - no shader build, no start-up.
+
+  The synth below is a COPY of song()'s pad in dev/champagne.html (PADsynth-lite table,
+  two panned copies per note, one lowpass, the hall), with the same sliders and the same
+  defaults, so what plays here is what the intro will play. If the pad changes there,
+  change it here too. When a score is done, "Copy as SCORE" puts it on the clipboard in
+  the intro's format ([start s, length s, MIDI notes...]) to paste into champagne.html.
+
+  The music is the user's: the party bans generated music. This page only plays what is
+  written into it.
+
+  Open via the dev server: python dev/serve.py, then http://localhost:8787/music.html
+-->
+<style>
+  :root { --bg: #15161a; --panel: #1d1f25; --line: #2c2f38; --text: #d8dae0; --dim: #8a8f9c;
+          --accent: #e0b85a; --hot: #f06a6a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 system-ui, sans-serif; }
+  header { display: flex; gap: 10px; align-items: center; padding: 10px 16px; border-bottom: 1px solid var(--line);
+           flex-wrap: wrap; }
+  header h1 { font-size: 15px; margin: 0 12px 0 0; font-weight: 600; }
+  button { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 4px;
+           padding: 5px 12px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--dim); }
+  button.on { border-color: var(--accent); color: var(--accent); }
+  label.chk { display: flex; gap: 5px; align-items: center; color: var(--dim); }
+  #status { color: var(--dim); margin-left: auto; font-variant-numeric: tabular-nums; }
+  #status.clip { color: var(--hot); }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 0; height: calc(100vh - 51px); }
+  #left { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--line); }
+  textarea { flex: 1; width: 100%; resize: none; background: var(--bg); color: var(--text); border: 0;
+             padding: 12px 16px; font: 13px/1.5 ui-monospace, Consolas, monospace; outline: none; tab-size: 2; }
+  #err { color: var(--hot); padding: 6px 16px; min-height: 1.6em; border-top: 1px solid var(--line);
+         font-family: ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+  #roll { height: 120px; width: 100%; display: block; border-top: 1px solid var(--line); background: #111216; }
+  #ui { padding: 8px 14px; overflow-y: auto; }
+  .row { display: grid; grid-template-columns: 82px 1fr 52px; gap: 8px; align-items: center; padding: 3px 0; }
+  .row span:first-child { color: var(--dim); }
+  .row output { text-align: right; font-variant-numeric: tabular-nums; }
+  .row input { width: 100%; accent-color: var(--accent); }
+  .row.changed span:first-child { color: var(--accent); }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--dim); margin: 12px 0 4px; }
+  @media (max-width: 760px) { main { grid-template-columns: 1fr; height: auto; }
+    #left { border-right: 0; } textarea { min-height: 40vh; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Music sketchpad</h1>
+  <button id="play" title="Render the score and play it (Space)">Play</button>
+  <button id="stop" title="Stop (Space)">Stop</button>
+  <label class="chk" title="Play the score round and round. The loop starts on the second pass, so the tails of the last chords carry over into the first, as they would in a repeat."><input type="checkbox" id="loop" checked> loop</label>
+  <button id="copy" title="Copy the score in the intro's format - [start s, length s, MIDI notes...] - to paste into SCORE in dev/champagne.html">Copy as SCORE</button>
+  <button id="reset" title="Put every slider back to the intro's current default">Reset sliders</button>
+  <span id="status">-</span>
+</header>
+<main>
+  <div id="left">
+    <textarea id="score" spellcheck="false"></textarea>
+    <div id="err"></div>
+    <canvas id="roll"></canvas>
+  </div>
+  <div id="ui"></div>
+</main>
+<script type="module">
+// ── the score ──
+// A JavaScript array, evaluated as you type. Each entry: [start s, length s, notes...];
+// a note is a MIDI number or a name such as 'A3', 'C#4', 'Bb2' (C4 = 60, A3 = 57).
+const DEFAULT_SCORE = `// [start s, length s, notes...] - a note is a MIDI number or a name: 'A3', 'C#4', 'Bb2'
+// (C4 = 60). Changes apply on the next Play. Plain root-position triads for now - the
+// voicing is a placeholder.
+[
+  [0, 3, 'A3', 'C4', 'E4'],   // Am  vi
+  [3, 3, 'F3', 'A3', 'C4'],   // F   IV
+  [6, 3, 'C3', 'E3', 'G3'],   // C   I
+  [9, 3, 'G3', 'B3', 'D4'],   // G   V
+]`;
+
+// ── the pad's controls: names, ranges, defaults and tooltips as in champagne.html's SPEC ──
+const SPEC = [
+  ['padGain',    0.01, 0,    0.2,  0.001, 3, 'The pad\'s level per voice.'],
+  ['master',     0.9,  0,    2,    0.01,  2, 'The overall level. Fixed, not normalised: watch the peak - past 1 the release clips.'],
+  ['padCut',     1400, 200,  6000, 10,    0, 'The pad\'s lowpass cutoff in Hz - lower is darker and softer, higher brighter.'],
+  ['padAtk',     2.5,  0.05, 8,    0.05,  2, 'Seconds a chord takes to swell in.'],
+  ['padRel',     4,    0.1,  10,   0.1,   1, 'Seconds a chord takes to fade after it ends. Longer lets chords overlap into each other.'],
+  ['padStagger', 0.15, 0,    1,    0.01,  2, 'The notes of a chord start up to this many seconds apart, as players do. 0 starts them together.'],
+  ['padBw',      30,   0,    200,  1,     0, 'PADsynth: how wide each harmonic is smeared, in cents at the fundamental. 0 is a plain saw-like tone; 20-50 an ensemble; 100+ a choir or a wash.'],
+  ['padBwScale', 1,    0,    2,    0.05,  2, 'PADsynth: how the smear grows up the harmonics. 1 is as wide in pitch at every harmonic; above 1 the highs get airier; below 1 cleaner.'],
+  ['verbLen',    4,    0.5,  10,   0.1,   1, 'The pad\'s hall, tail in seconds (to -60 dB).'],
+  ['verbMix',    0.5,  0,    2,    0.05,  2, 'How much of the pad goes into its hall.'],
+];
+const ui = {};
+const KEY = 'musicSketch.v1';
+const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } };
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ ui, score: $score.value })); } catch (e) {} };
+const $ = id => document.getElementById(id);
+const $score = $('score'), $err = $('err'), $status = $('status');
+
+// ── note names ──
+const NAMES = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+function midi(n) {
+  if (typeof n === 'number') return n;
+  const m = /^([A-Ga-g])([#b]*)(-?\d)$/.exec(String(n).trim());
+  if (!m) throw new Error('not a note: ' + JSON.stringify(n));
+  let v = NAMES[m[1].toUpperCase()] + (+m[3] + 1) * 12;
+  for (const a of m[2]) v += a === '#' ? 1 : -1;
+  return v;
+}
+function parseScore() {
+  const raw = Function('"use strict"; return (' + $score.value + '\n);')();
+  if (!Array.isArray(raw)) throw new Error('the score must be an array');
+  return raw.map((e, i) => {
+    if (!Array.isArray(e) || e.length < 3) throw new Error('entry ' + i + ': [start, length, notes...]');
+    const [t, len, ...notes] = e;
+    if (!(t >= 0) || !(len > 0)) throw new Error('entry ' + i + ': start >= 0 and length > 0');
+    return [t, len, ...notes.map(midi)];
+  });
+}
+
+// ── the pad: song()'s, copied ──
+// PADsynth-lite (Nasca Octavian Paul's PADsynth, ZynAddSubFX): every harmonic is a band of a
+// dozen sines with random phases, each a whole number of cycles per loop so the table loops.
+// The same seeded sequence (Park-Miller, seed 5) as the intro, so the table is the same.
+const rng = q => () => (q = q * 16807 % 2147483647) / 2147483647, TAU = 2 * Math.PI;
+const PL = 1 << 17, PF = 220;
+let tableKey = '', tableData = null;
+function padTable(sr, r3) {
+  // the table consumes r3 first, exactly as song() does, and is cached per sound
+  const key = [sr, ui.padBw, ui.padBwScale].join();
+  const pd = new Float32Array(PL);
+  for (let h = 1; h < 25; h++) for (let j = 0; j < 12; j++) {
+    const g = r3() + r3() + r3() - 1.5,
+          w = TAU * Math.round(PF * h * 2 ** (g * ui.padBw * h ** (ui.padBwScale - 1) / 1200) * PL / sr) / PL,
+          c = Math.cos(w), sn = Math.sin(w), ph = TAU * r3();
+    if (key === tableKey) continue;           // cached: draw the numbers, skip the work
+    let x = Math.cos(ph) / h, y = Math.sin(ph) / h;
+    for (let i = 0; i < PL; i++) { pd[i] += y; const x1 = x * c - y * sn; y = x * sn + y * c; x = x1; }
+  }
+  if (key !== tableKey) { tableKey = key; tableData = pd; }
+  return tableData;
+}
+
+async function render(score, sr, passes) {
+  const L = Math.max(...score.map(([t, len]) => t + len));   // the score's length
+  const span = L * passes, tail = ui.padRel * 2 + ui.verbLen;
+  const o = new OfflineAudioContext(2, Math.ceil(sr * (span + tail)), sr);
+  const gain = (v, to) => { const g = o.createGain(); g.gain.value = v; g.connect(to); return g; };
+  const out = gain(ui.master, o.destination);
+  const bus = gain(1, out);
+  const r3 = rng(5);
+  const pt = o.createBuffer(1, PL, sr);
+  pt.getChannelData(0).set(padTable(sr, r3));
+  const lp = o.createBiquadFilter();
+  lp.frequency.value = ui.padCut; lp.connect(bus);
+  for (let k = 0; k < passes; k++) for (const [t, len, ...notes] of score) for (const m of notes) {
+    const t0 = k * L + t + r3() * ui.padStagger;
+    for (const pn of [-0.6, 0.6]) {
+      const v = o.createBufferSource(), pan = o.createStereoPanner(), e = gain(0, pan);
+      v.buffer = pt; v.loop = true; v.playbackRate.value = 2 ** ((m - 57) / 12);   // table at 220 Hz, MIDI 57
+      pan.pan.value = pn; pan.connect(lp);
+      e.gain.setTargetAtTime(ui.padGain, t0, ui.padAtk / 3);
+      e.gain.setTargetAtTime(0, t0 + len, ui.padRel / 3);
+      v.connect(e); v.start(t0, r3() * PL / sr); v.stop(t0 + len + ui.padRel * 2);
+    }
+  }
+  // the hall: two channels of noise decaying to -60 dB (the intro seeds it from its own rnd)
+  const rnd = rng(7);
+  const cv = o.createConvolver(), ir = o.createBuffer(2, Math.ceil(sr * ui.verbLen), sr);
+  for (let c = 0; c < 2; c++) {
+    const d = ir.getChannelData(c);
+    for (let i = 0; i < d.length; i++) d[i] = (rnd() * 2 - 1) * Math.exp(-7 * i / d.length);
+  }
+  cv.buffer = ir; cv.connect(out); bus.connect(gain(ui.verbMix, cv));
+  const b = await o.startRendering();
+  let pk = 0;
+  for (let c = 0; c < 2; c++) for (const x of b.getChannelData(c)) pk = Math.max(pk, Math.abs(x));
+  return { b, L, pk };
+}
+
+// ── playback ──
+let ac = null, src = null, playing = null, renderId = 0;
+async function play() {
+  let score;
+  try { score = parseScore(); $err.textContent = ''; }
+  catch (e) { $err.textContent = e.message; return; }
+  if (!score.length) { $err.textContent = 'the score is empty'; return; }
+  ac = ac || new AudioContext();
+  await ac.resume();
+  const id = ++renderId;
+  $status.textContent = 'rendering...'; $status.className = '';
+  const t0 = performance.now();
+  const loop = $('loop').checked;
+  const { b, L, pk } = await render(score, ac.sampleRate, loop ? 2 : 1);
+  if (id !== renderId) return;                 // a newer Play overtook this render
+  stop(false);
+  src = ac.createBufferSource();
+  src.buffer = b; src.connect(ac.destination);
+  if (loop) { src.loop = true; src.loopStart = L; src.loopEnd = 2 * L; }
+  src.start();
+  playing = { start: ac.currentTime, L, loop, score, dur: b.duration };
+  src.onended = () => { if (playing && playing.src === src) stop(); };
+  playing.src = src;
+  $('play').classList.add('on');
+  $status.textContent = 'peak ' + pk.toFixed(2) + (pk > 1 ? '  CLIPS: lower master' : '') +
+                        '   rendered in ' + Math.round(performance.now() - t0) + ' ms';
+  $status.className = pk > 1 ? 'clip' : '';
+}
+function stop(clear = true) {
+  if (src) { try { src.stop(); } catch (e) {} src = null; }
+  if (clear) { playing = null; $('play').classList.remove('on'); }
+}
+
+// ── the piano roll: what the score holds, and where playback is ──
+const roll = $('roll'), g2 = roll.getContext('2d');
+function drawRoll() {
+  const w = roll.clientWidth, h = roll.clientHeight, dpr = devicePixelRatio || 1;
+  if (roll.width !== w * dpr) { roll.width = w * dpr; roll.height = h * dpr; }
+  g2.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g2.clearRect(0, 0, w, h);
+  let score; try { score = parseScore(); } catch (e) { score = []; }
+  if (score.length) {
+    const L = Math.max(...score.map(([t, len]) => t + len));
+    const all = score.flatMap(([, , ...n]) => n), lo = Math.min(...all) - 2, hi = Math.max(...all) + 2;
+    const X = t => 8 + (w - 16) * t / L, Y = m => h - 6 - (h - 12) * (m - lo) / (hi - lo);
+    g2.strokeStyle = '#2c2f38';
+    for (let t = 0; t <= L; t++) { g2.beginPath(); g2.moveTo(X(t), 0); g2.lineTo(X(t), h); g2.stroke(); }
+    g2.fillStyle = '#e0b85a';
+    for (const [t, len, ...notes] of score) for (const m of notes) g2.fillRect(X(t), Y(m) - 2, X(t + len) - X(t) - 1, 4);
+    if (playing) {
+      let t = ac.currentTime - playing.start;
+      if (playing.loop && t > playing.L) t = (t - playing.L) % playing.L;   // the loop runs on pass two
+      if (t <= L) { g2.fillStyle = '#f0f0f0'; g2.fillRect(X(t), 0, 1.5, h); }
+    }
+  }
+  requestAnimationFrame(drawRoll);
+}
+
+// ── the panel ──
+const stored = load();
+function buildUI() {
+  const box = $('ui');
+  box.innerHTML = '<h2>Pad (as in the intro)</h2>';
+  for (const [k, def, lo, hi, st, dec, tip] of SPEC) {
+    ui[k] = stored.ui && stored.ui[k] !== undefined ? stored.ui[k] : def;
+    const row = document.createElement('label'); row.className = 'row'; row.title = tip;
+    row.innerHTML = `<span>${k}</span><input type="range" min="${lo}" max="${hi}" step="${st}"><output></output>`;
+    const inp = row.querySelector('input'), out = row.querySelector('output');
+    const show = () => { out.textContent = (+ui[k]).toFixed(dec); row.classList.toggle('changed', ui[k] !== def); };
+    inp.value = ui[k]; show();
+    inp.oninput = () => { ui[k] = +inp.value; show(); save(); };
+    inp.onchange = () => { if (playing) play(); };   // let go of a slider: hear it
+    box.append(row);
+  }
+}
+$score.value = stored.score || DEFAULT_SCORE;
+buildUI();
+$score.oninput = () => { save(); try { parseScore(); $err.textContent = ''; } catch (e) { $err.textContent = e.message; } };
+$('play').onclick = play;
+$('stop').onclick = () => stop();
+$('loop').onchange = () => { if (playing) play(); };
+$('reset').onclick = () => { stored.ui = null; buildUI(); save(); if (playing) play(); };
+$('copy').onclick = async () => {
+  try {
+    const s = parseScore().map(e => '    [' + e.join(', ') + '],').join('\n');
+    await navigator.clipboard.writeText(s);
+    $status.textContent = 'copied ' + parseScore().length + ' entries as SCORE rows';
+  } catch (e) { $err.textContent = e.message; }
+};
+addEventListener('keydown', e => {
+  if (e.code === 'Space' && e.target !== $score) { e.preventDefault(); playing ? stop() : play(); }
+});
+drawRoll();
+// for checks from the harness tooling: render without playing, report the peak
+window.__render = async () => { const r = await render(parseScore(), 48000, 1); return { secs: r.b.duration, peak: r.pk }; };
+</script>
+</body>
+</html>

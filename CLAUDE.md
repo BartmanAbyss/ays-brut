@@ -22,6 +22,12 @@ editor*); the user tunes the timeline there and SAVES INTO `dev/champagne.html` 
 shot block and slider defaults can change under you between turns. Re-read before editing
 them, and never assume your last version is the current one.
 
+**The music is sketched in `dev/music.html`** (`http://localhost:8787/music.html`): the
+intro's pad alone - a copy of `song()`'s pad code with the same sliders and defaults - with
+the score as editable text, Play/loop, a piano roll and "Copy as SCORE" for pasting into
+`champagne.html`. No shader build, no start-up. If the pad changes in `song()`, change the
+copy too. The music is the user's to write; the page only plays it.
+
 **Force a paint before reading the probe.** The pane pauses `requestAnimationFrame` when it
 isn't painting, so a probe read without a preceding screenshot returns stale zeros. This has
 produced false "it's broken" readings more than once.
