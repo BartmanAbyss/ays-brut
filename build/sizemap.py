@@ -73,13 +73,13 @@ JS = {
             "  onclick = () => { onclick = null; canvas.width = screen.width; canvas.height = "
             "screen.height; document.body.requestFullscreen(); requestAnimationFrame(frame); };\n"
             "  document.body.append('click');\n")],
-    '  audio: pad synth (the score is empty)': [
+    '  audio: the pad and the score': [
         cut('  const SCORE = [', '  // The whole soundtrack'),
         cut('    const r3 = rng(5);', '    const lb = bus = gain(1, out);')],
     '  audio: drips + splashes': [
         cut('    // drips and splashes, as many as the spray', '    // the pour: a dense population')],
     '  audio: cork pop': [cut('    for (let i = 0, ph = 0, tp = 0, lo = 0, i0 = ', '    for (const b of bx) {')],
-    '  audio: reverbs': [cut('    for (const [from, len, mix] of [[pb, ', '    const b = await o.startRendering();')],
+    '  audio: reverbs': [cut('    for (const [from, len, mix] of [[pb, ', '\n  }\n\n  // ── start screen')],
     '  audio: pour glugs': [cut('    const glugP = t => {', '    // fizz: CO2 bubbles')],
     '  audio: fizz': [cut('    // fizz: CO2 bubbles bursting', '    // The cork, before any picture')],
     'lettering (stroke font, SVG, fades)': [
@@ -121,7 +121,7 @@ JS_REGIONS = [
     ('audio: pour glugs', '    const glugP = t => {'),
     ('audio: fizz', '    // fizz: CO2 bubbles bursting'),
     ('audio: cork pop', '    for (let i = 0, ph = 0, tp = 0, lo = 0, i0 = '),
-    ('audio: mix, reverbs, offline render', '    for (const b of bx) {'),
+    ('audio: mix, reverbs', '    for (const b of bx) {'),
     ('start screen, audio start', '  let ac, tA;'),
 ]
 JS_SPANS = [
