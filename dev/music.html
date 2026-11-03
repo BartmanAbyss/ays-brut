@@ -75,13 +75,13 @@
 // A JavaScript array, evaluated as you type. Each entry: [start s, length s, notes...];
 // a note is a MIDI number or a name such as 'A3', 'C#4', 'Bb2' (C4 = 60, A3 = 57).
 const DEFAULT_SCORE = `// [start s, length s, notes...] - a note is a MIDI number or a name: 'A3', 'C#4', 'Bb2'
-// (C4 = 60). Changes apply on the next Play. Plain root-position triads for now - the
-// voicing is a placeholder.
+// (C4 = 60). Changes apply on the next Play.
+// Open voicing: the root low, the 5th and the 10th above it, spread over two octaves.
 [
-  [0, 3, 'A3', 'C4', 'E4'],   // Am  vi
-  [3, 3, 'F3', 'A3', 'C4'],   // F   IV
-  [6, 3, 'C3', 'E3', 'G3'],   // C   I
-  [9, 3, 'G3', 'B3', 'D4'],   // G   V
+  [0,  6, 'A2', 'E3', 'C4'],   // Am  vi
+  [6,  6, 'F2', 'C3', 'A3'],   // F   IV
+  [12, 6, 'C3', 'G3', 'E4'],   // C   I
+  [18, 6, 'G2', 'D3', 'B3'],   // G   V
 ]`;
 
 // ── the pad's controls: names, ranges, defaults and tooltips as in champagne.html's SPEC ──
@@ -100,7 +100,9 @@ const SPEC = [
 const ui = {};
 const KEY = 'musicSketch.v1';
 const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch (e) { return {}; } };
-const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ ui, score: $score.value })); } catch (e) {} };
+// The score is kept with the default it started from: a score nobody edited follows a new
+// default in the file, an edited one stays as typed.
+const save = () => { try { localStorage.setItem(KEY, JSON.stringify({ ui, score: $score.value, def: DEFAULT_SCORE })); } catch (e) {} };
 const $ = id => document.getElementById(id);
 const $score = $('score'), $err = $('err'), $status = $('status');
 
@@ -260,7 +262,10 @@ function buildUI() {
     box.append(row);
   }
 }
-$score.value = stored.score || DEFAULT_SCORE;
+// (the first version stored no default: its unedited score is the one with this line)
+const unedited = !stored.score || stored.score === stored.def ||
+                 (!stored.def && stored.score.includes('Plain root-position triads for now'));
+$score.value = unedited ? DEFAULT_SCORE : stored.score;
 buildUI();
 $score.oninput = () => { save(); try { parseScore(); $err.textContent = ''; } catch (e) { $err.textContent = e.message; } };
 $('play').onclick = play;
