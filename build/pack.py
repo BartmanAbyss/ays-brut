@@ -250,8 +250,8 @@ def assemble(wgsl, js, parts=None, page=''):
     # came up as text/plain. ~2 bytes after brotli; the tag is implied anyway.
     # "wait" right after it: the page's first text, shown from the first moment while the
     # script decodes, compiles and builds the soundtrack - the start screen turns it into
-    # "click" (document.body.firstChild).
-    return ('<body>wait<canvas id=c hidden style=position:fixed;inset:0;width:100%;height:100%>' +
+    # "click" (document.body.firstChild). At 5em (80 px) on the body: +7 bytes.
+    return ('<body style=font-size:5em>wait<canvas id=c hidden style=position:fixed;inset:0;width:100%;height:100%>' +
             ('</canvas>' + page if page else '') + '<script>' + js.replace(SHADER_LOOKUP, v) + ';var ' + v + '=`' + wgsl + '`'
             '</script>').encode()
 
