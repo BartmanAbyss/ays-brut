@@ -4362,10 +4362,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D}
       requestAnimationFrame(frame);
     };
-    // The page opens on the word "wait" (build/pack.py assemble: <body>wait<canvas...), its
-    // first text node; ready, it says "click". Unstyled on purpose: -55 bytes against
+    // The page opens on the word "patientez" (build/pack.py assemble: <body>patientez<canvas...),
+    // its first text node; ready, it says "cliquez" - French, for Brut. Unstyled on purpose: -55 bytes against
     // centred white-on-black.
-    document.body.firstChild.data = 'click';
+    document.body.firstChild.data = 'cliquez';
 //#D{
     say.textContent = 'click here to start: show + sound';
     const go = onclick;

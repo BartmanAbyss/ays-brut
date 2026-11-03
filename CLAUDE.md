@@ -379,7 +379,7 @@ after any change that should ship; plain builds never touch `release/`. It is `-
 **`build/intro-compat.html` is the compatible version** for Linux, macOS and any WebGPU
 browser: the assembled page before Roadroller, written plain on every build (~23 KB, no
 size limit applies). No PowerShell dropper, no Roadroller decoder, no DecompressionStream -
-the same minified script and packed shader. Its text swap needs "wait" to stay the body's
+the same minified script and packed shader. Its text swap needs "patientez" to stay the body's
 first child: a test hook injected after `<body>` broke it (put such hooks before `<body>`).
 
 **To read what survives, use `python build/readable.py`** -> `build/stripped.wgsl`: the
@@ -708,7 +708,7 @@ terser `keep_fnames` +42. The scripts are not kept; the numbers are the result.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 191** (3 Nov 2026), 1
+  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 192** (3 Nov 2026), 0
   UNDER, with the start screen, the sound engine, the lettering and the score in;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
