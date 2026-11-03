@@ -473,8 +473,22 @@ function drawRoll() {
       g2.beginPath(); g2.moveTo(X(s), 14); g2.lineTo(X(s), h); g2.stroke();
       if (step > 1 && s % 10 === 0) g2.fillText(s, X(s) + 2, h - 3);
     }
+    // Each note as its envelope, the synth's own curves: thickness is loudness - the swell
+    // over padAtk (setTargetAtTime: 95% at padAtk), the hold, and the fade over padRel after
+    // the note ends (5% at padRel). The stagger between a chord's notes is left out.
+    const tA = ui.padAtk / 3, tR = ui.padRel / 3, H = Math.min(6, (h - 12) / (hi - lo) * 1.6);
+    const env = (x, len) => x < len ? 1 - Math.exp(-x / tA)
+                                    : (1 - Math.exp(-len / tA)) * Math.exp(-(x - len) / tR);
+    const px = Math.max(1e-3, L / (w - 16) * 2);   // a point every 2 px
     g2.fillStyle = '#e0b85a';
-    for (const [t, len, ...notes] of score) for (const m of notes) g2.fillRect(X(t), Y(m) - 2, X(t + len) - X(t) - 1, 4);
+    for (const [t, len, ...notes] of score) for (const m of notes) {
+      const span = len + ui.padRel, y = Y(m);
+      g2.beginPath();
+      g2.moveTo(X(t), y);
+      for (let x = 0; x <= span; x += px) g2.lineTo(X(t + x), y - 0.5 - env(x, len) * H / 2);
+      for (let x = span; x >= 0; x -= px) g2.lineTo(X(t + x), y + 0.5 + env(x, len) * H / 2);
+      g2.closePath(); g2.fill();
+    }
     if (t <= L && (playing || videoOn())) { g2.fillStyle = playing ? '#f0f0f0' : '#8a8f9c'; g2.fillRect(X(t), 0, 1.5, h); }
   }
   requestAnimationFrame(drawRoll);
