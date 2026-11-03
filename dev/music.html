@@ -656,12 +656,14 @@ function buildUI() {
     box.insertAdjacentHTML('beforeend', '<h2>' + title + '</h2>');
     for (const [k, def, lo, hi, st, dec, tip] of spec) {
       ui[k] = stored.ui && stored.ui[k] !== undefined ? stored.ui[k] : def;
-      const row = document.createElement('label'); row.className = 'row'; row.title = tip;
+      const row = document.createElement('label'); row.className = 'row'; row.title = tip + '\n\nDouble-click to reset to ' + def + '.';
       row.innerHTML = `<span>${k}</span><input type="range" min="${lo}" max="${hi}" step="${st}"><output></output>`;
       const inp = row.querySelector('input'), out = row.querySelector('output');
       const show = () => { out.textContent = (+ui[k]).toFixed(dec); row.classList.toggle('changed', ui[k] !== def); };
       inp.value = ui[k]; show();
       inp.oninput = () => { ui[k] = +inp.value; show(); save(); live(k); };
+      // a double-click puts this one slider back to its default (gold name: not the default)
+      row.ondblclick = e => { e.preventDefault(); ui[k] = def; inp.value = def; show(); save(); live(k); };
       box.append(row);
     }
   };
