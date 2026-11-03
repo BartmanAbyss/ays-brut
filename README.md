@@ -5,11 +5,14 @@ entirely by SDF raymarching. Target: an **8192-byte PC intro** for **ComParade 2
 (Emmering/Munich, 6–8 Nov 2026), packaged the INCENDIUM way — WebGPU + a tiny PowerShell
 dropper — not a native exe.
 
-**Current state (25 Oct 2026):** the renderer, simulation, first-draft timeline, the
-click-to-start screen and the sound engine (PADsynth pad, reverbs, liquid sounds, cork
-pop) work. `build/intro.cmd` is **9 379 bytes, 1 187 OVER the 8 192 budget**, so features have
-to be cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
-tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
+**Current state (3 Nov 2026):** complete. The renderer, the simulation, the timeline of
+eight shots, the lettering, the "wait"/"click" start screen and the soundtrack - the score,
+composed by hand in the music sketchpad, on the PADsynth pad with its swept cutoff, plus the
+liquid's bubbles and the cork - are all in. The entry is **8 191 bytes, 1 under the 8 192
+budget**. The deployed files are in `release/` (`python build/deploy.py` makes them):
+`ays-brut.cmd`, the Windows entry, and `ays-brut.uncompressed.html`, the same intro as one
+plain page for Linux, macOS and any WebGPU browser. Open point: on the dev GPU (an RTX 4070)
+the heaviest tier2 frame is ~22 ms against the ~19 ms that stands for the compo PC's 16.6.
 
 ![The dev harness with the timeline editor open, paused in shot 8](docs/harness-editor.png)
 *The dev harness (`dev/champagne.html?edit=1`), timeline editor open, paused at 88 s in shot 8.*

@@ -370,6 +370,12 @@ build's own output. Afterwards, check the file for bytes below 0x20 other than n
 `//#D}`; everything else the build decides by rule (see the README). Three things it has
 already cost, all of which look like success until you check:
 
+**Deploying is `python build/deploy.py`, then commit `release/`.** It builds, stops if
+`intro.cmd` is over 8 192 bytes, and copies `build/intro.cmd` to `release/ays-brut.cmd` (the
+entry) and `build/intro-compat.html` to `release/ays-brut.uncompressed.html` (any OS). Do it
+after any change that should ship; plain builds never touch `release/`. It is `-text` in
+`.gitattributes`: the .cmd ends in raw brotli, which a line-ending conversion breaks.
+
 **`build/intro-compat.html` is the compatible version** for Linux, macOS and any WebGPU
 browser: the assembled page before Roadroller, written plain on every build (~23 KB, no
 size limit applies). No PowerShell dropper, no Roadroller decoder, no DecompressionStream -
