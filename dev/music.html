@@ -221,13 +221,15 @@ async function play() {
   const { b, L, pk } = await render(score, ac.sampleRate, loop ? 2 : 1);
   if (id !== renderId) return;                 // a newer Play overtook this render
   stop(false);
-  src = ac.createBufferSource();
-  src.buffer = b; src.connect(ac.destination);
-  if (loop) { src.loop = true; src.loopStart = L; src.loopEnd = 2 * L; }
-  src.start();
-  playing = { start: ac.currentTime, L, loop, score, dur: b.duration };
-  src.onended = () => { if (playing && playing.src === src) stop(); };
-  playing.src = src;
+  const s = src = ac.createBufferSource();
+  s.buffer = b; s.connect(ac.destination);
+  if (loop) { s.loop = true; s.loopStart = L; s.loopEnd = 2 * L; }
+  s.start();
+  playing = { start: ac.currentTime, L, loop, score, dur: b.duration, src: s };
+  // Only this source's own end may stop playback. Stopping the previous one (above) fires
+  // its onended a moment later, and checking the CURRENT source there stopped the new one:
+  // a Play during playback rendered and then went silent.
+  s.onended = () => { if (playing && playing.src === s) stop(); };
   $('play').classList.add('on');
   $status.textContent = 'peak ' + pk.toFixed(2) + (pk > 1 ? '  CLIPS: lower master' : '') +
                         '   rendered in ' + Math.round(performance.now() - t0) + ' ms';
