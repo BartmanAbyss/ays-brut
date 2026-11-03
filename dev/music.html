@@ -40,6 +40,12 @@
              padding: 12px 16px; font: 13px/1.5 ui-monospace, Consolas, monospace; outline: none; tab-size: 2; }
   #err { color: var(--hot); padding: 6px 16px; min-height: 1.6em; border-top: 1px solid var(--line);
          font-family: ui-monospace, Consolas, monospace; white-space: pre-wrap; }
+  #vidbox { background: #000; border-bottom: 1px solid var(--line); position: relative; }
+  #vid { display: block; width: 100%; max-height: 48vh; object-fit: contain; }
+  #vidname { position: absolute; left: 8px; bottom: 6px; color: var(--dim); font-size: 11px; }
+  #time { color: var(--accent); font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
+  label.chk input:disabled + * , label.chk:has(input:disabled) { opacity: .45; }
+  #roll { cursor: pointer; }
   #roll { height: 120px; width: 100%; display: block; border-top: 1px solid var(--line); background: #111216; }
   #ui { padding: 8px 14px; overflow-y: auto; }
   .row { display: grid; grid-template-columns: 82px 1fr 52px; gap: 8px; align-items: center; padding: 3px 0; }
@@ -59,12 +65,18 @@
   <button id="stop" title="Stop (Space)">Stop</button>
   <label class="chk" title="Play the score round and round. The loop starts on the second pass, so the tails of the last chords carry over into the first, as they would in a repeat."><input type="checkbox" id="loop" checked> loop</label>
   <button id="copy" title="Copy the score in the intro's format - [start s, length s, MIDI notes...] - to paste into SCORE in dev/champagne.html">Copy as SCORE</button>
+  <label class="chk" title="Play along with the exported intro: the score's seconds are the show's, as in SCORE. Click the piano roll to move the playhead."><input type="checkbox" id="usevid" disabled> video</label>
+  <button id="loadvid" title="Play along with another video file (the default is build/intro-720p.mp4 from dev/export.py)">Video...</button>
+  <input type="file" id="vidfile" accept="video/*" hidden>
   <button id="defscore" title="Replace the score with the one written in music.html (asks first if yours differs)">Default score</button>
   <button id="reset" title="Put every slider back to the intro's current default">Reset sliders</button>
+  <span id="time" title="The playhead, in show seconds">0.00 s</span>
   <span id="status">-</span>
 </header>
 <main>
   <div id="left">
+    <div id="vidbox" style="display:none"><video id="vid" playsinline preload="auto"></video>
+      <div id="vidname"></div></div>
     <textarea id="score" spellcheck="false"></textarea>
     <div id="err"></div>
     <canvas id="roll"></canvas>
@@ -176,9 +188,9 @@ function padTable(sr, r3) {
   return tableData;
 }
 
-async function render(score, sr, passes) {
+async function render(score, sr, passes, minLen = 0) {
   const L = Math.max(...score.map(([t, len]) => t + len));   // the score's length
-  const span = L * passes, tail = ui.padRel * 2 + ui.verbLen;
+  const span = Math.max(L * passes, minLen), tail = ui.padRel * 2 + ui.verbLen;
   const o = new OfflineAudioContext(2, Math.ceil(sr * (span + tail)), sr);
   const gain = (v, to) => { const g = o.createGain(); g.gain.value = v; g.connect(to); return g; };
   const out = gain(ui.master, o.destination);
@@ -214,7 +226,14 @@ async function render(score, sr, passes) {
 }
 
 // ── playback ──
-let ac = null, src = null, playing = null, renderId = 0;
+// Without a video: the score, looped or once. With one (the intro exported by
+// dev/export.py, served from build/ by dev/serve.py): the score is show time - the same
+// seconds SCORE uses in the intro - rendered once over the whole video and started with it
+// at the playhead. The audio is the clock; the video is nudged back whenever it drifts.
+let ac = null, src = null, playing = null, renderId = 0, pos = 0, cache = null;
+const vid = $('vid');
+let haveVideo = false;
+const videoOn = () => haveVideo && $('usevid').checked;
 async function play() {
   let score;
   try { score = parseScore(); $err.textContent = ''; }
@@ -223,29 +242,77 @@ async function play() {
   ac = ac || new AudioContext();
   await ac.resume();
   const id = ++renderId;
-  $status.textContent = 'rendering...'; $status.className = '';
-  const t0 = performance.now();
-  const loop = $('loop').checked;
-  const { b, L, pk } = await render(score, ac.sampleRate, loop ? 2 : 1);
-  if (id !== renderId) return;                 // a newer Play overtook this render
+  const sync = videoOn(), loop = !sync && $('loop').checked, len = sync ? vid.duration : 0;
+  // a seek or a replay of the same score and sound reuses the render
+  const key = JSON.stringify([score, SPEC.map(([k]) => ui[k]), loop, len, ac.sampleRate]);
+  let r = cache && cache.key === key ? cache : null;
+  if (!r) {
+    $status.textContent = 'rendering...'; $status.className = '';
+    const t0 = performance.now();
+    r = await render(score, ac.sampleRate, loop ? 2 : 1, len);
+    r.key = key; r.ms = Math.round(performance.now() - t0);
+    cache = r;
+  }
+  if (id !== renderId) return;                 // a newer Play overtook this one
   stop(false);
   const s = src = ac.createBufferSource();
-  s.buffer = b; s.connect(ac.destination);
-  if (loop) { s.loop = true; s.loopStart = L; s.loopEnd = 2 * L; }
-  s.start();
-  playing = { start: ac.currentTime, L, loop, score, dur: b.duration, src: s };
+  s.buffer = r.b; s.connect(ac.destination);
+  let off = 0;
+  if (loop) { s.loop = true; s.loopStart = r.L; s.loopEnd = 2 * r.L; }
+  if (sync) {
+    vid.currentTime = Math.min(pos, vid.duration - 0.05);
+    try { await vid.play(); } catch (e) {}
+    if (id !== renderId) return;
+    off = vid.currentTime;                     // start the audio where the video really is
+  }
+  s.start(0, off);
+  playing = { start: ac.currentTime - off, L: r.L, loop, sync, src: s };
   // Only this source's own end may stop playback. Stopping the previous one (above) fires
   // its onended a moment later, and checking the CURRENT source there stopped the new one:
   // a Play during playback rendered and then went silent.
   s.onended = () => { if (playing && playing.src === s) stop(); };
   $('play').classList.add('on');
-  $status.textContent = 'peak ' + pk.toFixed(2) + (pk > 1 ? '  CLIPS: lower master' : '') +
-                        '   rendered in ' + Math.round(performance.now() - t0) + ' ms';
-  $status.className = pk > 1 ? 'clip' : '';
+  $status.textContent = 'peak ' + r.pk.toFixed(2) + (r.pk > 1 ? '  CLIPS: lower master' : '') +
+                        '   rendered in ' + r.ms + ' ms';
+  $status.className = r.pk > 1 ? 'clip' : '';
+}
+// the time being heard: the audio clock less the output latency
+function now() {
+  if (!playing) return pos;
+  const t = ac.currentTime - (ac.outputLatency || 0) - playing.start;
+  return playing.loop && t > playing.L ? (t - playing.L) % playing.L : Math.max(0, t);
 }
 function stop(clear = true) {
-  if (src) { try { src.stop(); } catch (e) {} src = null; }
-  if (clear) { playing = null; $('play').classList.remove('on'); }
+  if (clear && playing && playing.sync) pos = now();   // a stop leaves the playhead there
+  // unhook first: a stopped source fires onended later, and play() may still be waiting on
+  // the video then, with the old source still current - it stopped the new playback
+  if (src) { src.onended = null; try { src.stop(); } catch (e) {} src = null; }
+  if (clear) { playing = null; vid.pause(); $('play').classList.remove('on'); }
+}
+function seek(t) {
+  pos = Math.max(0, Math.min(t, vid.duration || t));
+  if (videoOn()) vid.currentTime = pos;
+  if (playing && playing.sync) play();         // cached: restarts at once
+}
+function useVideo(url, name) {
+  haveVideo = false;
+  vid.src = url;
+  vid.onloadedmetadata = () => {
+    haveVideo = true;
+    $('usevid').disabled = false; $('usevid').checked = true;
+    $('vidname').textContent = name + ' ' + vid.duration.toFixed(1) + ' s';
+    vid.volume = ui.vidVol;
+    showVideo();
+  };
+  vid.onerror = () => {
+    $('usevid').disabled = true; $('usevid').checked = false;
+    $('vidname').textContent = 'no ' + name + ' - export it, or load one';
+    showVideo();
+  };
+}
+function showVideo() {
+  $('vidbox').style.display = videoOn() ? '' : 'none';
+  $('loop').disabled = videoOn();
 }
 
 // ── the piano roll: what the score holds, and where playback is ──
@@ -256,39 +323,61 @@ function drawRoll() {
   g2.setTransform(dpr, 0, 0, dpr, 0, 0);
   g2.clearRect(0, 0, w, h);
   let score; try { score = parseScore(); } catch (e) { score = []; }
+  // keep the video on the audio clock: a hitch in either moves them apart
+  if (playing && playing.sync && !vid.seeking && Math.abs(vid.currentTime - now()) > 0.08) vid.currentTime = now();
+  if (playing && playing.sync && vid.paused && now() < vid.duration) vid.play().catch(() => {});
+  const t = now();
+  $('time').textContent = t.toFixed(2) + ' s';
   if (score.length) {
-    const L = Math.max(...score.map(([t, len]) => t + len));
+    const L = rollLen(score);
     const all = score.flatMap(([, , ...n]) => n), lo = Math.min(...all) - 2, hi = Math.max(...all) + 2;
     const X = t => 8 + (w - 16) * t / L, Y = m => h - 6 - (h - 12) * (m - lo) / (hi - lo);
-    g2.strokeStyle = '#2c2f38';
-    for (let t = 0; t <= L; t++) { g2.beginPath(); g2.moveTo(X(t), 0); g2.lineTo(X(t), h); g2.stroke(); }
+    const step = L > 40 ? 5 : 1;               // a grid line a second, or every 5 s on a long roll
+    g2.strokeStyle = '#2c2f38'; g2.fillStyle = '#5a5f6c'; g2.font = '10px system-ui';
+    for (let s = 0; s <= L; s += step) {
+      g2.beginPath(); g2.moveTo(X(s), 0); g2.lineTo(X(s), h); g2.stroke();
+      if (step > 1 && s % 10 === 0) g2.fillText(s, X(s) + 2, 10);
+    }
     g2.fillStyle = '#e0b85a';
     for (const [t, len, ...notes] of score) for (const m of notes) g2.fillRect(X(t), Y(m) - 2, X(t + len) - X(t) - 1, 4);
-    if (playing) {
-      let t = ac.currentTime - playing.start;
-      if (playing.loop && t > playing.L) t = (t - playing.L) % playing.L;   // the loop runs on pass two
-      if (t <= L) { g2.fillStyle = '#f0f0f0'; g2.fillRect(X(t), 0, 1.5, h); }
-    }
+    if (t <= L && (playing || videoOn())) { g2.fillStyle = playing ? '#f0f0f0' : '#8a8f9c'; g2.fillRect(X(t), 0, 1.5, h); }
   }
   requestAnimationFrame(drawRoll);
 }
+// the roll spans the score, or the whole video when one plays along
+const rollLen = score => Math.max(...score.map(([t, len]) => t + len), videoOn() ? vid.duration : 0);
+roll.onclick = e => {
+  if (!videoOn()) return;
+  let score; try { score = parseScore(); } catch (err) { return; }
+  const r = roll.getBoundingClientRect();
+  seek((e.clientX - r.left - 8) / (r.width - 16) * rollLen(score));
+};
 
 // ── the panel ──
 const stored = load();
+// the sketchpad's own controls, not the intro's
+const VSPEC = [
+  ['vidVol', 1, 0, 1, 0.01, 2, 'The video\'s own sound - the intro as exported: liquid, drips, the cork - under the pad. 0 mutes it.'],
+];
 function buildUI() {
   const box = $('ui');
-  box.innerHTML = '<h2>Pad (as in the intro)</h2>';
-  for (const [k, def, lo, hi, st, dec, tip] of SPEC) {
-    ui[k] = stored.ui && stored.ui[k] !== undefined ? stored.ui[k] : def;
-    const row = document.createElement('label'); row.className = 'row'; row.title = tip;
-    row.innerHTML = `<span>${k}</span><input type="range" min="${lo}" max="${hi}" step="${st}"><output></output>`;
-    const inp = row.querySelector('input'), out = row.querySelector('output');
-    const show = () => { out.textContent = (+ui[k]).toFixed(dec); row.classList.toggle('changed', ui[k] !== def); };
-    inp.value = ui[k]; show();
-    inp.oninput = () => { ui[k] = +inp.value; show(); save(); };
-    inp.onchange = () => { if (playing) play(); };   // let go of a slider: hear it
-    box.append(row);
-  }
+  box.innerHTML = '';
+  const rows = (title, spec, live) => {
+    box.insertAdjacentHTML('beforeend', '<h2>' + title + '</h2>');
+    for (const [k, def, lo, hi, st, dec, tip] of spec) {
+      ui[k] = stored.ui && stored.ui[k] !== undefined ? stored.ui[k] : def;
+      const row = document.createElement('label'); row.className = 'row'; row.title = tip;
+      row.innerHTML = `<span>${k}</span><input type="range" min="${lo}" max="${hi}" step="${st}"><output></output>`;
+      const inp = row.querySelector('input'), out = row.querySelector('output');
+      const show = () => { out.textContent = (+ui[k]).toFixed(dec); row.classList.toggle('changed', ui[k] !== def); };
+      inp.value = ui[k]; show();
+      inp.oninput = () => { ui[k] = +inp.value; show(); save(); live(); };
+      inp.onchange = () => { if (playing && spec === SPEC) play(); };   // let go of a pad slider: hear it
+      box.append(row);
+    }
+  };
+  rows('Pad (as in the intro)', SPEC, () => {});
+  rows('Video', VSPEC, () => { vid.volume = ui.vidVol; });
 }
 // (the first version stored no default: its unedited score is the one with this line)
 const unedited = !stored.score || stored.score === stored.def ||
@@ -299,6 +388,12 @@ $score.oninput = () => { save(); try { parseScore(); $err.textContent = ''; } ca
 $('play').onclick = play;
 $('stop').onclick = () => stop();
 $('loop').onchange = () => { if (playing) play(); };
+$('usevid').onchange = () => { showVideo(); if (playing) play(); };
+$('loadvid').onclick = () => $('vidfile').click();
+$('vidfile').onchange = () => { const f = $('vidfile').files[0]; if (f) { stop(); pos = 0; useVideo(URL.createObjectURL(f), f.name); } };
+// ?video=intro.mp4 picks another export from build/
+const vname = new URLSearchParams(location.search).get('video') || 'intro-720p.mp4';
+useVideo('/build/' + vname, 'build/' + vname);
 $('defscore').onclick = () => {
   if ($score.value !== DEFAULT_SCORE && !confirm('Replace your score with the default? Yours is lost.')) return;
   $score.value = DEFAULT_SCORE; $score.oninput();

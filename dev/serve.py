@@ -25,6 +25,7 @@ sys.path.insert(0, os.path.join(HERE, '..', 'build'))
 import timeline  # noqa: E402
 
 SRC = os.path.join(HERE, 'champagne.html')
+BUILD = os.path.join(HERE, '..', 'build')   # exported videos are served from here
 # sliders that are not settings: the show toggle and its clock
 NOT_SAVED = {'show', 'showT'}
 
@@ -139,6 +140,52 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             self._json(400, {'ok': False, 'error': str(e)})
             return
         self._json(200, {'ok': True, 'changed': changed, **({'src': out} if dry else {})})
+
+    def do_GET(self):
+        # /build/<name>.mp4: the exported videos, for the music sketchpad (dev/music.html).
+        # With byte ranges - a <video> cannot seek a file served without them.
+        path = self.path.partition('?')[0]
+        m = re.fullmatch(r'/build/([\w.-]+\.mp4)', path)
+        if not m:
+            return super().do_GET()
+        f = os.path.join(BUILD, m.group(1))
+        if not os.path.isfile(f):
+            self.send_error(404, 'no build/%s - export it with dev/export.py' % m.group(1))
+            return
+        size = os.path.getsize(f)
+        a, b, code = 0, size - 1, 200
+        r = re.fullmatch(r'bytes=(\d*)-(\d*)', self.headers.get('Range') or '')
+        if r and (r.group(1) or r.group(2)):
+            if r.group(1):
+                a = int(r.group(1))
+                b = min(int(r.group(2)), size - 1) if r.group(2) else size - 1
+            else:
+                a = max(0, size - int(r.group(2)))
+            if a > b:
+                self.send_response(416)
+                self.send_header('Content-Range', 'bytes */%d' % size)
+                self.end_headers()
+                return
+            code = 206
+        self.send_response(code)
+        self.send_header('Content-Type', 'video/mp4')
+        self.send_header('Accept-Ranges', 'bytes')
+        self.send_header('Content-Length', str(b - a + 1))
+        if code == 206:
+            self.send_header('Content-Range', 'bytes %d-%d/%d' % (a, b, size))
+        self.end_headers()
+        with open(f, 'rb') as fh:
+            fh.seek(a)
+            left = b - a + 1
+            try:
+                while left > 0:
+                    chunk = fh.read(min(left, 1 << 20))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    left -= len(chunk)
+            except (ConnectionResetError, ConnectionAbortedError, BrokenPipeError):
+                pass   # the player cancels ranges it no longer needs
 
     def log_message(self, fmt, *args):
         if self.command == 'POST':
