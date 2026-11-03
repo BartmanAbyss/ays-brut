@@ -2622,7 +2622,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['cgain',    'range', 0.05, 0.00, 0.30, 0.005,3],
     ['padGain',  'range', 0.01, 0,    0.2,  0.001,3],
     ['master',   'range', 0.9,  0,    2,    0.01, 2],
-    ['padCut',   'range', 1400, 200,  6000, 10,   0],
+    ['padLfo',   'range', 0.08, 0,    1,    0.005,3],
+    ['padLfoLo', 'range', 600,  200,  6000, 10,   0],
+    ['padLfoHi', 'range', 4000, 200,  6000, 10,   0],
     ['padAtk',   'range', 2.5,  0.05, 8,    0.05, 2],
     ['padRel',   'range', 4,    0.1,  10,   0.1,  1],
     ['padStagger','range',0.15, 0,    1,    0.01, 2],
@@ -2720,7 +2722,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     cgain: 'Brightness of the photon caustic map on the table. It carries the direct light too, so 0 leaves the table lit by ambient only.',
     padGain: 'Audio, heard after "hear audio": the pad\'s level. The whole mix is normalised at the end, so this sets the pad against the liquid, not the overall volume.',
     master: 'Audio: the overall level. Fixed, not normalised: watch the peak in this column\'s header - past 1 the release clips, so turn this down.',
-    padCut: 'Audio: the pad\'s lowpass cutoff in Hz - lower is darker and softer, higher brighter.',
+    padLfo: 'Audio: the pad\'s lowpass cutoff sweeps on a sine between padLfoLo and padLfoHi (linear in Hz), this many times a second - on show time, so a moment of the show always gets the same cutoff. 0 holds it halfway.',
+    padLfoLo: 'Audio: the bottom of the cutoff\'s sweep, Hz - the darkest the pad gets.',
+    padLfoHi: 'Audio: the top of the cutoff\'s sweep, Hz - the brightest the pad gets.',
     padAtk: 'Audio: seconds a chord takes to swell in.',
     padRel: 'Audio: seconds a chord takes to fade after it ends. Longer lets chords overlap into each other.',
     padStagger: 'Pad: the notes of a chord start up to this many seconds apart, as players do. 0 starts them together.',
@@ -2831,7 +2835,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     uiRoot.prepend(bar);
   }
   for (const [k, kind, d0, lo, hi, st] of SPEC) {
-    // any slider or box takes its value from the URL: ?padCut=900, ?trkFizz=0 (the audio
+    // any slider or box takes its value from the URL: ?padGain=0.02, ?trkFizz=0 (the audio
     // needs this - "hear audio" carries the audio sliders and track boxes over its reload)
     const def = !Q.has(k) ? d0 : kind === 'range' ? +Q.get(k) : Q.get(k) === '1';
     ui[k] = def;
@@ -2883,7 +2887,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     b.title = 'Reload with sound: the audio sliders and track boxes come along. When "rendering audio..." turns into "click here to start", click that box. From then the trk* boxes switch tracks on and off live, and an audio slider is heard a moment after you let go of it. Add &testpad=1 to the URL for a held test chord while the score is empty; &fs=1 for fullscreen as in the release.';
     b.onclick = () => {
       const q = new URLSearchParams(location.search);
-      for (const k of ['padGain', 'master', 'padCut', 'padAtk', 'padRel', 'padStagger', 'padBw',
+      for (const k of ['padGain', 'master', 'padLfo', 'padLfoLo', 'padLfoHi', 'padAtk', 'padRel', 'padStagger', 'padBw',
                        'padBwScale', 'verbLen',
                        'verbMix', 'fxVerbLen', 'fxVerbMix', 'drips',
                        'bRmin', 'bRmax', 'bGamma',
@@ -3840,15 +3844,42 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // ── music and sound ──
   // SCORE is the music: chords as [start s, length s, MIDI notes...], written by hand. The
   // party bans generated music and disqualifies entries that are mostly AI output, so
-  // nothing below composes. song() is the instrument - a string pad of detuned saws through
-  // a breathing lowpass into a convolution reverb - plus the liquid's sound, which follows
-  // what the simulation does. With SCORE empty the show plays the liquid alone.
+  // nothing below composes. song() is the instrument - the PADsynth-lite pad through a
+  // lowpass that padLfo sweeps, into a convolution reverb - plus the liquid's sound, which
+  // follows what the simulation does.
+  // The score is the user's, composed in dev/music.html; dev/score.txt is its readable
+  // source (chord names, up() transpositions), these rows are it in MIDI, in the same order -
+  // the order the pad draws its random stagger and loop phase in, so the intro sounds as
+  // the sketchpad does. Reorder or merge rows for size only knowing that.
   const SCORE = [
 //#D{
     // ?testpad=1: one plain held chord to judge the pad's timbre by. A test signal, never
     // shipped: these lines are dev-only.
     ...(cfg.testPad ? [[1, SHOW_END - 6, 45, 52, 57, 60, 64]] : []),
 //#D}
+    [0, 6, 48, 55, 59, 62, 64],
+    [6, 6, 45, 52, 55, 59, 60],
+    [12, 6, 41, 48, 52, 57, 59],
+    [18, 2.5, 43, 50, 60],
+    [18, 2.5, 41],
+    [23.5, 4, 57, 64, 72],
+    [27.5, 4, 53, 60, 69],
+    [31, 4, 48, 55, 64],
+    [34.75, 2, 55, 62, 71],
+    [51.75, 6, 48, 55, 64],
+    [57.75, 4, 50, 57, 66],
+    [39.5, 5, 50, 57, 66],
+    [45.25, 3, 57, 64, 73],
+    [64.25, 5, 52, 59, 68],
+    [64.25, 5, 40, 47, 56],
+    [69.5, 3.5, 57, 64, 73],
+    [69.5, 3.5, 45, 52, 61],
+    [76, 5, 32, 39, 48],
+    [81, 5, 34, 41, 50],
+    [86, 12, 36, 43, 52],
+    [76, 5, 44, 51, 60],
+    [81, 5, 46, 53, 62],
+    [86, 12, 48, 55, 64],
   ];
 
   // The whole soundtrack, rendered offline before the click: a slow render costs load time,
@@ -3910,8 +3941,12 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D{
     tap('pad');
 //#D}
-    const lp = o.createBiquadFilter();
-    lp.frequency.value = ui.padCut; lp.connect(bus);
+    // The cutoff sweeps on a sine between padLfoLo and padLfoHi, padLfo times a second, on
+    // show time (this render starts at show time 0, so a sine started at 0 is in phase - the
+    // sketchpad, dev/music.html, starts mid-show and sets the phase itself).
+    const lp = o.createBiquadFilter(), lf = o.createOscillator();
+    lp.frequency.value = (ui.padLfoLo + ui.padLfoHi) / 2; lp.connect(bus);
+    lf.frequency.value = ui.padLfo; lf.connect(gain((ui.padLfoHi - ui.padLfoLo) / 2, lp.frequency)); lf.start();
     for (const [t, len, ...notes] of SCORE) for (const m of notes) {
       const t0 = t + r3() * ui.padStagger;
       for (const pn of [-0.6, 0.6]) {
@@ -4176,7 +4211,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   const STEMS = { pad: 'trkPad', drips: 'trkDrips', splashes: 'trkSplash', pour: 'trkPour', fizz: 'trkFizz',
                   pop: 'trkPop' };
   const BUB = ['drips', 'splashes', 'pour', 'fizz'];
-  const AFFECTS = { padGain: ['pad'], padCut: ['pad'], padAtk: ['pad'], padRel: ['pad'],
+  const AFFECTS = { padGain: ['pad'], padLfo: ['pad'], padLfoLo: ['pad'], padLfoHi: ['pad'],
+                    padAtk: ['pad'], padRel: ['pad'],
                     padStagger: ['pad'], padBw: ['pad'], padBwScale: ['pad'], drips: ['drips', 'splashes'],
                     bRmin: BUB, bRmax: BUB, bGamma: BUB, bXi: BUB, bRiseCut: BUB, bBeta: BUB,
                     bAlpha: BUB, dripGain: ['drips'], splashGain: ['splashes'],

@@ -108,10 +108,9 @@ const DEFAULT_SCORE = `// [start s, length s, notes...] - a note is a MIDI numbe
 const SPEC = [
   ['padGain',    0.01, 0,    0.2,  0.001, 3, 'The pad\'s level per voice.'],
   ['master',     0.9,  0,    2,    0.01,  2, 'The overall level. Fixed, not normalised: watch the peak - past 1 the release clips.'],
-  ['padCut',     1400, 200,  6000, 10,    0, 'The pad\'s lowpass cutoff in Hz - lower is darker and softer, higher brighter. Ignored while padLfo sweeps it.'],
-  ['padLfo',     0.08, 0,    1,    0.005, 3, 'NOT IN THE INTRO YET. The cutoff sweeps on a sine between padLfoLo and padLfoHi (linear in Hz), this many times a second; 0 turns it off and padCut sets the cutoff. The phase follows show time, so a moment of the show always gets the same cutoff.'],
-  ['padLfoLo',   600,  200,  6000, 10,    0, 'NOT IN THE INTRO YET. The bottom of the cutoff\'s sweep, Hz: the darkest the pad gets.'],
-  ['padLfoHi',   6000, 200,  6000, 10,    0, 'NOT IN THE INTRO YET. The top of the cutoff\'s sweep, Hz: the brightest the pad gets.'],
+  ['padLfo',     0.08, 0,    1,    0.005, 3, 'The pad\'s lowpass cutoff sweeps on a sine between padLfoLo and padLfoHi (linear in Hz), this many times a second; 0 holds it halfway. The phase follows show time, so a moment of the show always gets the same cutoff.'],
+  ['padLfoLo',   600,  200,  6000, 10,    0, 'The bottom of the cutoff\'s sweep, Hz: the darkest the pad gets.'],
+  ['padLfoHi',   4000, 200,  6000, 10,    0, 'The top of the cutoff\'s sweep, Hz: the brightest the pad gets.'],
   ['padAtk',     2.5,  0.05, 8,    0.05,  2, 'Seconds a chord takes to swell in.'],
   ['padRel',     4,    0.1,  10,   0.1,   1, 'Seconds a chord takes to fade after it ends. Longer lets chords overlap into each other.'],
   ['padStagger', 0.15, 0,    1,    0.01,  2, 'The notes of a chord start up to this many seconds apart, as players do. 0 starts them together.'],
@@ -207,11 +206,10 @@ function padTable(sr, r3) {
 // linear in Hz, its phase on SHOW time - started at context time c for show time p, it is at
 // phase 2 pi f p there, so every start, seek and edit lands on the same curve. The phase
 // goes in through a one-harmonic periodic wave, sin(wt + ph) = sin ph cos wt + cos ph sin wt
-// (an oscillator has no phase of its own). Returns the oscillator, or null when padLfo is 0.
-const CUT = SPEC.find(r => r[0] === 'padCut'), CUT_LO = CUT[2], CUT_HI = CUT[3];   // the roll's scale
+// (an oscillator has no phase of its own). padLfo 0 holds the cutoff halfway, as the intro.
+const CUT_LO = 200, CUT_HI = 6000;              // the roll's scale for the cutoff line
 const cutAt = t => (ui.padLfoLo + ui.padLfoHi) / 2 + (ui.padLfoHi - ui.padLfoLo) / 2 * Math.sin(2 * Math.PI * ui.padLfo * t);
 function cutLfo(ctx, lp, p, c) {
-  if (!(ui.padLfo > 0)) { lp.frequency.setValueAtTime(ui.padCut, c); return null; }
   lp.frequency.setValueAtTime((ui.padLfoLo + ui.padLfoHi) / 2, c);
   const ph = 2 * Math.PI * ui.padLfo * p;
   const osc = ctx.createOscillator(), depth = ctx.createGain();
@@ -234,7 +232,7 @@ async function render(score, sr, passes, minLen = 0) {
   const pt = o.createBuffer(1, PL, sr);
   pt.getChannelData(0).set(padTable(sr, r3));
   const lp = o.createBiquadFilter();
-  lp.frequency.value = ui.padCut; lp.connect(bus);
+  lp.connect(bus);
   cutLfo(o, lp, 0, 0);
   for (let k = 0; k < passes; k++) for (const [t, len, ...notes] of score) for (const m of notes) {
     const t0 = k * L + t + r3() * ui.padStagger;
@@ -286,7 +284,7 @@ function graph(ctx) {                          // ctx: an offline context, for _
   // as in song(): voices -> lowpass -> pad bus -> master, and pad bus -> mix -> hall -> master
   out = gain(ui.master, ac.destination);
   const bus = gain(1, out);
-  lp = ac.createBiquadFilter(); lp.frequency.value = ui.padCut; lp.connect(bus);
+  lp = ac.createBiquadFilter(); lp.connect(bus);
   cv = ac.createConvolver(); cv.connect(out);
   wet = gain(ui.verbMix, cv); bus.connect(wet);
   meter = ac.createAnalyser(); meter.fftSize = 2048; out.connect(meter);
@@ -515,7 +513,7 @@ function drawRoll() {
       if (step > 1 && s % 10 === 0) g2.fillText(s, X(s) + 2, h - 3);
     }
     // the cutoff's sweep, when padLfo runs: high is bright (a log scale, 200 Hz to 6 kHz)
-    if (ui.padLfo > 0) {
+    {
       const cy = f => h - 4 - (h - 18) * Math.log(f / CUT_LO) / Math.log(CUT_HI / CUT_LO);
       g2.strokeStyle = '#6fa8dc99'; g2.lineWidth = 1.5; g2.beginPath();
       for (let x = 0; x <= w - 16; x += 2) { const s = x / (w - 16) * L; x ? g2.lineTo(X(s), cy(cutAt(s))) : g2.moveTo(X(s), cy(cutAt(s))); }
@@ -678,7 +676,6 @@ function liveParam(k) {
   if (!ac) return;
   const t = ac.currentTime;
   if (k === 'master') out.gain.setTargetAtTime(ui.master, t, 0.01);
-  else if (k === 'padCut') { if (!(ui.padLfo > 0)) lp.frequency.setTargetAtTime(ui.padCut, t, 0.01); }
   else if (k.startsWith('padLfo')) { if (playing && gen) sweep(gen.p0 + (t + LEAD - gen.c0), t + LEAD); }
   else if (k === 'verbMix') wet.gain.setTargetAtTime(ui.verbMix, t, 0.01);
   else if (k === 'verbLen') later(hall);
@@ -712,7 +709,7 @@ $('defscore').onclick = () => {
 };
 $('reset').onclick = () => {
   stored.ui = null; buildUI(); save();
-  for (const k of ['master', 'padCut', 'padLfo', 'verbMix', 'verbLen', 'padGain']) liveParam(k);   // padLfo: the whole sweep
+  for (const k of ['master', 'padLfo', 'verbMix', 'verbLen', 'padGain']) liveParam(k);   // padLfo: the whole sweep
 };
 $('copy').onclick = async () => {
   try {
@@ -729,6 +726,8 @@ drawRoll();
 window.__chord = chord;
 // The offline render above is no longer how the page plays; it stays as the reference the
 // live graph is checked against (the same score, rendered whole as song() would).
+// the offline render's buffer itself, to compare with the intro's (champagne.html __stem)
+window.__renderBuf = async sr => (await render(parseScore(), sr || 48000, 1)).b;
 window.__roll = () => ({ notes: rollNotes, hoverEntry });
 window.__live = () => ({ playing: !!playing, now: now(), gen: gen && { p0: gen.p0, voices: gen.v.length, srcs: gen.srcs.length, pass: gen.pass }, peak });
 // The live scheduling, run on an offline context from song time p, against the reference:
