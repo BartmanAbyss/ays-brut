@@ -3850,7 +3850,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // The score is the user's, composed in dev/music.html; dev/score.txt is its readable
   // source (chord names, up() transpositions), these rows are it in MIDI, in the same order -
   // the order the pad draws its random stagger and loop phase in, so the intro sounds as
-  // the sketchpad does. Reorder or merge rows for size only knowing that.
+  // the sketchpad does. Reorder or merge rows for size only knowing that: neighbours with
+  // the same start and length merge exactly (the same notes draw in the same order) - the
+  // three such pairs are merged; the peak chords an octave apart are not neighbours.
   const SCORE = [
 //#D{
     // ?testpad=1: one plain held chord to judge the pad's timbre by. A test signal, never
@@ -3860,8 +3862,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     [0, 6, 48, 55, 59, 62, 64],
     [6, 6, 45, 52, 55, 59, 60],
     [12, 6, 41, 48, 52, 57, 59],
-    [18, 2.5, 43, 50, 60],
-    [18, 2.5, 41],
+    [18, 2.5, 43, 50, 60, 41],
     [23.5, 4, 57, 64, 72],
     [27.5, 4, 53, 60, 69],
     [31, 4, 48, 55, 64],
@@ -3870,10 +3871,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     [57.75, 4, 50, 57, 66],
     [39.5, 5, 50, 57, 66],
     [45.25, 3, 57, 64, 73],
-    [64.25, 5, 52, 59, 68],
-    [64.25, 5, 40, 47, 56],
-    [69.5, 3.5, 57, 64, 73],
-    [69.5, 3.5, 45, 52, 61],
+    [64.25, 5, 52, 59, 68, 40, 47, 56],
+    [69.5, 3.5, 57, 64, 73, 45, 52, 61],
     [76, 5, 32, 39, 48],
     [81, 5, 34, 41, 50],
     [86, 12, 36, 43, 52],
@@ -4002,8 +4001,15 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // rates 1/r^gamma, loudness D r^alpha with D = rnd^beta (most bubbles deep and faint),
     // and only the loud, near-surface ones rise.
     const r2 = rnd;
-    const bx = [0, 1, 2, 3, 4].map(() => o.createBuffer(2, sr * (SHOW_END + 1), sr)),
-          BX = bx.map(b => [b.getChannelData(0), b.getChannelData(1)]);
+    // One buffer for all of the liquid: drips, splashes, pour, fizz and cork summed. The
+    // tracks are written through BX[track], which in the release are all the same pair of
+    // channels; the harness gives each its own buffer, for its stems.
+    let bx = [o.createBuffer(2, sr * (SHOW_END + 1), sr)], Y = [bx[0].getChannelData(0), bx[0].getChannelData(1)],
+        BX = [Y, Y, Y, Y, Y];
+//#D{
+    bx = [0, 1, 2, 3, 4].map(() => o.createBuffer(2, sr * (SHOW_END + 1), sr));
+    BX = bx.map(b => [b.getChannelData(0), b.getChannelData(1)]);
+//#D}
     // one bubble: radius rm in mm, amplitude a, rise xi, pan 0..1, starting at t
     const bub = (Y, t, rm, a, xi, pan) => {
       const f = 3000 / rm, d = 0.043 * f + 0.0014 * f ** 1.5, k = Math.exp(-d / sr),
