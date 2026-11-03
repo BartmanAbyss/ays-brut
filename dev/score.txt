@@ -1,0 +1,35 @@
+// The score, composed by the user in dev/music.html, copied here verbatim (3 Nov 2026).
+// Kept for moving it into SCORE in dev/champagne.html later, and for looking at its size
+// then. Paste it into the sketchpad's score box to play it.
+
+[
+  [0,  6, ...chord('C3', 'maj9')],      // Cmaj9      C3 G3 B3 D4 E4
+  [6,  6, ...chord('A2', 'm9')],        // Am9        A2 E3 G3 B3 C4
+  [12, 6, ...chord('F2', 'maj7#11')],   // Fmaj7#11   F2 C3 E3 A3 B3
+  [18, 2.5, ...chord('G2', 'sus4')],      // Gsus4      G2 D3 C4
+  [18, 2.5, 'F2'],      // Gsus4      G2 D3 C4
+
+  [23.5,  4, ...chord('A3', 'm')], // epic
+  [27.5,  4, ...chord('F3', '')],
+  [31,  4, ...chord('C3', '')],
+  [34.75,  2, ...chord('G3', '')],
+
+  [51.75,  6, ...chord('C3', '')], // awe
+  [57.75,  4, ...chord('D3', '')],
+
+  [39.5,  5, ...up(2, ...chord('C3', ''))], // pop
+  [45.25,  3, ...up(2, ...chord('G3', ''))],
+
+  [64.25,  5, ...up(4, ...chord('C3', ''))], // nostalgic
+  [64.25,  5, ...up(4, ...chord('C2', ''))], // nostalgic
+  [69.5,  3.5, ...up(4, ...chord('F3', ''))],
+  [69.5,  3.5, ...up(4, ...chord('F2', ''))],
+
+  [76, 5, ...chord('Ab1', '')], // peak1
+  [81, 5, ...chord('Bb1', '')],
+  [86, 12, ...chord('C2', '')],
+
+  [76, 5, ...chord('Ab2', '')], // peak2
+  [81, 5, ...chord('Bb2', '')],
+  [86, 12, ...chord('C3', '')],
+]
