@@ -2629,7 +2629,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['padRel',   'range', 4,    0.1,  10,   0.1,  1],
     ['padStagger','range',0.15, 0,    1,    0.01, 2],
     ['padBw',    'range', 30,   0,    200,  1,    0],
-    ['padBwScale','range',1,    0,    2,    0.05, 2],
     ['verbLen',  'range', 4,    0.5,  10,   0.1,  1],
     ['verbMix',  'range', 0.5,  0.00, 2,    0.05, 2],
     ['fxVerbLen','range', 0.6,  0.1,  6,    0.05, 2],
@@ -2642,7 +2641,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['bRiseCut', 'range', 0.9,  0,    1,    0.01, 2],
     ['bBeta',    'range', 10,   0,    20,   0.5,  1],
     ['bAlpha',   'range', 1.5,  0,    3,    0.1,  1],
-    ['dripGain','range', 1.0,  0,    3,    0.01, 2],
     ['splashGain','range',0.9, 0,    3,    0.01, 2],
     ['splashN',  'range', 30,   1,    150,  1,    0],
     ['splashLen','range', 0.12, 0.01, 0.6,  0.01, 2],
@@ -2729,7 +2727,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     padRel: 'Audio: seconds a chord takes to fade after it ends. Longer lets chords overlap into each other.',
     padStagger: 'Pad: the notes of a chord start up to this many seconds apart, as players do. 0 starts them together.',
     padBw: 'Pad (PADsynth): how wide each harmonic is smeared, in cents at the fundamental. 0 is a plain saw-like tone; 20-50 an ensemble; 100+ a choir or a wash.',
-    padBwScale: 'Pad (PADsynth): how the smear grows up the harmonics. 1 is as wide in pitch at every harmonic; above 1 the highs get airier; below 1 cleaner.',
     verbLen: 'Audio: the pad\'s hall, tail in seconds (to -60 dB).',
     verbMix: 'Audio: how much of the pad goes into its hall. Slow-motion footage usually sits in a big wet space.',
     fxVerbLen: 'Audio: the liquid\'s room, tail in seconds (to -60 dB). Short keeps the drips and splashes close and dry; the pad\'s 4 s hall made them sound like a cave.',
@@ -2748,7 +2745,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     bRiseCut: 'Bubble model: only bubbles louder than this (depth factor D, 0-1) get the pitch rise - the ones near the surface. 0.9 per the paper; 0 makes every bubble rise.',
     bBeta: 'Bubble model: depth factor D = rnd^beta - higher makes most bubbles deep and faint, with a few loud ones. 10 sounded best in the paper.',
     bAlpha: 'Bubble model: loudness grows as radius^alpha. 1.5 is physical; lower brings the small (high) bubbles forward - closer; higher is more distant.',
-    dripGain: 'Bubble drips: level. Each drip is one bubble, and often one or two smaller ones as it breaks up.',
     splashGain: 'Bubble splashes: level of each bubble in the cloud.',
     splashN: 'Bubble splashes: bubbles per splash.',
     splashLen: 'Bubble splashes: seconds over which a splash\'s bubbles form, densest at the impact.',
@@ -2888,10 +2884,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     b.onclick = () => {
       const q = new URLSearchParams(location.search);
       for (const k of ['padGain', 'master', 'padLfo', 'padLfoLo', 'padLfoHi', 'padAtk', 'padRel', 'padStagger', 'padBw',
-                       'padBwScale', 'verbLen',
+                       'verbLen',
                        'verbMix', 'fxVerbLen', 'fxVerbMix', 'drips',
                        'bRmin', 'bRmax', 'bGamma',
-                       'bXi', 'bRiseCut', 'bBeta', 'bAlpha', 'dripGain', 'splashGain',
+                       'bXi', 'bRiseCut', 'bBeta', 'bAlpha', 'splashGain',
                        'splashN', 'splashLen', 'pourGain', 'pourBub', 'glug', 'glugHz', 'fizzGain', 'fizzRate',
                        'fizzXi', 'popT', 'popGain', 'popF', 'popGlide', 'popDecay', 'popThump',
                        'popThumpF', 'popThumpLen',
@@ -3927,13 +3923,14 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // is a dozen sines, each a whole number of cycles per loop so the table still loops,
     // summed with a rotating phasor - and 2 pi has to be exact (TAU): with 6.2832 the top
     // partials drifted up to 0.2 rad over one loop, and the seam clicked every 2.7 s. The band is padBw cents wide at the fundamental and
-    // scales as h^(padBwScale - 1) in cents (1: as wide in pitch at every harmonic). Built
+    // is as wide in pitch at every harmonic (a padBwScale for h^(s - 1) went on 3 Nov: it was
+    // 1, and left h**0 in the release). Built
     // before the notes, so the score cannot change it.
     const PL = 1 << 17, PF = 220,    // loop length (2.7 s at 48 kHz), the pitch it is built at
           pt = o.createBuffer(1, PL, sr), pd = pt.getChannelData(0);
     for (let h = 1; h < 25; h++) for (let j = 0; j < 12; j++) {
       const g = r3() + r3() + r3() - 1.5,   // roughly gaussian
-            w = TAU * Math.round(PF * h * 2 ** (g * ui.padBw * h ** (ui.padBwScale - 1) / 1200) * PL / sr) / PL,
+            w = TAU * Math.round(PF * h * 2 ** (ui.padBw / 1200 * g) * PL / sr) / PL,   // cents: folds to one constant
             c = Math.cos(w), sn = Math.sin(w), ph = TAU * r3();
       let x = Math.cos(ph) / h, y = Math.sin(ph) / h;
       for (let i = 0; i < PL; i++) { pd[i] += y; const x1 = x * c - y * sn; y = x * sn + y * c; x = x1; }
@@ -4040,9 +4037,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       const nr = near(t), pan = r2() * 0.8 + 0.1;
       if (r2() < 0.7) {
         // a drip: its bubble, and often one or two smaller ones as it breaks up
-        pop(BX[0], t, ui.dripGain * nr, ui.bRmin, ui.bRmax, pan, 1);
+        pop(BX[0], t, nr, ui.bRmin, ui.bRmax, pan, 1);   // at level 1 (a dripGain slider went, 3 Nov)
         for (let j = r2() * 3 | 0; j--;)
-          pop(BX[0], t + 0.002 + r2() * 0.02, ui.dripGain * nr * 0.5, ui.bRmin, ui.bRmax / 2, pan);
+          pop(BX[0], t + 0.002 + r2() * 0.02, nr * 0.5, ui.bRmin, ui.bRmax / 2, pan);
       } else {
         // a splash: a cloud of bubbles, densest at the impact and thinning out
         for (let j = 0; j < ui.splashN; j++)
@@ -4229,9 +4226,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   const BUB = ['drips', 'splashes', 'pour', 'fizz'];
   const AFFECTS = { padGain: ['pad'], padLfo: ['pad'], padLfoLo: ['pad'], padLfoHi: ['pad'],
                     padAtk: ['pad'], padRel: ['pad'],
-                    padStagger: ['pad'], padBw: ['pad'], padBwScale: ['pad'], drips: ['drips', 'splashes'],
+                    padStagger: ['pad'], padBw: ['pad'], drips: ['drips', 'splashes'],
                     bRmin: BUB, bRmax: BUB, bGamma: BUB, bXi: BUB, bRiseCut: BUB, bBeta: BUB,
-                    bAlpha: BUB, dripGain: ['drips'], splashGain: ['splashes'],
+                    bAlpha: BUB, splashGain: ['splashes'],
                     splashN: ['splashes'], splashLen: ['splashes'], pourGain: ['pour'],
                     pourBub: ['pour'], glug: ['pour'], glugHz: ['pour'], fizzGain: ['fizz'], fizzRate: ['fizz'], fizzXi: ['fizz'],
                     popT: ['pop'], popGain: ['pop'], popF: ['pop'], popGlide: ['pop'],

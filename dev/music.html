@@ -115,7 +115,6 @@ const SPEC = [
   ['padRel',     4,    0.1,  10,   0.1,   1, 'Seconds a chord takes to fade after it ends. Longer lets chords overlap into each other.'],
   ['padStagger', 0.15, 0,    1,    0.01,  2, 'The notes of a chord start up to this many seconds apart, as players do. 0 starts them together.'],
   ['padBw',      30,   0,    200,  1,     0, 'PADsynth: how wide each harmonic is smeared, in cents at the fundamental. 0 is a plain saw-like tone; 20-50 an ensemble; 100+ a choir or a wash.'],
-  ['padBwScale', 1,    0,    2,    0.05,  2, 'PADsynth: how the smear grows up the harmonics. 1 is as wide in pitch at every harmonic; above 1 the highs get airier; below 1 cleaner.'],
   ['verbLen',    4,    0.5,  10,   0.1,   1, 'The pad\'s hall, tail in seconds (to -60 dB).'],
   ['verbMix',    0.5,  0,    2,    0.05,  2, 'How much of the pad goes into its hall.'],
 ];
@@ -188,11 +187,11 @@ const PL = 1 << 17, PF = 220;
 let tableKey = '', tableData = null;
 function padTable(sr, r3) {
   // the table consumes r3 first, exactly as song() does, and is cached per sound
-  const key = [sr, ui.padBw, ui.padBwScale].join();
+  const key = [sr, ui.padBw].join();
   const pd = new Float32Array(PL);
   for (let h = 1; h < 25; h++) for (let j = 0; j < 12; j++) {
     const g = r3() + r3() + r3() - 1.5,
-          w = TAU * Math.round(PF * h * 2 ** (g * ui.padBw * h ** (ui.padBwScale - 1) / 1200) * PL / sr) / PL,
+          w = TAU * Math.round(PF * h * 2 ** (ui.padBw / 1200 * g) * PL / sr) / PL,
           c = Math.cos(w), sn = Math.sin(w), ph = TAU * r3();
     if (key === tableKey) continue;           // cached: draw the numbers, skip the work
     let x = Math.cos(ph) / h, y = Math.sin(ph) / h;

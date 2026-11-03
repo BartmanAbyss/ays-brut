@@ -459,7 +459,7 @@ compared by ear, and replaced it. All four use one bubble function:
 
 | track | what it is | sliders |
 |---|---|---|
-| `drips` | per drip, one bubble from the population and 0-2 smaller ones as it breaks up | `dripGain` |
+| `drips` | per drip, one bubble from the population and 0-2 smaller ones as it breaks up | (level 1) |
 | `splashes` | per splash, a cloud of `splashN` bubbles over `splashLen`, densest at the impact | `splashGain`, `splashN`, `splashLen` |
 | `pour` | the stream as `pourBub` bubbles per second (up to ~1000/s is dripping to an intimate stream) | `pourGain`, `pourBub` |
 | `fizz` | CO2 bubbles bursting at the surface: 0.15-0.5 mm, every one heard, pitch rising as the cavity collapses (Poujol et al., "Sound of effervescence", Phys. Rev. Fluids 2021) | `fizzGain`, `fizzRate`, `fizzXi` |
@@ -538,7 +538,7 @@ upgrade are gone; this records what was tried):
 - **`pad2`, PADsynth-lite.** Nasca Octavian Paul's PADsynth (ZynAddSubFX) treats each
   harmonic as a band of frequencies with random phases and renders one long table that
   loops - "the phases are random, and this is the key". Lite: no FFT; 24 harmonics, each
-  a band of 12 sines `padBw` cents wide (scaling up the harmonics by `padBwScale`), every
+  a band of 12 sines `padBw` cents wide (as wide in pitch at every harmonic), every
   sine a whole number of cycles per 2.7 s loop, summed with a rotating phasor. Each note
   plays the table twice, from different points of the loop, panned apart.
 
@@ -1284,7 +1284,7 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 308 bytes (3 Nov 2026), 116 OVER 8 192**, lettering and score in
+**`intro.cmd` is 8 281 bytes (3 Nov 2026), 89 OVER 8 192**, lettering and score in
 (the score +127, the cutoff's sweep +26, the soundtrack played live instead of rendered -23); the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57), a simpler coupe (-105), the traced reflection dropped (-87), the bottle without heel bevel and neck taper (-43), one smoothed normal for all liquid (-56), the bottle held from 180 degrees (-32), its helpers inlined (-29), more single-call functions inlined (-51), `botShare` global, the pool halved and the integer consts untyped (-6), two uniforms gone (-15): the standing bottle is switched by the raised table (only shot 2 raises it past 0.4), and the shader takes the pour rate and works out the emission cadence itself; 62 exact rewrites across the shader (-160, see CLAUDE.md *Minifying*); a fresh packer search on them (-19; the Roadroller search found nothing better than its old settings); fs ending in one expression and the particle writes merged into one (-4 after another packer search); the bottle's wander computed in the shader, five uniforms fewer (-10); the mousse made from the wave impulse and drops absorbed at the bowl wall instead of sliding down it (-56, no visible difference); terser's `const` written as `let` (-11); Google Closure Compiler and esbuild in front of terser (-49); 23 exact rewrites in the march and the narrow band (-32, the band now float bits).
 Before them, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
