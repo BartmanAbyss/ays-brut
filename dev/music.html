@@ -59,6 +59,7 @@
   <button id="stop" title="Stop (Space)">Stop</button>
   <label class="chk" title="Play the score round and round. The loop starts on the second pass, so the tails of the last chords carry over into the first, as they would in a repeat."><input type="checkbox" id="loop" checked> loop</label>
   <button id="copy" title="Copy the score in the intro's format - [start s, length s, MIDI notes...] - to paste into SCORE in dev/champagne.html">Copy as SCORE</button>
+  <button id="defscore" title="Replace the score with the one written in music.html (asks first if yours differs)">Default score</button>
   <button id="reset" title="Put every slider back to the intro's current default">Reset sliders</button>
   <span id="status">-</span>
 </header>
@@ -77,13 +78,13 @@
 const DEFAULT_SCORE = `// [start s, length s, notes...] - a note is a MIDI number or a name: 'A3', 'C#4', 'Bb2'
 // (C4 = 60). Changes apply on the next Play.
 // Open voicing: the root low, the 5th and the 10th above it, spread over two octaves.
-// chord(root, kind) writes one for you: ...chord('F2', 'maj7') - kinds '' 'm' plus 'maj7'
-// 'add9' 'sus2' 'sus4' (e.g. 'madd9', 'maj7add9').
+// chord(root, kind) writes one for you: ...chord('F2', 'maj7') - kinds: 'm', 'maj7' 'maj9',
+// '7' '9', 'add9', '#11', 'sus2' 'sus4', combined in that order (e.g. 'm9', 'maj7#11').
 [
-  [0,  6, ...chord('A2', 'm')],   // Am  vi   A2 E3 C4
-  [6,  6, ...chord('F2')],        // F   IV   F2 C3 A3
-  [12, 6, ...chord('C3')],        // C   I    C3 G3 E4
-  [18, 6, ...chord('G2')],        // G   V    G2 D3 B3
+  [0,  6, ...chord('C3', 'maj9')],      // Cmaj9      C3 G3 B3 D4 E4
+  [6,  6, ...chord('A2', 'm9')],        // Am9        A2 E3 G3 B3 C4
+  [12, 6, ...chord('F2', 'maj7#11')],   // Fmaj7#11   F2 C3 E3 A3 B3
+  [18, 6, ...chord('G2', 'sus4')],      // Gsus4      G2 D3 C4
 ]`;
 
 // ── the pad's controls: names, ranges, defaults and tooltips as in champagne.html's SPEC ──
@@ -119,20 +120,27 @@ function midi(n) {
   return v;
 }
 // chord(root, kind): the notes of a chord in the sketch's open voicing - the root where
-// given, its 5th and 10th above, everything within two octaves. kind is '' or 'm' for the
-// triad, plus any of 'maj7' (the major 7th, between the 5th and the 10th), 'add9' (the 9th,
-// under the 10th), 'sus2' / 'sus4' (the 9th / the 11th instead of the 10th): 'm', 'maj7',
-// 'madd9', 'sus4', 'maj7add9'. In a score entry: [0, 6, ...chord('F2', 'maj7')].
+// given, its 5th and 10th above, everything within two octaves. kind, in this order:
+//   'm'                  minor (else major)
+//   'maj7' 'maj9'        the major 7th (+11), with the 9th (+14) for maj9
+//   '7' '9'              the minor 7th (+10), with the 9th for 9 - so 'm7', 'm9', '7', '9'
+//   'add9'               the 9th alone (+14, under the 10th)
+//   '#11'                the raised 11th (+18, above the 10th)
+//   'sus2' / 'sus4'      the 9th / the 11th (+17) INSTEAD of the 10th
+// e.g. 'maj9', 'm9', 'maj7#11', 'sus4', 'madd9'. In a score entry:
+// [0, 6, ...chord('C3', 'maj9')].
+const KIND = /^(m(?!aj))?(maj7|maj9|7|9)?(add9)?(#11)?(sus[24])?$/;
 function chord(root, kind = '') {
-  const r = midi(root), minor = /^m(?!aj)/.test(kind);
-  const n = [r, r + 7];
-  if (kind.includes('maj7')) n.push(r + 11);
-  if (kind.includes('add9')) n.push(r + 14);
-  if (kind.includes('sus2')) n.push(r + 14);
-  else if (kind.includes('sus4')) n.push(r + 17);
-  else n.push(r + (minor ? 15 : 16));
-  if (!/^(m(?!aj))?(maj7)?(add9)?(sus[24])?$/.test(kind)) throw new Error('chord kind not known: ' + JSON.stringify(kind));
-  return n;
+  const k = KIND.exec(kind);
+  if (!k) throw new Error('chord kind not known: ' + JSON.stringify(kind) + ' (see chord() for the list)');
+  const [, minor, sev, add9, s11, sus] = k, r = midi(root);
+  const iv = new Set([0, 7]);
+  if (sev) iv.add(sev.startsWith('maj') ? 11 : 10);
+  if (sev && sev.endsWith('9') || add9 || sus === 'sus2') iv.add(14);
+  if (sus === 'sus4') iv.add(17);
+  else if (!sus) iv.add(minor ? 15 : 16);
+  if (s11) iv.add(18);
+  return [...iv].sort((a, b) => a - b).map(i => r + i);
 }
 function parseScore() {
   const raw = Function('chord', '"use strict"; return (' + $score.value + '\n);')(chord);
@@ -291,6 +299,11 @@ $score.oninput = () => { save(); try { parseScore(); $err.textContent = ''; } ca
 $('play').onclick = play;
 $('stop').onclick = () => stop();
 $('loop').onchange = () => { if (playing) play(); };
+$('defscore').onclick = () => {
+  if ($score.value !== DEFAULT_SCORE && !confirm('Replace your score with the default? Yours is lost.')) return;
+  $score.value = DEFAULT_SCORE; $score.oninput();
+  if (playing) play();
+};
 $('reset').onclick = () => { stored.ui = null; buildUI(); save(); if (playing) play(); };
 $('copy').onclick = async () => {
   try {
