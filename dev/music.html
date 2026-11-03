@@ -331,16 +331,31 @@ function drawRoll() {
   if (playing && playing.sync && !vid.seeking && Math.abs(vid.currentTime - now()) > 0.08) vid.currentTime = now();
   if (playing && playing.sync && vid.paused && now() < vid.duration) vid.play().catch(() => {});
   const t = now();
-  $('time').textContent = t.toFixed(2) + ' s';
+  const shot = SHOTS.find(([, a, b]) => t >= a && t < b);
+  $('time').textContent = t.toFixed(2) + ' s' + (shot ? '  ' + shot[0] : '');
   if (score.length) {
     const L = rollLen(score);
     const all = score.flatMap(([, , ...n]) => n), lo = Math.min(...all) - 2, hi = Math.max(...all) + 2;
     const X = t => 8 + (w - 16) * t / L, Y = m => h - 6 - (h - 12) * (m - lo) / (hi - lo);
+    // the shots: a band each, the blacks between them darker, the name at the top
+    g2.font = '10px system-ui';
+    SHOTS.forEach(([name, a, b], i) => {
+      if (a >= L) return;
+      const x0 = X(a), x1 = X(Math.min(b, L));
+      g2.fillStyle = name === 'black' ? '#08080a' : i % 2 ? '#191b21' : '#15161b';
+      g2.fillRect(x0, 0, x1 - x0, h);
+      g2.fillStyle = '#4a5060'; g2.fillRect(x0, 0, 1, h);
+      if (name !== 'black' && x1 - x0 > 24) {
+        g2.save(); g2.beginPath(); g2.rect(x0, 0, x1 - x0 - 2, h); g2.clip();
+        g2.fillStyle = '#8a8f9c'; g2.fillText(name, x0 + 3, 11);
+        g2.restore();
+      }
+    });
     const step = L > 40 ? 5 : 1;               // a grid line a second, or every 5 s on a long roll
-    g2.strokeStyle = '#2c2f38'; g2.fillStyle = '#5a5f6c'; g2.font = '10px system-ui';
+    g2.strokeStyle = '#2c2f3888'; g2.fillStyle = '#5a5f6c';
     for (let s = 0; s <= L; s += step) {
-      g2.beginPath(); g2.moveTo(X(s), 0); g2.lineTo(X(s), h); g2.stroke();
-      if (step > 1 && s % 10 === 0) g2.fillText(s, X(s) + 2, 10);
+      g2.beginPath(); g2.moveTo(X(s), 14); g2.lineTo(X(s), h); g2.stroke();
+      if (step > 1 && s % 10 === 0) g2.fillText(s, X(s) + 2, h - 3);
     }
     g2.fillStyle = '#e0b85a';
     for (const [t, len, ...notes] of score) for (const m of notes) g2.fillRect(X(t), Y(m) - 2, X(t + len) - X(t) - 1, 4);
@@ -348,6 +363,16 @@ function drawRoll() {
   }
   requestAnimationFrame(drawRoll);
 }
+// The shots, [name, start s, end s], read from the harness's shot block on load - the one the
+// timeline editor saves - and laid end to end, as the intro does (build/timeline.py starts).
+let SHOTS = [];
+fetch('/champagne.html').then(r => r.text()).then(src => {
+  const block = src.slice(src.indexOf('// SHOTS:BEGIN'), src.indexOf('// SHOTS:END'));
+  let s = 0;
+  for (const m of block.matchAll(/\{\s*name:\s*'([^']*)',\s*dur:\s*([\d.]+)/g)) {
+    SHOTS.push([m[1], s, s + +m[2]]); s += +m[2];
+  }
+}).catch(() => {});
 // the roll spans the score, or the whole video when one plays along
 const rollLen = score => Math.max(...score.map(([t, len]) => t + len), videoOn() ? vid.duration : 0);
 // Click or drag on the roll to move the playhead. While dragging, playback pauses and the
