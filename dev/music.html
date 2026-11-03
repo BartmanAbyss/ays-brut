@@ -42,7 +42,8 @@
          font-family: ui-monospace, Consolas, monospace; white-space: pre-wrap; }
   #vidbox { background: #000; border-bottom: 1px solid var(--line); position: relative; }
   #vid { display: block; width: 100%; max-height: 48vh; object-fit: contain; }
-  #vidname { position: absolute; left: 8px; bottom: 6px; color: var(--dim); font-size: 11px; }
+  #vidname { position: absolute; left: 8px; bottom: 6px; color: var(--dim); font-size: 11px; pointer-events: none; }
+  #vidcover { position: absolute; inset: 0; cursor: pointer; }
   #time { color: var(--accent); font-variant-numeric: tabular-nums; min-width: 64px; text-align: right; }
   label.chk input:disabled + * , label.chk:has(input:disabled) { opacity: .45; }
   #roll { cursor: pointer; }
@@ -76,6 +77,9 @@
 <main>
   <div id="left">
     <div id="vidbox" style="display:none"><video id="vid" playsinline preload="auto"></video>
+      <!-- a cover over the video: hover-zoom extensions zoom whatever <video> is under the
+           mouse, and this keeps the mouse off it. Clicking it plays / stops. -->
+      <div id="vidcover" title="Click to play / stop (Space)"></div>
       <div id="vidname"></div></div>
     <textarea id="score" spellcheck="false"></textarea>
     <div id="err"></div>
@@ -346,11 +350,34 @@ function drawRoll() {
 }
 // the roll spans the score, or the whole video when one plays along
 const rollLen = score => Math.max(...score.map(([t, len]) => t + len), videoOn() ? vid.duration : 0);
-roll.onclick = e => {
-  if (!videoOn()) return;
-  let score; try { score = parseScore(); } catch (err) { return; }
+// Click or drag on the roll to move the playhead. While dragging, playback pauses and the
+// video follows the pointer; letting go resumes from there if it was playing (restarting
+// the audio on every move would only stutter).
+let drag = null;
+const rollTime = e => {
+  let score; try { score = parseScore(); } catch (err) { return null; }
   const r = roll.getBoundingClientRect();
-  seek((e.clientX - r.left - 8) / (r.width - 16) * rollLen(score));
+  return (e.clientX - r.left - 8) / (r.width - 16) * rollLen(score);
+};
+const scrub = e => {
+  const t = rollTime(e);
+  if (t === null) return;
+  pos = Math.max(0, Math.min(t, vid.duration));
+  if (vid.fastSeek && drag) vid.fastSeek(pos); else vid.currentTime = pos;
+};
+roll.onpointerdown = e => {
+  if (!videoOn()) return;
+  drag = { was: !!playing };
+  if (playing) stop();
+  roll.setPointerCapture(e.pointerId);
+  scrub(e);
+};
+roll.onpointermove = e => { if (drag) scrub(e); };
+roll.onpointerup = roll.onpointercancel = e => {
+  if (!drag) return;
+  const was = drag.was; drag = null;
+  scrub(e);                                    // land exactly where the pointer let go
+  if (was) play();
 };
 
 // ── the panel ──
@@ -390,6 +417,7 @@ $('stop').onclick = () => stop();
 $('loop').onchange = () => { if (playing) play(); };
 $('usevid').onchange = () => { showVideo(); if (playing) play(); };
 $('loadvid').onclick = () => $('vidfile').click();
+$('vidcover').onclick = () => { playing ? stop() : play(); };
 $('vidfile').onchange = () => { const f = $('vidfile').files[0]; if (f) { stop(); pos = 0; useVideo(URL.createObjectURL(f), f.name); } };
 // ?video=intro.mp4 picks another export from build/
 const vname = new URLSearchParams(location.search).get('video') || 'intro-720p.mp4';
