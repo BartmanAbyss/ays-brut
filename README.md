@@ -490,8 +490,7 @@ to say what it is. Track `pop`, at `popT` (0.5 s), in three parts:
   twice the speed of sound (Liger-Belair et al., *Science Advances* 2019, high-speed
   imaging of uncorking);
 - **the plop**: the open neck ringing as a Helmholtz resonator (`popF`, a few hundred Hz),
-  gliding there from `popGlide` x popF in ~25 ms as the cork clears it - below 1 rises,
-  the "plopp" - for `popDecay`, over a thump of the gas expanding that falls like a kick
+  (it glided there from below in ~25 ms as the cork cleared it, until 3 Nov) for `popDecay`, over a thump of the gas expanding that falls like a kick
   drum from twice `popThumpF` (60 Hz) to it, for `popThumpLen` (`popThump`, 1.2: "the pop
   needs more bass");
 - **the rush**: high-passed noise fading over `hissLen` as the rest of the gas leaves
@@ -1284,7 +1283,7 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 281 bytes (3 Nov 2026), 89 OVER 8 192**, lettering and score in
+**`intro.cmd` is 8 223 bytes (3 Nov 2026), 31 OVER 8 192**, lettering and score in
 (the score +127, the cutoff's sweep +26, the soundtrack played live instead of rendered -23); the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57), a simpler coupe (-105), the traced reflection dropped (-87), the bottle without heel bevel and neck taper (-43), one smoothed normal for all liquid (-56), the bottle held from 180 degrees (-32), its helpers inlined (-29), more single-call functions inlined (-51), `botShare` global, the pool halved and the integer consts untyped (-6), two uniforms gone (-15): the standing bottle is switched by the raised table (only shot 2 raises it past 0.4), and the shader takes the pour rate and works out the emission cadence itself; 62 exact rewrites across the shader (-160, see CLAUDE.md *Minifying*); a fresh packer search on them (-19; the Roadroller search found nothing better than its old settings); fs ending in one expression and the particle writes merged into one (-4 after another packer search); the bottle's wander computed in the shader, five uniforms fewer (-10); the mousse made from the wave impulse and drops absorbed at the bowl wall instead of sliding down it (-56, no visible difference); terser's `const` written as `let` (-11); Google Closure Compiler and esbuild in front of terser (-49); 23 exact rewrites in the march and the narrow band (-32, the band now float bits).
 Before them, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and

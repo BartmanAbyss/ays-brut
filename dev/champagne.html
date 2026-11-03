@@ -2652,7 +2652,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     ['popT',     'range', 22.05, 0,   70,   0.05, 2],
     ['popGain',  'range', 0.5,  0,    2,    0.01, 2],
     ['popF',     'range', 450,  80,   1500, 5,    0],
-    ['popGlide', 'range', 0.6,  0.2,  2.5,  0.05, 2],
     ['popDecay', 'range', 0.02, 0.003,0.15, 0.001,3],
     ['popThump', 'range', 1.2,  0,    3,    0.05, 2],
     ['popThumpF','range', 60,   30,   200,  1,    0],
@@ -2757,7 +2756,6 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     popT: 'Cork pop: when, in show seconds. It needs no picture - put it before the visuals.',
     popGain: 'Cork pop: overall level. The mix is normalised to its loudest moment, so a pop far louder than the rest turns everything else down.',
     popF: 'Cork pop: the pitch the open neck rings at, in Hz - a Helmholtz resonator, a few hundred Hz for a bottle neck. Lower is a bigger, hollower plop.',
-    popGlide: 'Cork pop: where the ringing starts, as a fraction of popF, gliding there in ~25 ms. Below 1 rises (the neck opening as the cork clears it: the "plopp"), above 1 falls.',
     popDecay: 'Cork pop: how long the neck rings, in seconds. Longer is more hollow and bottle-like, shorter a dry pop.',
     popThump: 'Cork pop: level of the low thump of the gas expanding - the bass of the pop.',
     popThumpF: 'Cork pop: pitch of the thump in Hz. It starts at twice this and falls here within ~20 ms, like a kick drum. Lower is deeper.',
@@ -2889,7 +2887,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
                        'bRmin', 'bRmax', 'bGamma',
                        'bXi', 'bRiseCut', 'bBeta', 'bAlpha', 'splashGain',
                        'splashN', 'splashLen', 'pourGain', 'pourBub', 'glug', 'glugHz', 'fizzGain', 'fizzRate',
-                       'fizzXi', 'popT', 'popGain', 'popF', 'popGlide', 'popDecay', 'popThump',
+                       'fizzXi', 'popT', 'popGain', 'popF', 'popDecay', 'popThump',
                        'popThumpF', 'popThumpLen',
                        'hissGain', 'hissLen']) q.set(k, ui[k]);
       for (const k of ['trkPad', 'trkDrips', 'trkSplash',
@@ -4009,8 +4007,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D}
     // one bubble: radius rm in mm, amplitude a, rise xi, pan 0..1, starting at t
     const bub = (Y, t, rm, a, xi, pan) => {
-      const f = 3000 / rm, d = 0.043 * f + 0.0014 * f ** 1.5, k = Math.exp(-d / sr),
-            i0 = t * sr | 0, n = 6 * sr / d | 0, gl = Math.sqrt(1 - pan), gr = Math.sqrt(pan);
+      // damping linear in f (it was 0.043 f + 0.0014 f^1.5; 3 Nov, for size)
+      const f = 3000 / rm, d = 0.12 * f, k = Math.exp(-d / sr),
+            i0 = t * sr | 0, n = 6 * sr / d | 0, gl = 1 - pan, gr = pan;   // linear pan (3 Nov, for size)
       let ph = 0, e = a;
       for (let i = 0; i < n; i++, e *= k) {
         ph += f * (1 + xi * d * i / sr) / sr;
@@ -4036,10 +4035,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     each(t => ui.drips * spray(t), t => {
       const nr = near(t), pan = r2() * 0.8 + 0.1;
       if (r2() < 0.7) {
-        // a drip: its bubble, and often one or two smaller ones as it breaks up
+        // a drip: its bubble (the one or two smaller ones as it broke up went on 3 Nov, for size)
         pop(BX[0], t, nr, ui.bRmin, ui.bRmax, pan, 1);   // at level 1 (a dripGain slider went, 3 Nov)
-        for (let j = r2() * 3 | 0; j--;)
-          pop(BX[0], t + 0.002 + r2() * 0.02, nr * 0.5, ui.bRmin, ui.bRmax / 2, pan);
       } else {
         // a splash: a cloud of bubbles, densest at the impact and thinning out
         for (let j = 0; j < ui.splashN; j++)
@@ -4070,15 +4067,16 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // neck ringing as a Helmholtz resonator, gliding to popF as the cork clears it, over a
     // low thump of the gas expanding; and the rush - high-passed noise fading as the rest of
     // the gas leaves.
-    for (let i = 0, ph = 0, tp = 0, lo = 0, i0 = ui.popT * sr | 0; i < sr * ui.hissLen * 4; i++) {
-      const s = i / sr, x = r2() * 2 - 1,
-            f = ui.popF * (1 - (1 - ui.popGlide) * Math.exp(-s / 0.008));
+    for (let i = 0, ph = 0, tp = 0, i0 = ui.popT * sr | 0; i < sr * ui.hissLen * 4; i++) {
+      // (3 Nov, for size: the plop rings at popF without gliding to it, and the rush is the
+      // plain noise, no highpass and no fade-in)
+      const s = i / sr, x = r2() * 2 - 1, f = ui.popF;
       // the thump falls like a kick drum: from twice popThumpF down to it within ~20 ms
-      ph += f / sr; tp += ui.popThumpF * (1 + Math.exp(-s / 0.01)) / sr; lo += (x - lo) * 0.3;
+      ph += f / sr; tp += ui.popThumpF * (1 + Math.exp(-s / 0.01)) / sr;
       const v = ui.popGain * (Math.sin(TAU * ph) * Math.exp(-s / ui.popDecay)
         + ui.popThump * Math.sin(TAU * tp) * Math.exp(-s / ui.popThumpLen)
         + x * Math.exp(-s / 0.0007)
-        + ui.hissGain * (x - lo) * Math.min(1, s / 0.01) * Math.exp(-s / ui.hissLen));
+        + ui.hissGain * x * Math.exp(-s / ui.hissLen));
       BX[4][0][i0 + i] += v; BX[4][1][i0 + i] += v;
     }
     for (const b of bx) {
@@ -4098,11 +4096,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // fxVerbLen for the liquid's room (filled last, so their lengths do not move the random
     // sequence the drips are drawn from)
     for (const [from, len, mix] of [[pb, ui.verbLen, ui.verbMix], [lb, ui.fxVerbLen, ui.fxVerbMix]]) {
-      const cv = o.createConvolver(), ir = o.createBuffer(2, sr * len, sr);
-      for (let c = 0; c < 2; c++) {
-        const d = ir.getChannelData(c);
-        for (let i = 0; i < d.length; i++) d[i] = (rnd() * 2 - 1) * Math.exp(-7 * i / d.length);
-      }
+      // one channel: the same reverb both sides (3 Nov, for size; it was two noise channels)
+      const cv = o.createConvolver(), ir = o.createBuffer(1, sr * len, sr), d = ir.getChannelData(0);
+      for (let i = 0; i < d.length; i++) d[i] = (rnd() * 2 - 1) * Math.exp(-7 * i / d.length);
       cv.buffer = ir; cv.connect(out); from.connect(gain(mix, cv));
     }
 
@@ -4231,7 +4227,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
                     bAlpha: BUB, splashGain: ['splashes'],
                     splashN: ['splashes'], splashLen: ['splashes'], pourGain: ['pour'],
                     pourBub: ['pour'], glug: ['pour'], glugHz: ['pour'], fizzGain: ['fizz'], fizzRate: ['fizz'], fizzXi: ['fizz'],
-                    popT: ['pop'], popGain: ['pop'], popF: ['pop'], popGlide: ['pop'],
+                    popT: ['pop'], popGain: ['pop'], popF: ['pop'],
                     popDecay: ['pop'], popThump: ['pop'], popThumpF: ['pop'], popThumpLen: ['pop'],
                     hissGain: ['pop'], hissLen: ['pop'] };
   const live = window.__live = { buf: {}, src: {}, g: {} };

@@ -244,13 +244,10 @@ async function render(score, sr, passes, minLen = 0) {
       v.connect(e); v.start(t0, r3() * PL / sr); v.stop(t0 + len + ui.padRel * 2);
     }
   }
-  // the hall: two channels of noise decaying to -60 dB (the intro seeds it from its own rnd)
+  // the hall: one channel of noise decaying to -60 dB, as the intro's (seeded from its own rnd)
   const rnd = rng(7);
-  const cv = o.createConvolver(), ir = o.createBuffer(2, Math.ceil(sr * ui.verbLen), sr);
-  for (let c = 0; c < 2; c++) {
-    const d = ir.getChannelData(c);
-    for (let i = 0; i < d.length; i++) d[i] = (rnd() * 2 - 1) * Math.exp(-7 * i / d.length);
-  }
+  const cv = o.createConvolver(), ir = o.createBuffer(1, Math.ceil(sr * ui.verbLen), sr), d = ir.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (rnd() * 2 - 1) * Math.exp(-7 * i / d.length);
   cv.buffer = ir; cv.connect(out); bus.connect(gain(ui.verbMix, cv));
   const b = await o.startRendering();
   let pk = 0;
@@ -293,11 +290,8 @@ function hall() {
   const key = [ac.sampleRate, ui.verbLen].join();
   if (key === irKey) return;
   irKey = key;
-  const rnd = rng(7), ir = ac.createBuffer(2, Math.ceil(ac.sampleRate * ui.verbLen), ac.sampleRate);
-  for (let c = 0; c < 2; c++) {
-    const d = ir.getChannelData(c);
-    for (let i = 0; i < d.length; i++) d[i] = (rnd() * 2 - 1) * Math.exp(-7 * i / d.length);
-  }
+  const rnd = rng(7), ir = ac.createBuffer(1, Math.ceil(ac.sampleRate * ui.verbLen), ac.sampleRate), d = ir.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = (rnd() * 2 - 1) * Math.exp(-7 * i / d.length);
   cv.buffer = ir;
 }
 // The voices of a score, with the random numbers drawn in the intro's order (the table
