@@ -1642,8 +1642,7 @@ Worth 1 050 bytes over the deflate version, for a header that came out *smaller*
 starts an `HttpListener` on http://localhost:8044/, opens that URL in the default browser
 and answers the one request with its own file past a fixed offset, sent with
 `Content-Encoding: br` and no Content-Type: the page opens with `<body>`, so the browser
-sniffs it as HTML. The payload sits in the file as **raw brotli bytes** — no base64, no
-escaping. The offset is written into the header; the build finds the value consistent
+sniffs it as HTML. The payload sits in the file as **raw brotli bytes**. The offset is written into the header; the build finds the value consistent
 with its own digit count, so the number cannot move what it points at. Every golfing
 choice is commented in `build.py`.
 
