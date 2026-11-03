@@ -96,6 +96,7 @@ const DEFAULT_SCORE = `// [start s, length s, notes...] - a note is a MIDI numbe
 // Open voicing: the root low, the 5th and the 10th above it, spread over two octaves.
 // chord(root, kind) writes one for you: ...chord('F2', 'maj7') - kinds: 'm', 'maj7' 'maj9',
 // '7' '9', 'add9', '#11', 'sus2' 'sus4', combined in that order (e.g. 'm9', 'maj7#11').
+// up(n, ...) transposes by n semitones: ...up(2, chord('F2', 'maj7')), ...up(-12, 'C3', 64).
 [
   [0,  6, ...chord('C3', 'maj9')],      // Cmaj9      C3 G3 B3 D4 E4
   [6,  6, ...chord('A2', 'm9')],        // Am9        A2 E3 G3 B3 C4
@@ -158,8 +159,15 @@ function chord(root, kind = '') {
   if (s11) iv.add(18);
   return [...iv].sort((a, b) => a - b).map(i => r + i);
 }
+// up(n, ...notes): the notes n semitones higher (lower for negative n). Takes a chord(),
+// note names, MIDI numbers or a mix: [0, 6, ...up(2, chord('F2', 'maj7#11'))],
+// [6, 6, ...up(-12, 'C3', 'G3', 64)].
+function up(n, ...notes) {
+  if (typeof n !== 'number') throw new Error('up(n, ...notes): n is the number of semitones, got ' + JSON.stringify(n));
+  return notes.flat().map(x => midi(x) + n);
+}
 function parseScore() {
-  const raw = Function('chord', '"use strict"; return (' + $score.value + '\n);')(chord);
+  const raw = Function('chord', 'up', '"use strict"; return (' + $score.value + '\n);')(chord, up);
   if (!Array.isArray(raw)) throw new Error('the score must be an array');
   return raw.map((e, i) => {
     if (!Array.isArray(e) || e.length < 3) throw new Error('entry ' + i + ': [start, length, notes...]');
