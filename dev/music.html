@@ -109,7 +109,9 @@ const SPEC = [
   ['padGain',    0.01, 0,    0.2,  0.001, 3, 'The pad\'s level per voice.'],
   ['master',     0.9,  0,    2,    0.01,  2, 'The overall level. Fixed, not normalised: watch the peak - past 1 the release clips.'],
   ['padCut',     1400, 200,  6000, 10,    0, 'The pad\'s lowpass cutoff in Hz - lower is darker and softer, higher brighter. Ignored while padLfo sweeps it.'],
-  ['padLfo',     0.05, 0,    1,    0.005, 3, 'NOT IN THE INTRO YET. The cutoff sweeps on a sine over padCut\'s whole range (200-6000 Hz, linear in Hz), this many times a second; 0 turns it off and padCut sets the cutoff. The phase follows show time, so a moment of the show always gets the same cutoff.'],
+  ['padLfo',     0.08, 0,    1,    0.005, 3, 'NOT IN THE INTRO YET. The cutoff sweeps on a sine between padLfoLo and padLfoHi (linear in Hz), this many times a second; 0 turns it off and padCut sets the cutoff. The phase follows show time, so a moment of the show always gets the same cutoff.'],
+  ['padLfoLo',   600,  200,  6000, 10,    0, 'NOT IN THE INTRO YET. The bottom of the cutoff\'s sweep, Hz: the darkest the pad gets.'],
+  ['padLfoHi',   6000, 200,  6000, 10,    0, 'NOT IN THE INTRO YET. The top of the cutoff\'s sweep, Hz: the brightest the pad gets.'],
   ['padAtk',     2.5,  0.05, 8,    0.05,  2, 'Seconds a chord takes to swell in.'],
   ['padRel',     4,    0.1,  10,   0.1,   1, 'Seconds a chord takes to fade after it ends. Longer lets chords overlap into each other.'],
   ['padStagger', 0.15, 0,    1,    0.01,  2, 'The notes of a chord start up to this many seconds apart, as players do. 0 starts them together.'],
@@ -201,22 +203,22 @@ function padTable(sr, r3) {
   return tableData;
 }
 
-// The cutoff's LFO (padLfo, not in the intro yet): a sine over padCut's slider range, linear
-// in Hz, its phase on SHOW time - started at context time c for show time p, it is at phase
-// 2 pi f p there, so every start, seek and edit lands on the same curve. The phase goes in
-// through a one-harmonic periodic wave, sin(wt + ph) = sin ph cos wt + cos ph sin wt (an
-// oscillator has no phase of its own). Returns the oscillator, or null when padLfo is 0.
-const CUT = SPEC.find(r => r[0] === 'padCut'), CUT_LO = CUT[2], CUT_HI = CUT[3];
-const cutAt = t => (CUT_LO + CUT_HI) / 2 + (CUT_HI - CUT_LO) / 2 * Math.sin(2 * Math.PI * ui.padLfo * t);
+// The cutoff's LFO (padLfo, not in the intro yet): a sine between padLfoLo and padLfoHi,
+// linear in Hz, its phase on SHOW time - started at context time c for show time p, it is at
+// phase 2 pi f p there, so every start, seek and edit lands on the same curve. The phase
+// goes in through a one-harmonic periodic wave, sin(wt + ph) = sin ph cos wt + cos ph sin wt
+// (an oscillator has no phase of its own). Returns the oscillator, or null when padLfo is 0.
+const CUT = SPEC.find(r => r[0] === 'padCut'), CUT_LO = CUT[2], CUT_HI = CUT[3];   // the roll's scale
+const cutAt = t => (ui.padLfoLo + ui.padLfoHi) / 2 + (ui.padLfoHi - ui.padLfoLo) / 2 * Math.sin(2 * Math.PI * ui.padLfo * t);
 function cutLfo(ctx, lp, p, c) {
   if (!(ui.padLfo > 0)) { lp.frequency.setValueAtTime(ui.padCut, c); return null; }
-  lp.frequency.setValueAtTime((CUT_LO + CUT_HI) / 2, c);
+  lp.frequency.setValueAtTime((ui.padLfoLo + ui.padLfoHi) / 2, c);
   const ph = 2 * Math.PI * ui.padLfo * p;
   const osc = ctx.createOscillator(), depth = ctx.createGain();
   osc.setPeriodicWave(ctx.createPeriodicWave(new Float32Array([0, Math.sin(ph)]),
                       new Float32Array([0, Math.cos(ph)]), { disableNormalization: true }));
   osc.frequency.value = ui.padLfo;
-  depth.gain.value = (CUT_HI - CUT_LO) / 2;
+  depth.gain.value = (ui.padLfoHi - ui.padLfoLo) / 2;
   osc.connect(depth); depth.connect(lp.frequency);
   osc.start(c);
   return osc;
@@ -675,7 +677,7 @@ function liveParam(k) {
   const t = ac.currentTime;
   if (k === 'master') out.gain.setTargetAtTime(ui.master, t, 0.01);
   else if (k === 'padCut') { if (!(ui.padLfo > 0)) lp.frequency.setTargetAtTime(ui.padCut, t, 0.01); }
-  else if (k === 'padLfo') { if (playing && gen) sweep(gen.p0 + (t + LEAD - gen.c0), t + LEAD); }
+  else if (k.startsWith('padLfo')) { if (playing && gen) sweep(gen.p0 + (t + LEAD - gen.c0), t + LEAD); }
   else if (k === 'verbMix') wet.gain.setTargetAtTime(ui.verbMix, t, 0.01);
   else if (k === 'verbLen') later(hall);
   else later(() => refresh());
@@ -708,7 +710,7 @@ $('defscore').onclick = () => {
 };
 $('reset').onclick = () => {
   stored.ui = null; buildUI(); save();
-  for (const k of ['master', 'padCut', 'padLfo', 'verbMix', 'verbLen', 'padGain']) liveParam(k);
+  for (const k of ['master', 'padCut', 'padLfo', 'verbMix', 'verbLen', 'padGain']) liveParam(k);   // padLfo: the whole sweep
 };
 $('copy').onclick = async () => {
   try {
