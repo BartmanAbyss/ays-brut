@@ -14,8 +14,9 @@ composed by hand in the music sketchpad, on the PADsynth pad with its swept cuto
 liquid's bubbles and the cork - are all in. The entry is **8 192 bytes, exactly the 8 192
 budget**. The deployed files are in `release/` (`python build/deploy.py` makes them):
 `ays-brut.cmd`, the Windows entry, and `ays-brut.uncompressed.html`, the same intro as one
-plain page for Linux, macOS and any WebGPU browser. Open point: on the dev GPU (an RTX 4070)
-the heaviest tier2 frame is ~22 ms against the ~19 ms that stands for the compo PC's 16.6.
+plain page for Linux, macOS and any WebGPU browser. Open point: the frame time. The release
+renders 1600×900 stretched to the screen, and on the dev GPU (an RTX 4070) its heaviest
+shot, 8, runs ~18.5-19.1 ms, on the ~19 ms line that stands for the compo PC's 16.6.
 
 ![The dev harness with the timeline editor open, paused in shot 8](docs/harness-editor.png)
 *The dev harness (`dev/champagne.html?edit=1`), timeline editor open, paused at 88 s in shot 8.*
@@ -49,8 +50,11 @@ That is `python -m http.server` on 127.0.0.1:8787 plus the editor's save (below)
 Requires a browser with WebGPU: Chrome, Edge and Firefox all run both the harness and the
 release (*Browsers*, below). Developed against an **RTX 4070**.
 
-The release is `build/intro.cmd` (see *Build*). Double-click it: it serves itself on
-http://localhost:8044/ and opens the default browser; click the page to start.
+The release is `release/ays-brut.cmd` (built as `build/intro.cmd`, see *Build*).
+Double-click it: it serves itself on http://localhost:8044/ and opens the default browser;
+the page says "patientez" while it starts up and "cliquez" once it is ready - click it.
+`release/ays-brut.uncompressed.html` is the same intro as a plain page: open it in any
+WebGPU browser, on any OS.
 
 ---
 
@@ -118,22 +122,23 @@ case alone would end a three-minute intro more than a minute behind the music.
 | master clock, 78 fps | 0.9996 |
 | master clock, 39 fps | 0.9954 |
 
-A frame that runs long leaves a deficit, and the deficit is **kept** and worked off over the
-following frames, so a hitch costs nothing in the end. Catch-up is capped at 16 steps per
-frame because the sub-step index wraps at 16 (it reaches the shader as the dispatch's grid
-height), and reusing one would make two substeps share an RNG stream — the bug that used
-to thin the pour. Past
-`LAG_STEPS` (0.5 s) behind, the missed steps are given up rather than chased: in a demo,
-staying with the music beats fluid continuity. Those events are counted in `probe.resyncs`
-so the cost is visible rather than silent.
+Each frame takes as many show steps as the clock has advanced since the last one, times
+the timeline's speed, capped at 16 - nothing is owed and nothing is chased (since 31 Oct;
+it used to keep a deficit and resync past 0.5 s behind). The show clock is the music, so
+nothing drifts against it; what a slow frame cannot afford is simply dropped. The cap is
+16 because the sub-step index wraps at 16 (it reaches the shader as the dispatch's grid
+height), and reusing one would make two substeps share an RNG stream - the bug that used
+to thin the pour. It only bites in the 8x blacks below ~30 fps, where the tower then
+fills a little less.
 
 **All** of the simulation steps on this clock, not just the particles. The per-glass volume
-ODE, the wave field and the table puddle sat in the per-frame build pass until the timeline
-exposed it: a seek running 3000 steps in one frame filled exactly one glass, because the
-bulk had advanced one frame's worth. At 60 fps it hid perfectly, since frames and steps
-matched one for one.
+ODE, the wave field and the table puddle (since cut) sat in the per-frame build pass until
+the timeline exposed it: a seek running 3000 steps in one frame filled exactly one glass,
+because the bulk had advanced one frame's worth. At 60 fps it hid perfectly, since frames
+and steps matched one for one.
 
-Measured with everything in, at 1920×1080 on the heaviest shot:
+Measured with everything in, at 1920×1080 on the heaviest shot (before the 31 Oct clock,
+which has no resyncs left to count):
 
 | | |
 |---|---|
@@ -163,19 +168,21 @@ in Python (`build/timeline.py`), so the release ships the same key list. The val
 sets for itself that the release carries - `shutter`, `pourRate` -
 go into `SHOT_V`, `[from, shutter, pourRate]` with a row wherever they
 change (in a shot that is black throughout, the look-only ones carry over from the shot
-before: a row fewer each). The release picks the current row each frame; three of them are
+before: a row fewer each). The release picks the current row each frame; both values are
 live uniforms there. Any other per-shot value, and a shot's `fade` length, is still
 harness-only, and the build warns when it leaves one out. The wander (`pourWander` 35,
 `wanderSpd` 9) is global: the shots' values were close, and a global one also stops the
 bottle jumping at a cut.
-Keys are `[t, angle, dist, camY, tgtY, simSpeed, ease, fade, light, pour, tilt, table, env]`:
+Keys are `[t, angle, dist, camY, tgtY, speed, fade, lightEl, pour, botTilt, tableY, envAmt]`
+(`build/timeline.py` `COLS`):
 
-- **`fade`**: 0 black .. 1 full; every shot fades in and out.
-- **`light`**: the key light's elevation in degrees; below 0 it is under the table, which
+- **`fade`**: 0 black .. 1 full; every shot fades in and out. The shader gets it squared,
+  so a fade is even to the eye rather than bright from its first frame.
+- **`lightEl`**: the key light's elevation in degrees; below 0 it is under the table, which
   then gets no light at all (the table is lit only by the photon map).
 - **`pour`**: the share of the bottle's flow, 0 = not pouring; ramp it for a natural start.
-- **`tilt`**: the bottle in degrees; 0 takes it out of the scene, ~118 pours.
-- **`table`**: the table's height. Raised to a tier's base it hides the tiers below - rays
+- **`botTilt`**: the bottle in degrees; 0 takes it out of the scene, ~118 pours.
+- **`tableY`**: the table's height. Raised to a tier's base it hides the tiers below - rays
   stop at the plane, so they are never even marched: 0.341 shows the top glass alone on
   the table, 0.171 two tiers, 0 the whole tower. A millimetre above the tier below, whose
   rims are exactly at the next base and otherwise cut through the table as rings. Drops
@@ -183,18 +190,20 @@ Keys are `[t, angle, dist, camY, tgtY, simSpeed, ease, fade, light, pour, tilt, 
   into the table); tier 3 starts filling when the table drops. Photons that would start
   under the table are discarded - with the light low they lit the hidden tiers, which
   showed through as rings. Change it only in the black.
-- **`env`**: the environment's brightness, 0..1 - the sky, the fill lights, the softbox
+- **`envAmt`**: the environment's brightness, 0..1 - the sky, the fill lights, the softbox
   and bokeh seen in the glass, the bounce-budget haze and the table's ambient. 0 leaves only
   what the key light lights through the photon map. All of it scales, key lobes included:
   with the light still under the table they showed in the glass, which then looked lit
   while the table was dark. Shot 1 brings it up with the light (0 → 0.1 at 2 s → 1 at 7.5).
-- In the black between shots `simSpeed` runs at 8, so the tower fills while nobody watches.
+- In the black between shots `speed` runs at 8, so the tower fills while nobody watches.
 
 - **Two keys sharing a `t` are a cut.** The later one wins at that instant, so the change is
   immediate instead of a one-frame blend.
-- **`ease`** applies to the segment starting at that key: 1 for smootherstep in and out, 0
-  for linear, so a long drift can run through several keys without stalling at each one.
-- **`simSpeed` is keyed too**, and the sim clock is the integral of it over show steps, so a
+- **Between keys every value moves linearly.** A soft start is a short key a second in, as
+  the shots do. (An `ease` column for smootherstep segments went on 31 Oct: two keys used
+  it.) Camera values are kept to a degree and a centimetre, and a black shot's camera copies
+  the shots either side of it - nobody sees it, and copies compress to nothing.
+- **`speed` is keyed too**, and the sim clock is the integral of it over show steps, so a
   timeline that varies speed stays machine-independent.
 - **Slow motion is real.** Below speed 1 each sim step covers *less* time (`u.dt`), one step
   per show step, so the liquid moves every frame. It used to run whole 1/60 s steps less
@@ -211,9 +220,7 @@ Keys are `[t, angle, dist, camY, tgtY, simSpeed, ease, fade, light, pour, tilt, 
   0.3 s into the pour with 12 of its 280 mL, and how badly depended on the step - slow
   motion filled differently. The volume is now the state and the level its exact inverse
   (a cubic, solved in closed form). The top glass now takes ~6 s to fill at the default
-  pour, which also means the first-draft timeline below and the measured drip rates in
-  *Sound* were timed against the wrong fill and have to be redone (the sound once the
-  timeline settles).
+  pour.
 - **Drops resting on the bowl fell through it.** The bowl constraint put a drop's centre
   exactly on the interior sphere, and float rounding then made about half of those test as
   outside the next substep - unconstrained, so in an empty glass the stream ran straight
@@ -225,7 +232,7 @@ Keys are `[t, angle, dist, camY, tgtY, simSpeed, ease, fade, light, pour, tilt, 
   time - 0.5 on average (the `pourRate` you set), swinging by `glug` (0.7) at about
   `glugHz` (3.5), the frequency wandering. At `glug` 1 the drops in flight swing between
   ~170 and ~1 130 against 520-690 steady; the fill rate is unchanged. The pour's bubble
-  sound pulses with the same function. `pourWander` is now 20 mm.
+  sound pulses with the same function.
 
 The camera is driven from the table directly and only *mirrored* into the sliders for
 readout. Routing it through them would quantise it to the slider step, and `dist` steps by
@@ -233,28 +240,32 @@ readout. Routing it through them would quantise it to the slider step, and `dist
 
 Scrubbing with `showT` moves the camera immediately, which is what blocking shots needs, and
 the fluid catches up on release. **Backwards means rebuilding the fluid from zero**, because
-the simulation has no inverse — you cannot un-pour it — so it reloads with `?showt=`. **A seek
+the simulation has no inverse — you cannot un-pour it — so it rewinds to zero in place and
+replays up to the target (the editor's kept shot starts skip most of that). **A seek
 replays the timeline** a quarter second of show time per frame (full steps, as many as
 needed): the pour, bottle and light reach the shader once per frame, and a seek that ran
 the whole sim in one frame poured from t = 0 with the target's values. A seek to 50 s takes
 a few seconds. It is representative, not bit-identical: spill azimuths differ by the RNG.
 
-**The shot plan, first draft (26 Oct 2026)**, 64.25 s (shot 1 since stretched 1.5x):
+**The shot plan** (`SHOTS` in `dev/champagne.html`; 101.25 s, then a second of reverb):
 
-| show s | shot | sim |
-|---|---|---|
-| 0 - 12.75 | 1. the top glass alone on the table (0.341); fades in dark, the light rises from 25° below the table to 45.6°, its shadow sweeping in, the environment coming up with it | empty, no pour, no bottle |
-| 12.75 - 21.25 | 2. an orbit round it | |
-| 21.25 - 23.75 | 3. black; the cork pops at `popT` 22.05 | the bottle appears, tilted in |
-| 23.75 - 35.75 | 4. the pour in slow motion (0.25 throughout): the bottle tips in, the flow starts at 24.25 s, the top glass fills | top glass a little under 3/4 full |
-| 35.75 - 37.25 | black: the table drops to tier 2 (0.171), sim at 8x | top glass overflows, tier 2 fills |
-| 37.25 - 47.75 | 5. an orbit of the two tiers (sim 1.5x) | tier 2 nearly full |
-| 47.75 - 49.25 | black, sim at 8x | |
-| 49.25 - 60.25 | 6. tier 2 in slow motion (0.25), spilling onto the table | tier 2 full and spilling |
-| 60.25 - 61.75 | black: the table drops to the floor, sim at 8x | tier 3 starts to fill |
-| 61.75 - 64.25 | 7. to be decided; for now the whole tower, wide | tier 3 about half full |
+| show s | shot | speed | what happens |
+|---|---|---|---|
+| 0 - 12.75 | 1 glass | 1 | the top glass alone on the table (0.341); fades in dark, the light rises from 25° below the table to 45.6°, its shadow sweeping in, the environment coming up with it; no pour, no bottle |
+| 12.75 - 21.25 | 2 orbit | 1 | an orbit round the standing bottle, the table raised over the whole tower (0.511); MAISON / ABYSSE / MILLESIME / 2026 |
+| 21.25 - 23.75 | 3 pop | 1 -> 0.25 | black; the cork pops at `popT` 22.05; the bottle tips in, unseen |
+| 23.75 - 38.75 | 4 pour | 0.5 | the pour in slow motion: the bottle tips to 118°, the flow starts at 24.9 s, the top glass fills |
+| 38.75 - 40.25 | black | 8 | the table drops to tier 2 (0.171); the top glass overflows into it |
+| 40.25 - 50.75 | 5 tiers | 0.5 | an orbit of the two tiers |
+| 50.75 - 52.25 | black | 8 | tier 2 fills to overflowing |
+| 52.25 - 63.25 | 6 tier 2 | 0.25 | tier 2 in slow motion, spilling onto the table |
+| 63.25 - 64.75 | black | 8 | the table drops to the floor; tier 3 starts to fill |
+| 64.75 - 74.75 | 7 tower | 0.5 | the whole tower, wide |
+| 74.75 - 76.25 | black | 8 | the camera moves down to the table |
+| 76.25 - 101.25 | 8 | 0.25 | from table height (camY 0.01), a slow half-orbit of the whole tower overflowing, its own `pourRate` 250; CHAMPAGNE / POUR / LES / MASSES from 10 s in |
 
-The sound has not been re-timed to it yet (the drip rates still follow the old measurement).
+The sound follows it: the drips and splashes ramp up where the spray does (~35 s, ~51 s,
+76.25 s), the pour follows the `pour` column (*Sound*).
 
 #### The timeline editor (`?edit=1`)
 
@@ -262,8 +273,8 @@ The sound has not been re-timed to it yet (the drip rates still follow the old m
 in the editor at all, and the show is on.
 
 - **Above the strip**: the timeline's speed as an orange curve (log scale, lines at 0.25,
-  1 and 8) and its fade in grey, across the whole show; under them a diamond for every key -
-  filled when the move from it is eased, yellow-edged at a cut. Hover a diamond for the key's
+  1 and 8) and its fade in grey, across the whole show; under them a diamond for every key,
+  yellow-edged at a cut. Hover a diamond for the key's
   values and what moves on the way to the next key; click it to jump there.
 - **The strip** at the bottom: every shot end to end, each as wide as it is long. Click in
   one to select it and play from the point clicked; ctrl- or shift-click to add to the
@@ -430,7 +441,8 @@ pad table's phases - and is the same piece. Three parts:
   the liquid drops out in the blacks, where the sim runs at 8x. +45 bytes with the
   packer's default state on both sides (+43 shipped). Re-measure the ramp times when the
   shots change what the tower does when.
-- **The reverbs**: convolution, each impulse two channels of noise decaying to -60 dB.
+- **The reverbs**: convolution, each impulse one channel of noise decaying to -60 dB (the
+  same reverb both sides since 3 Nov; it was two noise channels).
   The pad goes into a hall (`verbLen` 4 s, `verbMix`), the liquid into a short room
   (`fxVerbLen` 0.6 s, `fxVerbMix` 0.25): one 4 s hall for everything made the drips sound
   like a cave. +21 bytes for the second one.
@@ -438,7 +450,9 @@ pad table's phases - and is the same piece. Three parts:
 The level is a fixed `master` gain (0.9), not normalised: the harness shows the mix's peak
 in the audio column's header, red with "CLIPS" past 1 - then turn `master` down. (It was
 normalised to a 0.9 peak; scanning and scaling the 6 M rendered samples cost 25 bytes.)
-Render time: ~3 s.
+The release only builds the graph before "cliquez" and plays it live (the pad's table,
+one `Math.sin` per sample, is ~0.65 s of that); start-up is ~4.4 s in all. The harness's
+offline render takes a few seconds.
 
 **To hear it**, press *hear audio* in the harness panel: it reloads with `?gate=1&show=1`
 and the audio sliders in the URL; click the page. Add `&testpad=1` for the test chord.
@@ -447,7 +461,7 @@ through a live hall, and the `trk*` boxes switch each track (and the reverb) on 
 while the show runs. Letting go of an audio slider re-renders just the stems it touches
 (the pad takes ~2 s, the rest a fraction of that) and swaps them in at the playback
 position; the peak shown is then re-measured. With everything on it is the release mix:
-the stems times `master` sum to it within 3e-7. The release itself renders one mix and
+the stems times `master` sum to it within 3e-7. The release builds one live graph and
 ships none of this (drips and splashes having a buffer each cost 18 bytes).
 
 The start box says what is happening: "rendering audio..." (about 10 s in the harness,
@@ -473,7 +487,7 @@ compared by ear, and replaced it. All four use one bubble function:
 
 | track | what it is | sliders |
 |---|---|---|
-| `drips` | per drip, one bubble from the population and 0-2 smaller ones as it breaks up | (level 1) |
+| `drips` | per drip, one bubble from the population (0-2 smaller ones as it broke up went on 3 Nov) | `drips` (the rate), level 1 |
 | `splashes` | per splash, a cloud of `splashN` bubbles over `splashLen`, densest at the impact | `splashGain`, `splashN`, `splashLen` |
 | `pour` | the stream as `pourBub` bubbles per second (up to ~1000/s is dripping to an intimate stream) | `pourGain`, `pourBub` |
 | `fizz` | CO2 bubbles bursting at the surface: 0.15-0.5 mm, every one heard, pitch rising as the cavity collapses (Poujol et al., "Sound of effervescence", Phys. Rev. Fluids 2021) | `fizzGain`, `fizzRate`, `fizzXi` |
@@ -495,10 +509,14 @@ it. Defaults re-levelled to the old tracks, raw on the macro shot (RMS / peak): 
 0.007, `drip2` about 0.02 / 0.5 against drips 0.051 / 0.39 - bubble drips are short ticks,
 and matching the old RMS would have put their peaks over everything. `fizz` 0.009, pad 0.063.
 
+Simplified for size on 3 Nov, judged by ear: the damping is linear in f (`0.12 f`, it was
+the paper's `0.043 f + 0.0014 f^1.5`), the pan linear, and a drip is its one bubble.
+
 #### The cork pop
 
 The show opens on the bottle being opened, with no picture for it, so the sound alone has
-to say what it is. Track `pop`, at `popT` (0.5 s), in three parts:
+to say what it is. Track `pop`, at `popT` (22.05 s, in the black of shot 3), in three
+parts:
 
 - **the crack**: a millisecond of broadband noise as the gas jet leaves the neck - at about
   twice the speed of sound (Liger-Belair et al., *Science Advances* 2019, high-speed
@@ -507,13 +525,13 @@ to say what it is. Track `pop`, at `popT` (0.5 s), in three parts:
   (it glided there from below in ~25 ms as the cork cleared it, until 3 Nov) for `popDecay`, over a thump of the gas expanding that falls like a kick
   drum from twice `popThumpF` (60 Hz) to it, for `popThumpLen` (`popThump`, 1.2: "the pop
   needs more bass");
-- **the rush**: high-passed noise fading over `hissLen` as the rest of the gas leaves
-  (`hissGain`).
+- **the rush**: noise fading over `hissLen` as the rest of the gas leaves (`hissGain`;
+  high-passed, with a fade-in, until 3 Nov).
 
 No study quantifies the pop's own sound, so these are physics-shaped starting points to
-tune by ear. Peak 0.985 (raw) with the deeper thump: the pop is the loudest moment, so it
-is what clips first if `master` or the pop go up. +90 bytes, +18 for the kick-like
-thump.
+tune by ear. The pop is the loudest moment, so it is what clips first if `master` or the
+pop go up: with `Math.random` its crack differs every run, and at `popGain` 0.45 the peak
+lands at 0.87-0.93. +90 bytes, +18 for the kick-like thump.
 
 #### Audio size pass: 9 476 -> 9 394
 
@@ -552,8 +570,9 @@ upgrade are gone; this records what was tried):
   harmonic as a band of frequencies with random phases and renders one long table that
   loops - "the phases are random, and this is the key". Lite: no FFT; 24 harmonics, each
   a band of 12 sines `padBw` cents wide (as wide in pitch at every harmonic), every
-  sine a whole number of cycles per 2.7 s loop, summed with a rotating phasor. Each note
-  plays the table twice, from different points of the loop, panned apart.
+  sine a whole number of cycles per 2.7 s loop, one `Math.sin` call per sample (a rotating
+  phasor until 3 Nov: 30 bytes more, the same sound). Each note plays the table twice, from
+  different points of the loop, panned apart.
 
 Bytes, measured by building each variant: the upgrade +136; PADsynth *instead of* the saw
 pad +111 - so the one that sounded better was also the cheaper. Shipped: 9 476, the
@@ -643,7 +662,13 @@ CPU and disk don't matter here — one draw call, everything GPU-side.
 
 The compo runs at **1920×1080**, confirmed with the organisers.
 
-### Where it stands
+### Where it stood on 24 Oct
+
+> A snapshot from before the timeline existed, at 1920×1080 with 65 536 photons and the
+> table puddle still in. The release now renders 1600×900 with 2.36 M photons, and the
+> shots are the timeline's: for the current frame time see *Profiling a whole run* and
+> *Shot 8's pour and the frame budget*. The camera presets below are the harness's (the
+> `bottl` one is gone).
 
 RTX 4070, 1920×1080, everything on, at the **heavy natural state**: `det=1`, run to step
 3120 (t = 52 s, tower overflowing), `simSpeed` 0, then each camera preset in turn. Median
@@ -775,7 +800,7 @@ speed: 2.3 frames/s, against 13 with the socket on the light first shot.
 ### What each lever actually buys
 
 > Historical: measured before the profiler work, at fill 88, so the absolute numbers are
-> superseded by *Where it stands* above. What it shows about which knobs matter still holds.
+> superseded by *Where it stood on 24 Oct* above. What it shows about which knobs matter still holds.
 
 Measured on `tier2` at fill 88, the worst shot. Baseline render 22.61, total 26.48:
 
@@ -966,10 +991,10 @@ box, the profiler records which component gave the minimum and so set the step:
 steps are inside a medium. Bulk, tower and spray are limited by geometry that is really
 there. The puddle was not: its bound used the global depth cap, a slab 20 mm deep over every
 wet block, which rays crossed in 0.8 mm steps over a film usually a millimetre thick.
-`puddleCoarse` now stores the tallest rendered film within one block of each block
-(including the smoothing skirt), and `puddleSDF` bounds by that locally and by the global
+`puddleCoarse` then stored the tallest rendered film within one block of each block
+(including the smoothing skirt), and `puddleSDF` bounded by that locally and by the global
 cap a block away. Puddle-limited steps fell 5.1 M → 1.4 M at three times the length; all
-steps −5%, **render 19.15 → 18.02**.
+steps −5%, **render 19.15 → 18.02**. (The puddle itself was cut on 25 Oct, for size.)
 
 Two candidates that failed. **Stacked cylinders for the coupe** (bowl, stem, foot instead of
 one rim-wide cylinder over the full height) were a valid bound and cut exact coupe
@@ -984,7 +1009,7 @@ into different pixels. The stacked cylinders changed 6.5% of pixels, all on drop
 the glass untouched. The puddle bound changed 0.04%, specks on the low drops. A pixel diff
 judges such changes only together with *where* the pixels are (`__diff` shows that).
 
-Heavy tier2 now: **render ~18.0, total ~22.1** (was 24.8 / 29.9 when this profile started).
+Heavy tier2 at the end of this work (24 Oct): **render ~18.0, total ~22.1** (was 24.8 / 29.9 when this profile started).
 Still ~3 ms over the 19 ms target.
 
 ### WebGPU limits: none requested
@@ -1008,26 +1033,32 @@ The dev harness requests `timestamp-query` when the adapter has it, for the per-
 
 Panel, top right. Every control has a tooltip; every one is also a URL parameter.
 
-**View** — `beauty · steps · normals · medium · liquid · glass · tir · bottle`.
+**View** — `beauty · steps · normals · medium · liquid · glass · tir`.
 The isolation views are the debugging workhorses: `liquid`/`glass` show one field alone,
-`tir` reddens total internal reflection,
-`bottle` shows the magnum alone, flat-lit, for shape comparison.
+`tir` reddens total internal reflection. (The `bottle` view went on 2 Nov, for size.)
 
-**Camera presets** — `tower · pour · macro · tier2 · top · bottl`.
+**Camera presets** — `tower · pour · macro · tier2 · top`.
 
-**Sliders/toggles** — `spin, angle, dist, camY, tgtY, lightAz, lightEl, gridEnv,
-drops, bubbles, waves, reflect, autofill, fill, pourRate, dropVol, dropRad, foam,
-bottle, botTilt, pourWander, wanderSpd, shutter, bounces, simSpeed, expo, cgain`.
+**Sliders/toggles** (`SPEC`, in panel order) — the timeline and camera (`show, showT, spin,
+angle, dist, camY, tgtY`), light and room (`lightAz, lightEl, tableY, envAmt, bkLife,
+gridEnv, strat`), shape (`smooth, stemK, footK`), the simulation (`drops, bubbles, waves,
+reflect, autofill, fill, pourRate, botShare, dropVol, dropRad, foam, glug, glugHz, bottle,
+botTilt, pourWander, wanderSpd`), the look (`shutter, bounces, speed, simSpeed, expo,
+cgain`) and the audio column (the pad, the reverbs, the bubble model, the cork, the `trk*`
+track boxes).
 
-**Buttons** — `ff +20s` (jump the sim forward), `restart`, `pause` (also spacebar).
+**Buttons** — `ff +20s` (jump the sim forward), `restart` (reload), `rewind` (back to t = 0
+without reloading), `pause` (also spacebar).
 
 **Timeline** — `show` runs it, `showT` scrubs it. `?show=1` and `?showt=<seconds>` do the same
 from a URL, and `&pause=1` with them lands on an exact frame for judging a shot.
 
 Useful URL params beyond the above: `w`, `h` (explicit resolution, letterboxed), `t` (fixed
-time), `still`, `warm`, `det`, `steps`, `npart`, `nphoton`, `parts`, `selftest`, and `gate`
-(the release's start screen and audio clock) with `tick` (a click every half second, to
-check sync).
+time), `still`, `warm`, `det`, `steps`, `npart`, `nphoton`, `parts`, `selftest`, `edit` and
+`edtest` (the timeline editor and its tests), `text` (every word held), `testpad`,
+`export` (for `dev/export.py`), and `gate` (the release's start screen and audio clock)
+with `tick` (a click every half second, to check sync) and `fs` (fullscreen at 1600×900,
+as the release).
 
 `gridEnv` replaces the environment with a lat-long UV test grid (green horizon, magenta
 poles, orange dot at the key light) — it makes it obvious which direction a reflection or
@@ -1039,7 +1070,7 @@ refraction is sampling.
 
 `window.__probe()` returns JSON: per-pass GPU times (`timestamp-query`), fps, adapter info,
 shader compile and validation errors, glass levels in mm, particle counts and bottle-stream
-extent, and the clock's `step`, `drift` and `resyncs`.
+extent, and the clock's `step`, `drift` and `frameSteps` (show steps this frame).
 Drift should stay under one step (16.7 ms); the HUD shows it live. `?selftest=1` runs assertions and logs
 PASS/FAIL.
 
@@ -1066,29 +1097,25 @@ from the release.
 
 ## Roadmap
 
-Done: geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, bottle,
-lighting, a first-draft timeline, the build and packer, the dropper, the click-to-start
-screen with fullscreen and the audio clock, the sound engine and the cork pop.
-`intro.cmd` is 9 379 bytes.
+Done (3 Nov 2026): geometry, hybrid sim, dielectrics, caustics, bubbles, mousse, bottle,
+lighting, the timeline of eight shots, the lettering, the build and packer with Roadroller,
+the dropper, the start screen ("patientez" / "cliquez") with fullscreen and the audio
+clock, the sound engine, the cork pop and the score. `release/ays-brut.cmd` is 8 192
+bytes, exactly the budget.
 
-Next:
-1. **Size** — 1 187 bytes over, before the score and any text. The puddle is cut (-362);
-   next candidates in *Feature cuts, measured*, and a packer search on the new shader.
-   Features have to be cut or simplified (*Feature cuts, measured*), or the sound made
-   smaller.
-2. **The score** — must be **human-composed**; the party bans prompt-based music. Chords
-   go into `SCORE` (*Sound*); each chord costs a few bytes.
-3. **Text**, if any (credits, title), from the same budget.
-4. **tier2** — ~22 ms against ~19 in its heaviest state (*Where it stands*). Options: cut
-   there, don't hold on it while the spill is densest, or take `bounces` down on that shot.
-5. **Render size** — the release renders at the screen's size. At the compo's 1920×1080
-   that is the budget; on a larger monitor it is proportionally slower.
-6. Timeline polish against the finished music.
-7. Late, when every byte counts: design-constant rounding (~-40 to -90), a final packer
-   search, a fresh Roadroller search (`python build/roadroller.py`). Roadroller itself is
-   in the build since 31 Oct (-792).
+Open:
+1. **Frame time** — the release renders 1600×900 stretched to the screen (the time that
+   frees went into photons); shot 8, the heaviest, sits on the ~19 ms line on the dev
+   RTX 4070 (*Shot 8's pour and the frame budget*), which stands for 16.6 on the compo's
+   5070. Only a run on the compo machine settles it.
+2. **To buy back when bytes allow** — the foam/wall cut (commit d3f182d, +56) put a
+   "funnel" in the pour shot that only shows in motion (CLAUDE.md, *Paid for*). Every byte
+   for it has to come from somewhere else first.
+3. **Size reserves** if something must give: the photons' jittered grid (-8), caustics
+   without the blur pass (branch `reserve/caustics-4tap`, -7) - both visible (CLAUDE.md).
+4. **The NFO** — with the generative-AI disclosure the party requires (*Disclosure*).
 
-Not planned for now: bloom, fluid inside the bottle (it is an empty shell).
+Not planned: bloom, fluid inside the bottle (it is solid glass).
 
 Open questions for the organisers: whether a browser/WebGPU entry is allowed, and the
 submission deadline.
@@ -1126,8 +1153,13 @@ python build/build.py
 ```
 
 If `python` is not found or opens the Microsoft Store, use the launcher instead: `py -m pip
-install brotli` and `py build/build.py`. On macOS or Linux it is the same with `python3`;
-only the dropper itself is Windows-only.
+install brotli` and `py build/build.py`. The build is Windows-only since 2 Nov: Closure
+Compiler and esbuild are vendored as native Windows x64 executables. (What it builds,
+`ays-brut.uncompressed.html`, runs anywhere.)
+
+To deploy, `python build/deploy.py`: it builds, stops if `intro.cmd` is over 8 192 bytes,
+and copies `build/intro.cmd` to `release/ays-brut.cmd` and `build/intro-compat.html` to
+`release/ays-brut.uncompressed.html`. Commit `release/` afterwards.
 
 The output ends with `intro.cmd  <bytes>  UNDER`, and for a given commit that number is the
 same on every machine. If something is missing, the build stops with `BUILD FAILED` and
@@ -1146,6 +1178,7 @@ the debug panel used to supply, minifies, packs, and writes:
 | file | what |
 |---|---|
 | `build/intro.cmd` | **the deliverable**: the dropper header plus the brotli payload - the page, its script packed by Roadroller (`build/roadroller.py`, settings in `build/roadroller.json`) |
+| `build/intro-compat.html` | the compatible version: the assembled page before Roadroller, plain (~23 KB) - no dropper, no Roadroller decoder; any OS, any WebGPU browser. Deployed as `release/ays-brut.uncompressed.html` |
 | `build/intro.html` | a local test copy that inflates itself (base64 + deflate), ~50% bigger - not the entry |
 | `build/min.wgsl`, `build/min.js` | what ships, as packed |
 | `build/min.pretty.wgsl`, `build/min.pretty.js` | the same, re-indented to read |
@@ -1222,16 +1255,17 @@ The pre-pass is required (vendored, see *Build*); it used to be optional, which 
 machine without Node built an intro 287 bytes heavier without saying so. Two notes for
 anyone repeating this: wgslender's validator rejects our `atomicAdd` calls as `@must_use`
 where Dawn accepts them, so `validate` reports errors on a shader that compiles and runs;
-and all 17 entry points survive its tree-shaking, which is worth re-checking whenever a
-compute pass is added.
+and all 9 entry points (7 compute, `vs`, `fs`) survive its tree-shaking, which is worth
+re-checking whenever a compute pass is added.
 
 [washi](https://github.com/datatrash/washi) was the other candidate and is not usable here:
 no prebuilt releases, cargo required, and its own README recommends wgslender instead.
 
 ### Folding what the release never varies
 
-When this was written, 29 of the 47 uniform slots were constants in the release (the struct
-has since been cut to its 9 live fields, the rest dev-only): the debug toggles, `view`,
+When this was written, 29 of the 47 uniform slots were constants in the release (the
+release's struct is now its 15 live fields, shipped as a nameless `array<vec4f,6>`; the
+rest are dev-only): the debug toggles, `view`,
 bounce and step counts, light angles, bottle pose. The build inlines them (39 references)
 as the shortest literal that rounds to the same f32 the JS would have written, then
 evaluates the comparisons that leaves behind — `if (0. > 0.5)` and friends — and deletes
@@ -1295,7 +1329,7 @@ fifth. Across cores it reaches 730 evaluations/s against 48/s on one core — 15
 brotli q11's optimal parsing saturates a core on its own. Faster search means fewer or
 smarter evaluations, not faster ones.
 
-### Where it lands today (no music, first draft timeline)
+### Where it lands today
 
 **`intro.cmd` is 8 192 bytes (3 Nov 2026), exactly at the limit**, lettering and score in
 (the start screen in French, "patientez" and "cliquez", +1; the score +127, the cutoff's sweep +26, the soundtrack played live instead of rendered -23); the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57), a simpler coupe (-105), the traced reflection dropped (-87), the bottle without heel bevel and neck taper (-43), one smoothed normal for all liquid (-56), the bottle held from 180 degrees (-32), its helpers inlined (-29), more single-call functions inlined (-51), `botShare` global, the pool halved and the integer consts untyped (-6), two uniforms gone (-15): the standing bottle is switched by the raised table (only shot 2 raises it past 0.4), and the shader takes the pour rate and works out the emission cadence itself; 62 exact rewrites across the shader (-160, see CLAUDE.md *Minifying*); a fresh packer search on them (-19; the Roadroller search found nothing better than its old settings); fs ending in one expression and the particle writes merged into one (-4 after another packer search); the bottle's wander computed in the shader, five uniforms fewer (-10); the mousse made from the wave impulse and drops absorbed at the bowl wall instead of sliding down it (-56, no visible difference); terser's `const` written as `let` (-11); Google Closure Compiler and esbuild in front of terser (-49); 23 exact rewrites in the march and the narrow band (-32, the band now float bits).
@@ -1316,7 +1350,7 @@ photon noise: 65 536 photons a frame put ~5 in each blurred (5x5 texel) cell, an
 236/256 fade averages ~25 frames. `strat` picks the emitter pattern - 0 random, 1 R2
 low-discrepancy shifted per frame (`stratJit` breaks the faint diagonal stripes plain R2
 beats into the texel grid), 2 a jittered grid, one random photon per cell (default; fewest
-bytes, no stripes). Same photon count, same paths, same cost (photon pass 1.47 vs 1.48 ms at
+bytes, no stripes; since then `strat` is 0 random or 1 the grid, and R2 is gone). Same photon count, same paths, same cost (photon pass 1.47 vs 1.48 ms at
 1920x1080, tower at step 2400). Grain on the lit table in the shot-1 framing, mean
 |5x5 box - 25x25 box| / mean, 5 grabs: light at 45.6° random 1.32% -> grid 0.95% (41x41: 2.01
 -> 1.22); light at 20° 1.70 -> 1.36, because the photons then land ~6 texels apart along the
@@ -1367,19 +1401,23 @@ That was 225 to spare before the click-to-start screen, which took 116 of them.
 
 #### Start screen and music hookup: 7 967 -> 8 083
 
-The release opens on the word "click", unstyled (black on white, top left: centred
-white-on-black cost 55 bytes), which appears only once everything is loaded
-(device, pipelines, the song rendered). A click goes fullscreen on the canvas, sizes it once
-from `screen.width/height` (no resize handling in the release), resumes the audio, schedules
-playback 0.1 s ahead and starts the render loop. From then the show clock is the AUDIO
-clock: as many whole sim steps as the music has played, so the picture follows the music.
+As it is now (3 Nov): the page opens on the word "patientez" - its first text, there
+from the first moment while the script decodes, compiles and builds the soundtrack - and
+says "cliquez" once everything is ready (device, pipelines, the audio graph). Unstyled but
+for its size (5em, +7 bytes): black on white, top left; centred white-on-black cost 55
+bytes. The canvas stays `hidden` until the click (Firefox draws an unpainted WebGPU canvas
+black over the text). A click shows it at a fixed 1600×900, stretched to the screen, puts
+the BODY in fullscreen (with the canvas, the lettering's overlay beside it vanished),
+resumes the suspended `AudioContext` and starts the render loop. From then the show clock
+is the AUDIO clock: as many sim steps as the music has played, so the picture follows the
+music.
 
-The music hookup is `song(L, R, sr)` in the harness: it fills the stereo buffers once,
-before the click, so a slow player costs load time and never a hitch. It is empty - silence
-of the show's length - until the user's player goes in; the party bans generated music.
-In the harness the same path runs with `?gate=1`; `?tick=1` adds a click every half second
-to check sync. Measured: show time advances 1.00 s per second of audio, drift one step.
-If fullscreen is refused, the 16:9 canvas is stretched to the window.
+The music hookup is `song(o)`: it builds the whole graph on the release's context,
+suspended at 0, before the click, so the score plays live and nothing is rendered ahead
+(*Sound*). It started out as `song(L, R, sr)` filling silent stereo buffers, then rendered
+offline before the click until 3 Nov. In the harness the same path runs with `?gate=1`
+(`&fs=1` for the fullscreen); `?tick=1` adds a click every half second to check sync.
+Measured: show time advances 1.00 s per second of audio, drift one step.
 
 #### Browsers (24 Oct 2026)
 
@@ -1392,8 +1430,9 @@ picture; a frozen dev-harness frame matched in Firefox and Chrome. Speed is the 
 often as behind.
 
 Two things it showed:
-- **The release renders at the SCREEN's size** (`screen.width/height`). On a 1440p monitor
-  that is 1.78x the pixels the 1080p budget is set for, so it looks slow on any browser.
+- **The release rendered at the SCREEN's size** (`screen.width/height`). On a 1440p monitor
+  that is 1.78x the pixels the 1080p budget is set for, so it looked slow on any browser.
+  It renders a fixed 1600×900 now, stretched to the screen.
 - **Chromium compiles pipelines lazily** - fixed, +5 bytes. "click" appeared ~0.5 s after
   load, but on a cold shader cache (a fresh profile, as on the compo machine) the first
   frame then waited 3-7 s while the audio clock already ran, so the picture started that far
@@ -1699,7 +1738,8 @@ build tools in `build/vendor` are third-party code and keep their licences (belo
 - **The pad** - PADsynth, by Nasca Octavian Paul (ZynAddSubFX): harmonics as bands of
   frequencies with random phases in one looped table. A lite version without the FFT.
 - **Random numbers** - S. K. Park, K. W. Miller, "Random Number Generators: Good Ones Are
-  Hard to Find", *Communications of the ACM* 31(10), 1988 (the minimal standard, 16807).
+  Hard to Find", *Communications of the ACM* 31(10), 1988 (the minimal standard, 16807):
+  the music sketchpad's seeded sequences. The release draws from `Math.random`.
 - Champagne acoustics background (not implemented directly): K. Spratt, K. Lee,
   P. Wilson, "Champagne acoustics", *Physics Today* 2018.
 
@@ -1709,6 +1749,10 @@ build tools in `build/vendor` are third-party code and keep their licences (belo
 - **terser** (BSD-2-Clause) - JS minification, with its dependencies acorn, commander,
   source-map-support, buffer-from, @jridgewell/* (MIT) and source-map (BSD-3-Clause).
   Vendored; licences in `build/vendor/node_modules`.
+- **Closure Compiler** (Google, Apache-2.0), v20261015 native Windows build - JS
+  optimisation in SIMPLE mode, before esbuild and terser. Vendored.
+- **esbuild** (Evan Wallace, MIT), 0.28.2 native Windows build - between Closure and
+  terser. Vendored.
 - **Brotli** (Google, MIT) - via Python's `brotli` package.
 - **Late-acceptance hill climbing** (the packer search) - E. K. Burke, Y. Bykov, "The Late
   Acceptance Hill-Climbing Heuristic", *European Journal of Operational Research* 258(1),
