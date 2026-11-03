@@ -229,74 +229,189 @@ async function render(score, sr, passes, minLen = 0) {
   return { b, L, pk };
 }
 
-// ── playback ──
-// Without a video: the score, looped or once. With one (the intro exported by
-// dev/export.py, served from build/ by dev/serve.py): the score is show time - the same
-// seconds SCORE uses in the intro - rendered once over the whole video and started with it
-// at the playhead. The audio is the clock; the video is nudged back whenever it drifts.
-let ac = null, src = null, playing = null, renderId = 0, pos = 0, cache = null;
+// ── playback: live, nothing rendered ahead ──
+// The intro renders its soundtrack offline so its start cannot stutter; a sketchpad has no
+// need to. The same graph runs live: the hall, the lowpass and the master stay up for the
+// whole session, and each start, seek or edit makes a new GENERATION of voices - the notes
+// scheduled a quarter second ahead of the playhead, the ones already sounding started in
+// mid-note (the right loop phase, the right point on the envelope). An edit fades the old
+// generation out over a few ms while the new one picks up at the same phase, and the hall
+// rings on. Without a video the score plays once or loops; with one (the intro exported by
+// dev/export.py, served from build/ by dev/serve.py) the score is show time - the seconds
+// SCORE uses in the intro. The audio is the clock; the video is nudged whenever it drifts.
+let ac = null, out = null, lp = null, wet = null, cv = null, meter = null;
+let playing = null, gen = null, pos = 0, startId = 0, peak = 0, irKey = '';
 const vid = $('vid');
 let haveVideo = false;
 const videoOn = () => haveVideo && $('usevid').checked;
+const LEAD = 0.03;                             // the first note this far ahead
+let AHEAD = 0.25;                              // voices scheduled this far ahead
+
+function graph(ctx) {                          // ctx: an offline context, for __pickupTest
+  if (ac && !ctx) return;
+  ac = ctx || new AudioContext(); irKey = ''; tableBufKey = '';
+  const gain = (v, to) => { const g = ac.createGain(); g.gain.value = v; g.connect(to); return g; };
+  // as in song(): voices -> lowpass -> pad bus -> master, and pad bus -> mix -> hall -> master
+  out = gain(ui.master, ac.destination);
+  const bus = gain(1, out);
+  lp = ac.createBiquadFilter(); lp.frequency.value = ui.padCut; lp.connect(bus);
+  cv = ac.createConvolver(); cv.connect(out);
+  wet = gain(ui.verbMix, cv); bus.connect(wet);
+  meter = ac.createAnalyser(); meter.fftSize = 2048; out.connect(meter);
+}
+// the hall's impulse: two channels of noise decaying to -60 dB, as in song()
+function hall() {
+  const key = [ac.sampleRate, ui.verbLen].join();
+  if (key === irKey) return;
+  irKey = key;
+  const rnd = rng(7), ir = ac.createBuffer(2, Math.ceil(ac.sampleRate * ui.verbLen), ac.sampleRate);
+  for (let c = 0; c < 2; c++) {
+    const d = ir.getChannelData(c);
+    for (let i = 0; i < d.length; i++) d[i] = (rnd() * 2 - 1) * Math.exp(-7 * i / d.length);
+  }
+  cv.buffer = ir;
+}
+// The voices of a score, with the random numbers drawn in the intro's order (the table
+// first, then per note its stagger and one loop offset for each of its two copies).
+let tableBuf = null, tableBufKey = '';
+function plan(score) {
+  const sr = ac.sampleRate, r3 = rng(5), pd = padTable(sr, r3);
+  if (tableBufKey !== tableKey) {
+    tableBuf = ac.createBuffer(1, PL, sr); tableBuf.getChannelData(0).set(pd); tableBufKey = tableKey;
+  }
+  const L = Math.max(...score.map(([t, len]) => t + len)), v = [];
+  for (const [t, len, ...notes] of score) for (const m of notes) {
+    const t0 = t + r3() * ui.padStagger;
+    for (const pn of [-0.6, 0.6]) v.push({ t0, len, m, pn, off: r3() * PL / sr });
+  }
+  v.sort((a, b) => a.t0 - b.t0);
+  return { v, L, end: Math.max(...v.map(x => x.t0 + x.len)) + ui.padRel * 2 };
+}
+// A new generation of voices from song time p, replacing the playing one.
+function generation(p, score) {
+  const old = gen, c0 = ac.currentTime + LEAD;
+  const bus = ac.createGain(); bus.connect(lp);
+  if (old) {                                   // fade the old voices out, then let them go
+    old.bus.gain.setTargetAtTime(0, c0, 0.005);
+    old.dead = true; clearInterval(old.timer);
+    setTimeout(() => { for (const s of old.srcs) { try { s.stop(); } catch (e) {} } old.bus.disconnect(); }, 200);
+  }
+  const g = gen = { ...plan(score), bus, c0, p0: p, srcs: [], next: 0, pass: 0, dead: false };
+  // in a loop the score repeats every L; p is inside the first pass
+  const loop = playing && playing.loop;
+  for (const v of g.v) if (v.t0 < p && v.t0 + v.len + ui.padRel * 2 > p) voice(g, v, v.t0);
+  while (g.next < g.v.length && g.v[g.next].t0 < p) g.next++;
+  const tick = () => {
+    if (g.dead) return;
+    const horizon = ac.currentTime + AHEAD;
+    for (;;) {
+      if (g.next >= g.v.length) {
+        if (!loop) break;
+        g.pass++; g.next = 0;
+      }
+      const v = g.v[g.next], T = g.pass * g.L + v.t0;
+      if (g.c0 + (T - g.p0) > horizon) break;
+      voice(g, v, T); g.next++;
+    }
+  };
+  tick(); g.timer = setInterval(tick, 50);
+}
+// One voice at song time T (its t0 in this pass) - in mid-note if T is already past.
+function voice(g, v, T) {
+  const tA = ui.padAtk / 3, tR = ui.padRel / 3, G = ui.padGain, rate = 2 ** ((v.m - 57) / 12);
+  const c = g.c0 + (T - g.p0);                 // its start on the audio clock
+  const s = ac.createBufferSource(), pan = ac.createStereoPanner(), e = ac.createGain();
+  s.buffer = tableBuf; s.loop = true; s.playbackRate.value = rate;   // the table is at MIDI 57
+  pan.pan.value = v.pn; pan.connect(g.bus); e.connect(pan); s.connect(e);
+  e.gain.value = 0;
+  if (c >= g.c0) {                             // ahead: as song() schedules it
+    e.gain.setTargetAtTime(G, c, tA);
+    e.gain.setTargetAtTime(0, c + v.len, tR);
+    s.start(c, v.off);
+  } else {                                     // already sounding: pick it up where it is
+    const el = g.c0 - c;
+    const att = x => G * (1 - Math.exp(-x / tA));
+    if (el < v.len) {
+      e.gain.setValueAtTime(att(el), g.c0);
+      e.gain.setTargetAtTime(G, g.c0, tA);
+      e.gain.setTargetAtTime(0, c + v.len, tR);
+    } else {
+      e.gain.setValueAtTime(att(v.len) * Math.exp(-(el - v.len) / tR), g.c0);
+      e.gain.setTargetAtTime(0, g.c0, tR);
+    }
+    s.start(g.c0, (v.off + el * rate) % (PL / ac.sampleRate));
+  }
+  s.stop(c + v.len + ui.padRel * 2);
+  g.srcs.push(s);
+}
 async function play() {
   let score;
   try { score = parseScore(); $err.textContent = ''; }
   catch (e) { $err.textContent = e.message; return; }
   if (!score.length) { $err.textContent = 'the score is empty'; return; }
-  ac = ac || new AudioContext();
+  graph(); hall();
   await ac.resume();
-  const id = ++renderId;
-  const sync = videoOn(), loop = !sync && $('loop').checked, len = sync ? vid.duration : 0;
-  // a seek or a replay of the same score and sound reuses the render
-  const key = JSON.stringify([score, SPEC.map(([k]) => ui[k]), loop, len, ac.sampleRate]);
-  let r = cache && cache.key === key ? cache : null;
-  if (!r) {
-    $status.textContent = 'rendering...'; $status.className = '';
-    const t0 = performance.now();
-    r = await render(score, ac.sampleRate, loop ? 2 : 1, len);
-    r.key = key; r.ms = Math.round(performance.now() - t0);
-    cache = r;
-  }
-  if (id !== renderId) return;                 // a newer Play overtook this one
-  stop(false);
-  const s = src = ac.createBufferSource();
-  s.buffer = r.b; s.connect(ac.destination);
-  let off = 0;
-  if (loop) { s.loop = true; s.loopStart = r.L; s.loopEnd = 2 * r.L; }
+  const id = ++startId;
+  const sync = videoOn(), loop = !sync && $('loop').checked;
+  let p = sync || playing ? now() : 0;
   if (sync) {
     vid.currentTime = Math.min(pos, vid.duration - 0.05);
     try { await vid.play(); } catch (e) {}
-    if (id !== renderId) return;
-    off = vid.currentTime;                     // start the audio where the video really is
+    if (id !== startId) return;
+    p = vid.currentTime;                       // start where the video really is
   }
-  s.start(0, off);
-  playing = { start: ac.currentTime - off, L: r.L, loop, sync, src: s };
-  // Only this source's own end may stop playback. Stopping the previous one (above) fires
-  // its onended a moment later, and checking the CURRENT source there stopped the new one:
-  // a Play during playback rendered and then went silent.
-  s.onended = () => { if (playing && playing.src === s) stop(); };
+  if (loop && gen) p = p % gen.L;
+  playing = { loop, sync };
+  peak = 0;
+  generation(p, score);
   $('play').classList.add('on');
-  $status.textContent = 'peak ' + r.pk.toFixed(2) + (r.pk > 1 ? '  CLIPS: lower master' : '') +
-                        '   rendered in ' + r.ms + ' ms';
-  $status.className = r.pk > 1 ? 'clip' : '';
 }
-// the time being heard: the audio clock less the output latency
+// Song time being heard: the audio clock less the output latency.
 function now() {
-  if (!playing) return pos;
-  const t = ac.currentTime - (ac.outputLatency || 0) - playing.start;
-  return playing.loop && t > playing.L ? (t - playing.L) % playing.L : Math.max(0, t);
+  if (!playing || !gen) return pos;
+  const t = gen.p0 + (ac.currentTime - (ac.outputLatency || 0) - gen.c0);
+  return playing.loop ? Math.max(0, t) % gen.L : Math.max(0, t);
 }
-function stop(clear = true) {
-  if (clear && playing && playing.sync) pos = now();   // a stop leaves the playhead there
-  // unhook first: a stopped source fires onended later, and play() may still be waiting on
-  // the video then, with the old source still current - it stopped the new playback
-  if (src) { src.onended = null; try { src.stop(); } catch (e) {} src = null; }
-  if (clear) { playing = null; vid.pause(); $('play').classList.remove('on'); }
+function stop() {
+  if (!playing) return;
+  pos = playing.sync ? now() : 0;              // with a video, a stop leaves the playhead there
+  startId++;
+  if (gen) {
+    const g = gen; gen = null;
+    g.dead = true; clearInterval(g.timer);
+    g.bus.gain.setTargetAtTime(0, ac.currentTime, 0.02);   // the hall rings out on its own
+    setTimeout(() => { for (const s of g.srcs) { try { s.stop(); } catch (e) {} } g.bus.disconnect(); }, 300);
+  }
+  playing = null; vid.pause(); $('play').classList.remove('on');
+}
+// An edit or a seek while playing: a new generation from where the playhead is.
+function refresh(at) {
+  if (!playing) return;
+  let score;
+  try { score = parseScore(); } catch (e) { return; }  // the error shows under the score
+  if (!score.length) return;
+  hall();
+  const p = at !== undefined ? at : now() + (ac.outputLatency || 0) + LEAD;
+  generation(playing.loop ? p % Math.max(...score.map(([t, len]) => t + len)) : p, score);
 }
 function seek(t) {
   pos = Math.max(0, Math.min(t, vid.duration || t));
   if (videoOn()) vid.currentTime = pos;
-  if (playing && playing.sync) play();         // cached: restarts at once
+  if (playing && playing.sync) refresh(pos);
+}
+// the end of a score played once, without a video
+setInterval(() => {
+  if (playing && !playing.loop && !playing.sync && gen && now() > gen.end + ui.verbLen) stop();
+}, 250);
+vid.onended = () => { if (playing && playing.sync) stop(); };
+// the level: the highest sample heard since Play, from a meter on the master
+const mbuf = new Float32Array(2048);
+function level() {
+  if (!playing || !meter) return;
+  meter.getFloatTimeDomainData(mbuf);
+  for (const x of mbuf) peak = Math.max(peak, Math.abs(x));
+  $status.textContent = 'live   peak ' + peak.toFixed(2) + (peak > 1 ? '  CLIPS: lower master' : '');
+  $status.className = peak > 1 ? 'clip' : '';
 }
 function useVideo(url, name) {
   haveVideo = false;
@@ -330,6 +445,7 @@ function drawRoll() {
   // keep the video on the audio clock: a hitch in either moves them apart
   if (playing && playing.sync && !vid.seeking && Math.abs(vid.currentTime - now()) > 0.08) vid.currentTime = now();
   if (playing && playing.sync && vid.paused && now() < vid.duration) vid.play().catch(() => {});
+  level();
   const t = now();
   const shot = SHOTS.find(([, a, b]) => t >= a && t < b);
   $('time').textContent = t.toFixed(2) + ' s' + (shot ? '  ' + shot[0] : '');
@@ -423,20 +539,37 @@ function buildUI() {
       const inp = row.querySelector('input'), out = row.querySelector('output');
       const show = () => { out.textContent = (+ui[k]).toFixed(dec); row.classList.toggle('changed', ui[k] !== def); };
       inp.value = ui[k]; show();
-      inp.oninput = () => { ui[k] = +inp.value; show(); save(); live(); };
-      inp.onchange = () => { if (playing && spec === SPEC) play(); };   // let go of a pad slider: hear it
+      inp.oninput = () => { ui[k] = +inp.value; show(); save(); live(k); };
       box.append(row);
     }
   };
-  rows('Pad (as in the intro)', SPEC, () => {});
+  rows('Pad (as in the intro)', SPEC, liveParam);
   rows('Video', VSPEC, () => { vid.volume = ui.vidVol; });
+}
+// A slider, while playing: the level, the cutoff and the hall's mix go straight to the graph,
+// the hall's length swaps its impulse, the rest make a new generation of voices.
+let soon = 0;
+const later = f => { clearTimeout(soon); soon = setTimeout(f, 150); };
+function liveParam(k) {
+  if (!ac) return;
+  const t = ac.currentTime;
+  if (k === 'master') out.gain.setTargetAtTime(ui.master, t, 0.01);
+  else if (k === 'padCut') lp.frequency.setTargetAtTime(ui.padCut, t, 0.01);
+  else if (k === 'verbMix') wet.gain.setTargetAtTime(ui.verbMix, t, 0.01);
+  else if (k === 'verbLen') later(hall);
+  else later(() => refresh());
 }
 // (the first version stored no default: its unedited score is the one with this line)
 const unedited = !stored.score || stored.score === stored.def ||
                  (!stored.def && stored.score.includes('Plain root-position triads for now'));
 $score.value = unedited ? DEFAULT_SCORE : stored.score;
 buildUI();
-$score.oninput = () => { save(); try { parseScore(); $err.textContent = ''; } catch (e) { $err.textContent = e.message; } };
+// an edit is heard as soon as the score parses again: a new generation from the playhead
+$score.oninput = () => {
+  save();
+  try { parseScore(); $err.textContent = ''; } catch (e) { $err.textContent = e.message; return; }
+  later(() => refresh());
+};
 $('play').onclick = play;
 $('stop').onclick = () => stop();
 $('loop').onchange = () => { if (playing) play(); };
@@ -452,7 +585,10 @@ $('defscore').onclick = () => {
   $score.value = DEFAULT_SCORE; $score.oninput();
   if (playing) play();
 };
-$('reset').onclick = () => { stored.ui = null; buildUI(); save(); if (playing) play(); };
+$('reset').onclick = () => {
+  stored.ui = null; buildUI(); save();
+  for (const k of ['master', 'padCut', 'verbMix', 'verbLen', 'padGain']) liveParam(k);
+};
 $('copy').onclick = async () => {
   try {
     const s = parseScore().map(e => '    [' + e.join(', ') + '],').join('\n');
@@ -466,6 +602,33 @@ addEventListener('keydown', e => {
 drawRoll();
 // for checks from the harness tooling: render without playing, report the peak
 window.__chord = chord;
+// The offline render above is no longer how the page plays; it stays as the reference the
+// live graph is checked against (the same score, rendered whole as song() would).
+window.__live = () => ({ playing: !!playing, now: now(), gen: gen && { p0: gen.p0, voices: gen.v.length, srcs: gen.srcs.length, pass: gen.pass }, peak });
+// The live scheduling, run on an offline context from song time p, against the reference:
+// the largest sample difference after the first verbLen seconds (before that the hall's
+// tail from ahead of p is missing, as it is live). Must not run while playing.
+window.__pickupTest = async p => {
+  if (playing) return 'stop first';
+  const score = parseScore(), sr = 48000;
+  const ref = (await render(score, sr, 1)).b;
+  const keep = { ac, out, lp, wet, cv, meter, gen };
+  const o = new OfflineAudioContext(2, ref.length, sr);
+  graph(o); hall(); AHEAD = 1e9; playing = { loop: false, sync: false };
+  generation(p, score);
+  const g = gen; g.dead = true; clearInterval(g.timer);
+  const b = await o.startRendering();
+  ({ ac, out, lp, wet, cv, meter, gen } = keep); playing = null; AHEAD = 0.25; irKey = ''; tableBufKey = '';
+  const shift = Math.round((p - LEAD) * sr), from = Math.ceil((LEAD + ui.verbLen + 0.1) * sr);
+  let mx = 0, rpk = 0;
+  for (let c = 0; c < 2; c++) {
+    const x = b.getChannelData(c), y = ref.getChannelData(c);
+    for (let i = from; i + shift < y.length && i < x.length; i++) {
+      mx = Math.max(mx, Math.abs(x[i] - y[i + shift])); rpk = Math.max(rpk, Math.abs(y[i + shift]));
+    }
+  }
+  return { p, maxDiff: mx, refPeak: rpk };
+};
 window.__render = async () => { const r = await render(parseScore(), 48000, 1); return { secs: r.b.duration, peak: r.pk }; };
 </script>
 </body>

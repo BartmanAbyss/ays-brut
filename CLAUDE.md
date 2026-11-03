@@ -26,7 +26,12 @@ them, and never assume your last version is the current one.
 intro's pad alone - a copy of `song()`'s pad code with the same sliders and defaults - with
 the score as editable text, Play/loop, a piano roll and "Copy as SCORE" for pasting into
 `champagne.html`. No shader build, no start-up. If the pad changes in `song()`, change the
-copy too. The music is the user's to write; the page only plays it. With a video it plays
+copy too. The music is the user's to write; the page only plays it. It plays LIVE - the
+same graph in a realtime AudioContext, voices scheduled 0.25 s ahead, notes already
+sounding picked up mid-note - so an edit is heard within ~0.2 s; an offline render of the
+whole score took over a second per edit. `__pickupTest(p)` checks the live voices against
+the offline reference: 5e-7 when the start is 128-sample aligned, ~4e-4 otherwise (Web
+Audio evaluates envelopes per 128-sample block). With a video it plays
 along in sync (score seconds = show seconds; the audio is the clock, the video is
 corrected past 80 ms): `python dev/export.py --render 1280x720 --size 1280x720 -o
 build/intro-720p.mp4` makes the default one in ~2 min, `?video=<name>` picks another from
