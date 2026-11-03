@@ -3842,11 +3842,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // lowpass that padLfo sweeps, into a convolution reverb - plus the liquid's sound, which
   // follows what the simulation does.
   // The score is the user's, composed in dev/music.html; dev/score.txt is its readable
-  // source (chord names, up() transpositions), these rows are it in MIDI, in the same order -
-  // the order the pad draws its random stagger and loop phase in, so the intro sounds as
-  // the sketchpad does. Reorder or merge rows for size only knowing that: neighbours with
-  // the same start and length merge exactly (the same notes draw in the same order) - the
-  // three such pairs are merged; the peak chords an octave apart are not neighbours.
+  // source (chord names, up() transpositions), these rows are it in MIDI, in the same order.
+  // (Neighbouring rows with the same start and length are merged.) The intro draws its
+  // randomness from Math.random, so it sounds like the sketchpad, not sample for sample.
   const SCORE = [
 //#D{
     // ?testpad=1: one plain held chord to judge the pad's timbre by. A test signal, never
@@ -3877,7 +3875,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 
   // The whole soundtrack as one Web Audio graph, built before the click and played live
   // (song, below): the browser's own oscillators are band-limited and its convolver makes a
-  // hall from a buffer of noise. Seeded, so every run sounds the same.
+  // hall from a buffer of noise. Math.random: every run differs in its details (which notes
+  // lead a chord, where the drips fall) and is the same piece.
 //#D{
   let solo = null;   // a track name: song() renders that track alone, dry (a stem)
 //#D}
@@ -3889,10 +3888,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
   // hands it an offline context (songBuf, below) for its stems, live sliders and the WAV.
   function song(o) {
     const sr = o.sampleRate;
-    // Three independent random sequences from one generator (Park-Miller): the liquid, the
-    // pad and the bubbles each have their own, so editing one never reshuffles another.
-    const rng = q => () => (q = q * 16807 % 2147483647) / 2147483647,
-          rnd = rng(7), TAU = 2 * Math.PI;
+    // Math.random, not seeded (3 Nov, -20 bytes): there were seeded Park-Miller sequences,
+    // one for the pad and one for the liquid, so a run was repeatable and the sketchpad
+    // matched sample for sample. The score is final, and nothing needs that any more.
+    const rnd = Math.random, TAU = 2 * Math.PI;
     const gain = (v, to) => { const g = o.createGain(); g.gain.value = v; g.connect(to); return g; };
     // Two buses, each with a reverb of its own (built at the end): the pad's goes into a big
     // hall, the liquid's into a short room - one 4 s hall for both made the drips sound
@@ -3912,8 +3911,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     if (keep) Object.assign(ui, { drips: 0, pourBub: 0, fizzRate: 0 });
 //#D}
 
-    // The pad's own random sequence: editing the score must not reshuffle the drips.
-    const r3 = rng(5);
+    const r3 = rnd;
 
     // The pad: PADsynth-lite. Nasca Octavian Paul's PADsynth (ZynAddSubFX) treats every
     // harmonic as a BAND of frequencies with random phases - the pitch scatter of an
@@ -3929,9 +3927,8 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     for (let h = 1; h < 25; h++) for (let j = 0; j < 12; j++) {
       const g = r3() + r3() + r3() - 1.5,   // roughly gaussian
             w = TAU * Math.round(PF * h * 2 ** (ui.padBw / 1200 * g) * PL / sr) / PL,   // cents: folds to one constant
-            c = Math.cos(w), sn = Math.sin(w), ph = TAU * r3();
-      let x = Math.cos(ph) / h, y = Math.sin(ph) / h;
-      for (let i = 0; i < PL; i++) { pd[i] += y; const x1 = x * c - y * sn; y = x * sn + y * c; x = x1; }
+            ph = TAU * r3();
+      for (let i = 0; i < PL; i++) pd[i] += Math.sin(w * i + ph) / h;
     }
 
     // The score on the table: two copies per note from different points of the loop, panned

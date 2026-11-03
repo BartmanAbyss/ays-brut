@@ -181,7 +181,9 @@ function parseScore() {
 // ── the pad: song()'s, copied ──
 // PADsynth-lite (Nasca Octavian Paul's PADsynth, ZynAddSubFX): every harmonic is a band of a
 // dozen sines with random phases, each a whole number of cycles per loop so the table loops.
-// The same seeded sequence (Park-Miller, seed 5) as the intro, so the table is the same.
+// A seeded sequence (Park-Miller, seed 5), as the intro had until it took Math.random on
+// 3 Nov: the live re-voicing needs a note's draws to repeat. So the sketchpad sounds like the
+// intro, not sample for sample.
 const rng = q => () => (q = q * 16807 % 2147483647) / 2147483647, TAU = 2 * Math.PI;
 const PL = 1 << 17, PF = 220;
 let tableKey = '', tableData = null;

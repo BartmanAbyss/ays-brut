@@ -390,7 +390,9 @@ click, so the score plays live as the show runs; the show clock is then the audi
 (*Timing*). Until 3 Nov it rendered offline first: with the score in, 4.3 s of render before
 "click" and a few dozen bytes more. The harness renders the same graph offline (`songBuf`)
 for its stems, its live sliders and the export's WAV; the release's graph matches that
-render to 3e-7. Seeded, so it sounds the same every run. Three parts:
+render to 3e-7 when both are seeded alike. It draws from `Math.random` (3 Nov, -20 bytes):
+every run differs in its details - which notes of a chord lead, where the drips fall, the
+pad table's phases - and is the same piece. Three parts:
 
 - **The pad** plays `SCORE`: chords as `[start s, length s, MIDI notes...]`. **The score is
   written by hand** - the party bans generated music; the user composed it in
@@ -545,8 +547,8 @@ Bytes, measured by building each variant: the upgrade +136; PADsynth *instead of
 pad +111 - so the one that sounded better was also the cheaper. Shipped: 9 476, the
 predicted figure, 278 less than with both. The pad's level matches the old one (RMS 0.067
 against 0.063). Rendering the pad costs ~0.8 s; the upgraded saw pad cost 2.2 s, mostly in
-its modulated delays. The pad has its own random sequence, so editing the score never
-reshuffles the drips.
+its modulated delays. (The pad had its own seeded random sequence, so editing the score
+never reshuffled the drips; since 3 Nov everything draws from `Math.random`.)
 
 The harness also has **rewind** (top bar): back to t = 0 without reloading. The simulation
 lives in buffers that start zeroed plus a few clocks, so clearing both is exactly a fresh
@@ -1283,7 +1285,7 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 223 bytes (3 Nov 2026), 31 OVER 8 192**, lettering and score in
+**`intro.cmd` is 8 174 bytes (3 Nov 2026), 18 UNDER 8 192**, lettering and score in
 (the score +127, the cutoff's sweep +26, the soundtrack played live instead of rendered -23); the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57), a simpler coupe (-105), the traced reflection dropped (-87), the bottle without heel bevel and neck taper (-43), one smoothed normal for all liquid (-56), the bottle held from 180 degrees (-32), its helpers inlined (-29), more single-call functions inlined (-51), `botShare` global, the pool halved and the integer consts untyped (-6), two uniforms gone (-15): the standing bottle is switched by the raised table (only shot 2 raises it past 0.4), and the shader takes the pour rate and works out the emission cadence itself; 62 exact rewrites across the shader (-160, see CLAUDE.md *Minifying*); a fresh packer search on them (-19; the Roadroller search found nothing better than its old settings); fs ending in one expression and the particle writes merged into one (-4 after another packer search); the bottle's wander computed in the shader, five uniforms fewer (-10); the mousse made from the wave impulse and drops absorbed at the bowl wall instead of sliding down it (-56, no visible difference); terser's `const` written as `let` (-11); Google Closure Compiler and esbuild in front of terser (-49); 23 exact rewrites in the march and the narrow band (-32, the band now float bits).
 Before them, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and

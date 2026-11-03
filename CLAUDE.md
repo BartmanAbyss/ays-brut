@@ -433,7 +433,14 @@ click, or the harness's offline one (`songBuf`: stems, live sliders, `export.py`
 Rendering offline in the release cost 4.3 s before "click" once the score was in - 146
 voices of source+gain+panner each processed over the whole 102 s - and 23 bytes. To check
 the release's audio, swap `window.AudioContext` for an offline context in a copy of
-`build/intro.html`, render what its `song()` built, and compare with `__song(48000)`.
+`build/intro.html`, render what its `song()` built, and compare with `__song(48000)` - with
+`Math.random` replaced by the same seeded generator in both pages first, since `song()`
+draws from it (3 Nov, -20 bytes; it was seeded Park-Miller). Unseeded, every run, and so
+every `export.py` soundtrack, differs in its details. The sketchpad stays seeded: its live
+re-voicing needs a note's draws to repeat.
+
+**The pad table is built with `Math.sin`, one call per sample** (3 Nov, -30 bytes against a
+rotating phasor, the same sound): 37.7 M calls, ~0.65 s more before "click".
 
 **Never give a local the name of a parameter.** `waveUpdate` gained a parameter `nw` while
 its body already had `var nw`: the harness compiled it, but the packer gave both one short
@@ -689,8 +696,8 @@ terser `keep_fnames` +42. The scripts are not kept; the numbers are the result.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 223** (3 Nov 2026), 31
-  OVER, with the start screen, the sound engine, the lettering and the score in;
+  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 174** (3 Nov 2026), 18
+  UNDER, with the start screen, the sound engine, the lettering and the score in;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
   README (*Where it lands today*) has the size map by feature and function.
