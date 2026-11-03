@@ -742,7 +742,9 @@ def main():
     # for any OS and any WebGPU browser, opened by double-click. No PowerShell dropper, no
     # Roadroller decoder (its eval and number-crunching are a small risk in some browsers),
     # no DecompressionStream; the same minified script and packed shader, so the same intro.
-    io.open(os.path.join(ROOT, 'intro-compat.html'), 'wb').write(pb)
+    # A title for its tab: no size limit here, and a local .html is not content-sniffed, so
+    # it may come before <body> (the entry's page may not - and carries no title).
+    io.open(os.path.join(ROOT, 'intro-compat.html'), 'wb').write(b'<title>Brut by Abyss</title>' + pb)
     # Roadroller packs the page's script (build/roadroller.py); brotli then goes on top
     import roadroller
     try:
@@ -818,7 +820,7 @@ def main():
     print('deflate-raw            %8d' % len(raw_deflate))
     print('brotli q11             %8d' % len(br))
     print('intro.html (runnable)  %8d' % len(loader.encode()))
-    print('intro-compat.html      %8d   (no Roadroller, no dropper: any OS)' % len(payload.encode()))
+    print('intro-compat.html      %8d   (no Roadroller, no dropper: any OS)' % (len(payload.encode()) + 28))
     print()
     budget = 8192
     print('budget %d, dropper %d, payload allowance %d' % (budget, off, budget - off))

@@ -1,4 +1,7 @@
-# comparade26 — champagne tower
+# Brut — by Abyss
+
+**Brut** is an 8 KB intro by the demo group **Abyss** (this repository: comparade26, the
+champagne tower).
 
 A realtime 3D fluid simulation of champagne filling a three-tier champagne tower, rendered
 entirely by SDF raymarching. Target: an **8192-byte PC intro** for **ComParade 2026**
