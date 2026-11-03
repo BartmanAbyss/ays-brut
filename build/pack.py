@@ -248,7 +248,10 @@ def assemble(wgsl, js, parts=None, page=''):
     # `<body>` first so a browser sniffs the page as HTML: the dropper sends no Content-Type
     # (27 bytes of header). Chrome's sniffer knows <body>, not <canvas> - without it the page
     # came up as text/plain. ~2 bytes after brotli; the tag is implied anyway.
-    return ('<body><canvas id=c hidden style=position:fixed;inset:0;width:100%;height:100%>' +
+    # "wait" right after it: the page's first text, shown from the first moment while the
+    # script decodes, compiles and builds the soundtrack - the start screen turns it into
+    # "click" (document.body.firstChild).
+    return ('<body>wait<canvas id=c hidden style=position:fixed;inset:0;width:100%;height:100%>' +
             ('</canvas>' + page if page else '') + '<script>' + js.replace(SHADER_LOOKUP, v) + ';var ' + v + '=`' + wgsl + '`'
             '</script>').encode()
 

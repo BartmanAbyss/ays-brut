@@ -4362,7 +4362,10 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D}
       requestAnimationFrame(frame);
     };
-    document.body.append('click');   // unstyled on purpose: -55 bytes against centred white-on-black
+    // The page opens on the word "wait" (build/pack.py assemble: <body>wait<canvas...), its
+    // first text node; ready, it says "click". Unstyled on purpose: -55 bytes against
+    // centred white-on-black.
+    document.body.firstChild.data = 'click';
 //#D{
     say.textContent = 'click here to start: show + sound';
     const go = onclick;
