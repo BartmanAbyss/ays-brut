@@ -480,15 +480,18 @@ function drawRoll() {
     const env = (x, len) => x < len ? 1 - Math.exp(-x / tA)
                                     : (1 - Math.exp(-len / tA)) * Math.exp(-(x - len) / tR);
     const px = Math.max(1e-3, L / (w - 16) * 2);   // a point every 2 px
-    g2.fillStyle = '#e0b85a';
-    for (const [t, len, ...notes] of score) for (const m of notes) {
+    rollNotes = [];
+    score.forEach(([t, len, ...notes], i) => notes.forEach(m => {
       const span = len + ui.padRel, y = Y(m);
+      rollNotes.push({ i, x0: X(t), x1: X(t + span), y, hw: H / 2 + 3 });
+      // the hovered entry - the chord a click would select in the score - stands out
+      g2.fillStyle = i === hoverEntry ? '#fff3cf' : '#e0b85a';
       g2.beginPath();
       g2.moveTo(X(t), y);
       for (let x = 0; x <= span; x += px) g2.lineTo(X(t + x), y - 0.5 - env(x, len) * H / 2);
       for (let x = span; x >= 0; x -= px) g2.lineTo(X(t + x), y + 0.5 + env(x, len) * H / 2);
       g2.closePath(); g2.fill();
-    }
+    }));
     if (t <= L && (playing || videoOn())) { g2.fillStyle = playing ? '#f0f0f0' : '#8a8f9c'; g2.fillRect(X(t), 0, 1.5, h); }
   }
   requestAnimationFrame(drawRoll);
@@ -505,9 +508,52 @@ fetch('/champagne.html').then(r => r.text()).then(src => {
 }).catch(() => {});
 // the roll spans the score, or the whole video when one plays along
 const rollLen = score => Math.max(...score.map(([t, len]) => t + len), videoOn() ? vid.duration : 0);
+// The notes as drawn ({i: score entry, x0, x1, y, hw}) for hit tests, and the hovered entry.
+let rollNotes = [], hoverEntry = -1;
+const noteAt = e => {
+  const r = roll.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
+  let best = null, bd = 1e9;
+  for (const n of rollNotes) {
+    const d = Math.abs(y - n.y);
+    if (x >= n.x0 && x <= n.x1 && d <= n.hw && d < bd) { best = n; bd = d; }
+  }
+  return best ? best.i : -1;
+};
+// Where each entry of the score sits in its text: the [ ... ] elements of the outermost
+// array, found by bracket depth, skipping comments and strings. null when the score is not
+// such a list (built by code, say) - then a click on a note does nothing.
+function entrySpans(text, count) {
+  const spans = [];
+  let depth = 0, start = -1;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '/' && text[i + 1] === '/') { i = text.indexOf('\n', i); if (i < 0) break; continue; }
+    if (c === '/' && text[i + 1] === '*') { i = text.indexOf('*/', i + 2) + 1; if (i <= 0) break; continue; }
+    if (c === '"' || c === "'" || c === '`') {
+      for (i++; i < text.length && text[i] !== c; i++) if (text[i] === '\\') i++;
+      continue;
+    }
+    if (c === '[') { if (++depth === 2) start = i; }
+    else if (c === ']') { if (depth-- === 2) spans.push([start, i + 1]); }
+  }
+  return spans.length === count ? spans : null;
+}
+// Select entry i in the score and bring it into view.
+function showEntry(i) {
+  let score; try { score = parseScore(); } catch (e) { return; }
+  const spans = entrySpans($score.value, score.length);
+  if (!spans || !spans[i]) return;
+  const [a, b] = spans[i];
+  $score.focus({ preventScroll: true });
+  $score.setSelectionRange(a, b);
+  const line = $score.value.slice(0, a).split('\n').length - 1;
+  const lh = parseFloat(getComputedStyle($score).lineHeight) || 19.5;
+  $score.scrollTop = Math.max(0, line * lh - $score.clientHeight / 3);
+}
 // Click or drag on the roll to move the playhead. While dragging, playback pauses and the
 // video follows the pointer; letting go resumes from there if it was playing (restarting
-// the audio on every move would only stutter).
+// the audio on every move would only stutter). A click on a note selects its entry in the
+// score instead; a drag that starts on a note still scrubs once the pointer moves.
 let drag = null;
 const rollTime = e => {
   let score; try { score = parseScore(); } catch (err) { return null; }
@@ -521,18 +567,32 @@ const scrub = e => {
   if (vid.fastSeek && drag) vid.fastSeek(pos); else vid.currentTime = pos;
 };
 roll.onpointerdown = e => {
-  if (!videoOn()) return;
-  drag = { was: !!playing };
-  if (playing) stop();
+  const note = noteAt(e);
+  if (!videoOn() && note < 0) return;
+  drag = { was: !!playing, note, x: e.clientX, moved: note < 0 };
   roll.setPointerCapture(e.pointerId);
-  scrub(e);
+  if (drag.moved && videoOn()) { if (playing) stop(); scrub(e); }
 };
-roll.onpointermove = e => { if (drag) scrub(e); };
+roll.onpointermove = e => {
+  if (!drag) {
+    const i = noteAt(e);
+    if (i !== hoverEntry) { hoverEntry = i; roll.style.cursor = i >= 0 ? 'pointer' : ''; }
+    return;
+  }
+  if (!drag.moved && Math.abs(e.clientX - drag.x) > 3 && videoOn()) {   // a note, dragged
+    drag.moved = true;
+    if (playing) stop();
+  }
+  if (drag.moved && videoOn()) scrub(e);
+};
+roll.onpointerleave = () => { if (!drag) { hoverEntry = -1; roll.style.cursor = ''; } };
 roll.onpointerup = roll.onpointercancel = e => {
   if (!drag) return;
-  const was = drag.was; drag = null;
+  const d = drag; drag = null;
+  if (!d.moved) { showEntry(d.note); return; }  // a click on a note: to it in the score
+  if (!videoOn()) return;
   scrub(e);                                    // land exactly where the pointer let go
-  if (was) play();
+  if (d.was) play();
 };
 
 // ── the panel ──
@@ -618,6 +678,7 @@ drawRoll();
 window.__chord = chord;
 // The offline render above is no longer how the page plays; it stays as the reference the
 // live graph is checked against (the same score, rendered whole as song() would).
+window.__roll = () => ({ notes: rollNotes, hoverEntry });
 window.__live = () => ({ playing: !!playing, now: now(), gen: gen && { p0: gen.p0, voices: gen.v.length, srcs: gen.srcs.length, pass: gen.pass }, peak });
 // The live scheduling, run on an offline context from song time p, against the reference:
 // the largest sample difference after the first verbLen seconds (before that the hall's
