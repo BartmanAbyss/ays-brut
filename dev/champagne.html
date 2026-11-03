@@ -3888,8 +3888,14 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 //#D{
   let solo = null;   // a track name: song() renders that track alone, dry (a stem)
 //#D}
-  async function song(sr) {
-    const o = new OfflineAudioContext(2, sr * (SHOW_END + 1), sr);
+  // song(o) builds the soundtrack's whole graph on the context o, every note, sweep and
+  // buffer at its show time, and starts nothing. The release hands it the live AudioContext
+  // while it is still suspended - its clock at 0 - and the click starts it: the score plays
+  // as the show runs. It used to render offline first, 4.3 s before "click" once the score
+  // was in, plus an OfflineAudioContext and a buffer source to play the result. The harness
+  // hands it an offline context (songBuf, below) for its stems, live sliders and the WAV.
+  function song(o) {
+    const sr = o.sampleRate;
     // Three independent random sequences from one generator (Park-Miller): the liquid, the
     // pad and the bubbles each have their own, so editing one never reshuffles another.
     const rng = q => () => (q = q * 16807 % 2147483647) / 2147483647,
@@ -4097,8 +4103,14 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       cv.buffer = ir; cv.connect(out); from.connect(gain(mix, cv));
     }
 
-    const b = await o.startRendering();
+  }
 //#D{
+  // The harness's render of the same graph: the soundtrack as one AudioBuffer.
+  async function songBuf(sr) {
+    const only = solo;   // song() reads it too, synchronously, before the render's await
+    const o = new OfflineAudioContext(2, sr * (SHOW_END + 1), sr);
+    song(o);
+    const b = await o.startRendering();
     if (only) return b;   // stems stay raw: the live player applies the master gain
     // the mix's peak, shown in the audio column: past 1 the release clips
     let pk = 0;
@@ -4116,11 +4128,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         if (k < 2000) d[i] += Math.sin(k * 0.3) * Math.exp(-k / 300) * 0.5;
       }
     }
-//#D}
     return b;
   }
-//#D{
-  window.__song = song;   // await __song(48000) -> the AudioBuffer, for checking levels
+  window.__song = songBuf;   // await __song(48000) -> the AudioBuffer (offline), for checking levels
   window.__stem = k => stem(k);   // await __stem('pad') -> one track alone, dry
 
   // ── video export (python dev/export.py) ──
@@ -4143,7 +4153,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     exWs.send(px);
   });
   async function exAudioWav() {
-    const b = await song(48000), n = b.length, L = b.getChannelData(0), R = b.getChannelData(1);
+    const b = await songBuf(48000), n = b.length, L = b.getChannelData(0), R = b.getChannelData(1);
     const v = new DataView(new ArrayBuffer(44 + n * 4));
     const str = (o, s) => [...s].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
     str(0, 'RIFF'); v.setUint32(4, 36 + n * 4, true); str(8, 'WAVEfmt ');
@@ -4230,7 +4240,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     // song() reads `solo` synchronously as it starts, so clearing it at once keeps any
     // render started meanwhile a full mix
     solo = k;
-    const r = song(ac.sampleRate);
+    const r = songBuf(ac.sampleRate);
     solo = null;
     return r;
   }
@@ -4287,7 +4297,7 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
         send.disconnect(); send.connect(cv);
         setTimeout(() => old.disconnect(), 100);
       }
-      await song(ac.sampleRate);   // first: it refreshes song.raw and the mix's gain
+      await songBuf(ac.sampleRate);   // first: it refreshes song.raw and the mix's gain
       for (const k of AFFECTS[key] || []) {
         live.buf[k] = await stem(k);
         if (tA !== undefined) {
@@ -4306,11 +4316,14 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
 
   // ── start screen ──
   // Behind the gate the click starts everything: fullscreen, the audio, the render loop.
-  // The text appears only once all of it is ready - pipelines compiled, soundtrack
-  // rendered - so it doubles as "loaded".
+  // The text appears only once all of it is ready - pipelines compiled, the soundtrack's
+  // graph built - so it doubles as "loaded".
   let ac, tA;                  // the audio context, and the audio time the show starts at
   if (cfg.gate) {
-    ac = new AudioContext();
+    // Suspended, its clock stopped at 0, until the click: song() schedules every sound at
+    // its show time on this clock. (A page may not start audio before a click anyway, but a
+    // browser that allows it would run the clock while the graph is built.)
+    (ac = new AudioContext()).suspend();
 //#D{
     // The harness says what is happening: its HUD reads "booting" until the first frame and
     // hides the release's bare "click". Only this box starts the show, so the panel stays
@@ -4322,10 +4335,13 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     say.textContent = 'rendering audio...';
     document.body.append(say);
 //#D}
-    const b = await song(ac.sampleRate);
 //#D{
+    // the harness renders offline and plays that (or its stems) - not the live graph
+    const b = await songBuf(ac.sampleRate);
     if (!cfg.tick) await liveSetup();   // the harness plays stems instead (?tick=1 keeps the mix)
+    if (0)
 //#D}
+    song(ac);
     onclick = () => {
       onclick = null;
       // fullscreen is the screen: size the canvas once, here, rather than on every resize
@@ -4341,10 +4357,11 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
       // that frees goes into photons (nphoton). Fixed for now, whatever the screen.
       if (cfg.fs) { canvas.width = 1600; canvas.height = 900; document.body.requestFullscreen(); }
       ac.resume();
+      tA = 0;   // show time is the context's clock: song() scheduled everything from 0
+//#D{
       const src = ac.createBufferSource();
       src.buffer = b; src.connect(ac.destination);
       src.start(tA = ac.currentTime + 0.1);
-//#D{
       if (live.master) { src.disconnect(); for (const k in STEMS) liveStart(k, tA, 0); }
 //#D}
       requestAnimationFrame(frame);

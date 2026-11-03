@@ -384,12 +384,17 @@ letter is the same string and brotli stores it once. Measured 31 Oct, intro.cmd:
 
 ### Sound
 
-`song()` renders the whole soundtrack once, before "click" appears, with an
-`OfflineAudioContext`; the show clock is then the audio clock (*Timing*). Seeded, so it
-sounds the same every run. Three parts:
+`song(o)` builds the whole soundtrack's graph on a context, every note, sweep and buffer at
+its show time. The release gives it its `AudioContext`, suspended (clock at 0) until the
+click, so the score plays live as the show runs; the show clock is then the audio clock
+(*Timing*). Until 3 Nov it rendered offline first: with the score in, 4.3 s of render before
+"click" and a few dozen bytes more. The harness renders the same graph offline (`songBuf`)
+for its stems, its live sliders and the export's WAV; the release's graph matches that
+render to 3e-7. Seeded, so it sounds the same every run. Three parts:
 
 - **The pad** plays `SCORE`: chords as `[start s, length s, MIDI notes...]`. **The score is
-  written by hand** - the party bans generated music - and is empty in the repository;
+  written by hand** - the party bans generated music; the user composed it in
+  `dev/music.html`, and `dev/score.txt` is its readable source;
   `?testpad=1` adds one plain held chord in the harness (dev-only lines, never shipped) to
   judge the timbre by. The pad is PADsynth-lite (*The pad*, below): each note plays one
   looped table of smeared harmonics twice, panned apart, through a lowpass whose cutoff
@@ -1279,8 +1284,8 @@ smarter evaluations, not faster ones.
 
 ### Where it lands today (no music, first draft timeline)
 
-**`intro.cmd` is 8 331 bytes (3 Nov 2026), 139 OVER 8 192**, lettering and score in
-(the score +127, the cutoff's sweep +26); the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57), a simpler coupe (-105), the traced reflection dropped (-87), the bottle without heel bevel and neck taper (-43), one smoothed normal for all liquid (-56), the bottle held from 180 degrees (-32), its helpers inlined (-29), more single-call functions inlined (-51), `botShare` global, the pool halved and the integer consts untyped (-6), two uniforms gone (-15): the standing bottle is switched by the raised table (only shot 2 raises it past 0.4), and the shader takes the pour rate and works out the emission cadence itself; 62 exact rewrites across the shader (-160, see CLAUDE.md *Minifying*); a fresh packer search on them (-19; the Roadroller search found nothing better than its old settings); fs ending in one expression and the particle writes merged into one (-4 after another packer search); the bottle's wander computed in the shader, five uniforms fewer (-10); the mousse made from the wave impulse and drops absorbed at the bowl wall instead of sliding down it (-56, no visible difference); terser's `const` written as `let` (-11); Google Closure Compiler and esbuild in front of terser (-49); 23 exact rewrites in the march and the narrow band (-32, the band now float bits).
+**`intro.cmd` is 8 308 bytes (3 Nov 2026), 116 OVER 8 192**, lettering and score in
+(the score +127, the cutoff's sweep +26, the soundtrack played live instead of rendered -23); the last changes: the liquid's sound re-done for the shot plan (+43, *Sound*), shot 8 5 s longer (+11), its pour down to 250 for the frame budget (+9), clearFine and causticDecay folded into resolveFine (-52), exact shader simplifications (-57), a simpler coupe (-105), the traced reflection dropped (-87), the bottle without heel bevel and neck taper (-43), one smoothed normal for all liquid (-56), the bottle held from 180 degrees (-32), its helpers inlined (-29), more single-call functions inlined (-51), `botShare` global, the pool halved and the integer consts untyped (-6), two uniforms gone (-15): the standing bottle is switched by the raised table (only shot 2 raises it past 0.4), and the shader takes the pour rate and works out the emission cadence itself; 62 exact rewrites across the shader (-160, see CLAUDE.md *Minifying*); a fresh packer search on them (-19; the Roadroller search found nothing better than its old settings); fs ending in one expression and the particle writes merged into one (-4 after another packer search); the bottle's wander computed in the shader, five uniforms fewer (-10); the mousse made from the wave impulse and drops absorbed at the bowl wall instead of sliding down it (-56, no visible difference); terser's `const` written as `let` (-11); Google Closure Compiler and esbuild in front of terser (-49); 23 exact rewrites in the march and the narrow band (-32, the band now float bits).
 Before them, all lossless: the dropper golfed 310 -> 218 (9 426 -> 9 336, see
 *The dropper*); the release's uniforms as a nameless `array<vec4f,6>` plus fresh packer and
 Roadroller searches (-> 9 319); sloppy literals in the WGSL (-> 9 213): 520 places where

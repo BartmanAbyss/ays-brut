@@ -427,6 +427,14 @@ click, with the music already running. Your own machine's cache hides it - test 
 in a FRESH browser profile. The release awaits `create*PipelineAsync` before showing
 "click".
 
+**The soundtrack plays live in the release, offline in the harness.** `song(o)` builds the
+graph on whatever context it gets: the release's `AudioContext`, suspended at 0 until the
+click, or the harness's offline one (`songBuf`: stems, live sliders, `export.py`'s WAV).
+Rendering offline in the release cost 4.3 s before "click" once the score was in - 146
+voices of source+gain+panner each processed over the whole 102 s - and 23 bytes. To check
+the release's audio, swap `window.AudioContext` for an offline context in a copy of
+`build/intro.html`, render what its `song()` built, and compare with `__song(48000)`.
+
 **Never give a local the name of a parameter.** `waveUpdate` gained a parameter `nw` while
 its body already had `var nw`: the harness compiled it, but the packer gave both one short
 name and the release failed with "redeclaration" - while the build reported success. After
@@ -681,7 +689,7 @@ terser `keep_fnames` +42. The scripts are not kept; the numbers are the result.
   liquid, tower and spray about a third each (README, *What limits the steps*).
 - Size budget is **8192 bytes** for the whole entry, dropper included — confirmed by the
   organisers on 20 Oct 2026; it was 4096 until then, so anything that still says 4 kb is
-  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 331** (3 Nov 2026), 139
+  stale. Our dropper header is 218 bytes. `intro.cmd` is **8 308** (3 Nov 2026), 116
   OVER, with the start screen, the sound engine, the lettering and the score in;
   to leave them room, what exists must reach
   ~5.8 KB. The lossless options are spent - the rest is features, cut or simplified. The
