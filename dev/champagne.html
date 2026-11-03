@@ -1860,9 +1860,13 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     canvas.nextSibling.style.opacity = fade;   // the words go dark with the picture
     const V = shotVals(showT);
     // in struct U order: what the release keeps first...
+    // The fade goes in SQUARED. The shader scales linear light by it, and the gamma at the
+    // end (pow 1/2.2) lifts the low end: a plain fade's first frame out of black, 0.8% of
+    // the light, showed as an 11% pixel - a jump, then a slow climb. Squared it is ~fade^2.2
+    // in light, so the picture fades evenly as seen (the words' CSS opacity already does).
     f32.set([canvas.width, canvas.height, time, simU,
              Math.sin(ang) * dist, camY, Math.cos(ang) * dist, V[1] * SIM_DT * frameSim,
-             stepDt, tgtY, fade,   // the bottle's wander is the shader's (wob)
+             stepDt, tgtY, fade * fade,   // the bottle's wander is the shader's (wob)
              el / 57.3, pour, tilt / 57.3, ty, en,
              V[2]]);   // the shot's own
 //#D{
