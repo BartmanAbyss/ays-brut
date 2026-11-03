@@ -6,6 +6,8 @@ values the panel used to supply, minifies, packs, and writes the dropper.
 Run:  python build/build.py
 Out:  build/intro.cmd    the deliverable: a dropper that serves its own brotli payload
       build/intro.html   a local test copy (base64 + deflate, inflates itself) - not the entry
+      build/intro-compat.html  the page before Roadroller, plain: the compatible version
+                         for Linux, macOS and any WebGPU browser (~12 KB, no size limit)
       build/min.*        what ships, packed and prettified
       and a size report on stdout.
 """
@@ -736,6 +738,11 @@ def main():
     except ImportError:
         raise BuildError('the Python `brotli` module is missing - pip install brotli')
     plain_br = len(brotli.compress(pb, quality=11, lgwin=24))
+    # The compatible version: this page as it is, before Roadroller - one plain HTML file
+    # for any OS and any WebGPU browser, opened by double-click. No PowerShell dropper, no
+    # Roadroller decoder (its eval and number-crunching are a small risk in some browsers),
+    # no DecompressionStream; the same minified script and packed shader, so the same intro.
+    io.open(os.path.join(ROOT, 'intro-compat.html'), 'wb').write(pb)
     # Roadroller packs the page's script (build/roadroller.py); brotli then goes on top
     import roadroller
     try:
@@ -811,6 +818,7 @@ def main():
     print('deflate-raw            %8d' % len(raw_deflate))
     print('brotli q11             %8d' % len(br))
     print('intro.html (runnable)  %8d' % len(loader.encode()))
+    print('intro-compat.html      %8d   (no Roadroller, no dropper: any OS)' % len(payload.encode()))
     print()
     budget = 8192
     print('budget %d, dropper %d, payload allowance %d' % (budget, off, budget - off))

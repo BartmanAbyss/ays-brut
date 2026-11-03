@@ -370,6 +370,12 @@ build's own output. Afterwards, check the file for bytes below 0x20 other than n
 `//#D}`; everything else the build decides by rule (see the README). Three things it has
 already cost, all of which look like success until you check:
 
+**`build/intro-compat.html` is the compatible version** for Linux, macOS and any WebGPU
+browser: the assembled page before Roadroller, written plain on every build (~23 KB, no
+size limit applies). No PowerShell dropper, no Roadroller decoder, no DecompressionStream -
+the same minified script and packed shader. Its text swap needs "wait" to stay the body's
+first child: a test hook injected after `<body>` broke it (put such hooks before `<body>`).
+
 **To read what survives, use `python build/readable.py`** -> `build/stripped.wgsl`: the
 release's shader with the source's names and comments kept. It runs build.py's own passes
 (uniforms folded, dead ifs folded, wgslender's verdict on dead declarations) over text
