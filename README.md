@@ -11,6 +11,12 @@ pop) work. `build/intro.cmd` is **9 379 bytes, 1 187 OVER the 8 192 budget**, so
 to be cut or simplified. Missing: the score (the chords, to be written by hand), any text, and
 tier2 is still ~3 ms over the frame budget in its heaviest state. See *Roadmap*.
 
+![The dev harness with the timeline editor open, paused in shot 8](docs/harness-editor.png)
+*The dev harness (`dev/champagne.html?edit=1`), timeline editor open, paused at 88 s in shot 8.*
+
+![The music sketchpad playing the score along with the exported video](docs/sketchpad.png)
+*The music sketchpad (`dev/music.html`): the score as text, the intro's pad, the exported video in sync, the shots and the cutoff's sweep on the timeline.*
+
 ---
 
 ## Running it
