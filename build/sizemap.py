@@ -125,7 +125,8 @@ JS_REGIONS = [
     ('start screen, audio start', '  let ac, tA;'),
 ]
 JS_SPANS = [
-    ('lettering', '    canvas.nextSibling.style.opacity = fade;', '    const V = shotVals(showT);'),
+    ('audio: the score (SCORE rows)', '  const SCORE = [', '  // The whole soundtrack'),
+    ('lettering','    canvas.nextSibling.style.opacity = fade;', '    const V = shotVals(showT);'),
     ('lettering', '    drawText(showT);', '    const enc = device.createCommandEncoder();'),
     ('frame: show clock, locked to the audio', '    let nShow;', '    let big = false;'),
 ]

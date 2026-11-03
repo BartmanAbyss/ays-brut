@@ -3877,9 +3877,9 @@ window.__probe = () => JSON.parse(JSON.stringify(probe));
     [86, 12, 48, 55, 64],
   ];
 
-  // The whole soundtrack, rendered offline before the click: a slow render costs load time,
-  // never a hitch, and the browser's own oscillators are band-limited and its convolver
-  // makes a hall from a buffer of noise. Seeded, so every run sounds the same.
+  // The whole soundtrack as one Web Audio graph, built before the click and played live
+  // (song, below): the browser's own oscillators are band-limited and its convolver makes a
+  // hall from a buffer of noise. Seeded, so every run sounds the same.
 //#D{
   let solo = null;   // a track name: song() renders that track alone, dry (a stem)
 //#D}
