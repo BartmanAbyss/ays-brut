@@ -1669,6 +1669,8 @@ to reverse at the end if bytes are short.
 Everything the intro uses that came from someone else, for the NFO. Ideas and algorithms
 were implemented from their descriptions; no third-party code ships in the intro. The
 build tools in `build/vendor` are third-party code and keep their licences (below).
+Everything else here is our own and dedicated to the public domain under CC0 1.0
+(`LICENSE`), except the Josefin Sans font file in `dev/fonts` (OFL, below).
 
 ### Prior art and packaging
 
