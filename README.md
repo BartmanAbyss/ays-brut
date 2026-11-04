@@ -1,6 +1,6 @@
 # Brut — by Abyss
 
-**Brut** is an 8 KB intro by the demo group **Abyss** (this repository: comparade26, the
+**Brut** is an 8 KB intro by the demo group **Abyss** (this repository: ays-brut, the
 champagne tower).
 
 A realtime 3D fluid simulation of champagne filling a three-tier champagne tower, rendered
@@ -1146,8 +1146,8 @@ Open a **new** terminal so PATH picks them up, then:
 
 ```bash
 python -m pip install brotli
-git clone https://github.com/BartmanAbyss/comparade26.git
-cd comparade26
+git clone https://github.com/BartmanAbyss/ays-brut.git
+cd ays-brut
 python build/build.py
 ```
 
