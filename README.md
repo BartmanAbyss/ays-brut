@@ -1107,7 +1107,7 @@ Open:
    frees went into photons); shot 8, the heaviest, sits on the ~19 ms line on the dev
    RTX 4070 (*Shot 8's pour and the frame budget*), which stands for 16.6 on the compo's
    5070. Only a run on the compo machine settles it.
-2. **To buy back when bytes allow** — the foam/wall cut (commit d3f182d, +56) put a
+2. **To buy back when bytes allow** — the foam/wall cut (commit ad8e4ad, +56) put a
    "funnel" in the pour shot that only shows in motion (CLAUDE.md, *Paid for*). Every byte
    for it has to come from somewhere else first.
 3. **Size reserves** if something must give: the photons' jittered grid (-8), caustics
@@ -1478,7 +1478,7 @@ pays.
 
 #### Table light without photons: tried 30 Oct, reverted
 
-Commits 7de3f51 and d62f890, reverted. Both measured with the photon code really deleted,
+Commits bfe6065 and 5f86875, reverted. Both measured with the photon code really deleted,
 packer default state on both sides:
 - **Analytic fake** (each bowl a lens-shaped blob, the bottle a capsule): -262 bytes,
   ~-0.9 ms, but it looked nothing like the photons.

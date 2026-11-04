@@ -615,7 +615,7 @@ visible cost the user chose not to pay yet:
 
 **Paid for, to buy back when bytes allow:** cuts already in, whose cost the user wants
 undone once there is room.
-- Foam from the wave impulse and drops absorbed at the bowl wall (commit d3f182d, -56
+- Foam from the wave impulse and drops absorbed at the bowl wall (commit ad8e4ad, -56
   together: foam -28, wall -28). In motion the pour shot (4) shows a "funnel" that six
   still frames side by side did not - the user saw it watching the whole intro. Not yet
   known which of the two causes it; the wall is the likelier (the stream's drops used to
