@@ -781,21 +781,47 @@ next frame only once this one is read back and handed over, instead of on
 
 It serves `dev/` on 127.0.0.1:8796 and opens the harness in the default browser (any WebGPU
 browser; `--no-open` prints the URL instead). The page renders the soundtrack first
-(`song()`, as a 16-bit WAV to `/audio`), then for each frame draws the 4K canvas down to
-1080p in a 2D canvas (smoothing 'high': at exactly 2:1 an even box filter), composites the
-lettering - it is an SVG overlay in the DOM - from the overlay's own
-state, and sends the raw RGBA over a WebSocket on port 8797; the script pipes it into
-ffmpeg. The audio starts one frame in, since the page's frame k already shows show step
-k+1. RGB goes to YUV with the BT.709 matrix and is tagged so - swscale's default is BT.601,
-which every HD player would decode with the wrong colours.
+(`song()`, as a 16-bit WAV to `/audio`). Then, for each frame and all on the GPU, it
+averages each k x k block of the render into the video size (a box filter, as a 2D
+canvas's 'high' smoothing is at exactly 2:1), blends the lettering over it - an SVG overlay
+in the DOM, rasterised from the overlay's own state - and converts the result to YUV 4:2:0
+as NV12: BT.709, TV range, chroma the mean of each 2x2 block, what ffmpeg's swscale did. The
+frame goes into one of three buffers read back while the next frames render, and over a
+WebSocket on port 8797 to the script, which pipes it straight into x264. The audio starts
+one frame in, since the page's frame k already shows show step k+1. The video is tagged
+BT.709 - swscale's default is BT.601, which every HD player would decode with the wrong
+colours.
 
 Options: `--seconds 30` stops at that show time (a test; the default is the end plus a
 second of reverb), `-o`, `--render 3840x2160`, `--size 1920x1080`, `--bitrate 20M`,
-`--maxrate`, `--bufsize`, `--preset slow`. The rate is fixed at 60: the simulation steps at
-60 Hz, and any other rate would not be the intro. Needs ffmpeg on PATH and
-`pip install websockets`. Keep the browser window visible: nothing depends on frame
-timing, but a hidden tab may be throttled to a crawl. ffmpeg's warnings go to
-`build/intro.ffmpeg.log`.
+`--maxrate`, `--bufsize`, `--preset slow`, `--ffmpeg` (or `$FFMPEG`; default `ffmpeg` on
+PATH), `--cpu-scale` (the old 2D-canvas path, sending RGBA, to compare against). The rate is
+fixed at 60: the simulation steps at 60 Hz, and any other rate would not be the intro.
+Needs ffmpeg and `pip install websockets`. Keep the browser window visible: nothing depends
+on frame timing, but a hidden tab may be throttled to a crawl. ffmpeg's warnings go to
+`<output>.ffmpeg.log`. The progress line splits each frame's time between waiting for the
+page and waiting for the encoder.
+
+For 4K (YouTube), render at 8K:
+
+```bash
+python dev/export.py --render 7680x4320 --size 3840x2160 --bitrate 60M --maxrate 80M --bufsize 120M -o build/intro-4k.mp4
+```
+
+**What made it fast (6 Nov, RTX 4070, the first 10-12 s).** The page, not the encoder, was
+always the limit: x264 'slow' blocked for 1-4 ms a frame even at 4K.
+- The 2D canvas pulled the whole render through the CPU: `drawImage` + `getImageData` of an
+  8K canvas was 60-100 ms a frame, against 18 ms for the GPU's render. Scaling on the GPU
+  into a ring of read-back buffers: 8K -> 4K 7.7 -> 10.7 fps.
+- Python's `websockets` reads the socket 64 KiB at a time: a 33 MB frame took 86 ms to
+  receive even from Python itself. A 16 MiB read size and NV12 (12.4 MB a 4K frame instead
+  of 33): 8K -> 4K 17.3 fps, 4K -> 1080p 28 -> 53 fps.
+- Checked against the 2D-canvas path on the same 12 s: 62-64 dB PSNR per channel, 52.6 at
+  worst - a level here and there.
+- NVENC was not needed: ffmpeg 9.0's `h264_nvenc` runs on the 4070, but x264 keeps up.
+
+Past the first shots the render itself dominates - heavy shots cost 16x their 1080p time at
+8K - so expect the full 8K -> 4K export to take something like 15-20 minutes.
 
 The frames go over a WebSocket because a `fetch()` POST of 8 MB took the browser
 150-500 ms to upload (curl: 4 ms), which made the upload the export's
