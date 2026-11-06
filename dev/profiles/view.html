@@ -4,7 +4,10 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <!-- A whole-show performance profile over show time. Serve dev/ (python dev/serve.py) and
      open http://localhost:8787/profiles/view.html?f=<file>.json - the default is the newest
-     the index lists. Files are written by a run recorder (README, "Profiling a whole run"). -->
+     the index lists. Files are written by a run recorder (README, "Profiling a whole run").
+     &vs=<file>.json overlays a second profile's GPU total as a line, on the same show time
+     (both dropdowns set these too); &log=0|1 forces the scale, which goes logarithmic by
+     default when the two differ by more than 4x, or one would be a flat line. -->
 <style>
   :root { --bg:#111; --fg:#ddd; --dim:#888; --grid:#2a2a2a; --sim:#6c8ebf; --build:#8fbf6c;
           --photon:#d8b25a; --render:#c8665a; --frame:#fff; --budget:#ff5a5a; --target:#ffb15a; }
@@ -21,10 +24,16 @@
   th, td { padding:3px 10px; text-align:right; border-bottom:1px solid var(--grid); }
   th:first-child, td:first-child { text-align:left; }
   .over { color:var(--budget); }
+  :root { --vs:#4fd8e8; }
+  select { max-width:22em; }
+  #shots { display:block; overflow-x:auto; max-width:calc(100% - 32px); }
 </style>
 <header>
-  <b id="title">profile</b>
+  <label>profile <select id="pick"></select></label>
   <span id="meta"></span>
+  <label>vs <select id="pickVs"><option value="">none</option></select></label>
+  <span id="metaVs"></span>
+  <label><input type="checkbox" id="log"> log scale</label>
   <label>smooth <select id="smooth"><option value="1">off</option><option value="5">5 frames</option>
     <option value="15" selected>15 frames</option><option value="60">60 frames</option></select></label>
   <label><input type="checkbox" id="frame" checked> frame interval</label>
@@ -34,50 +43,97 @@
     <span class="key" style="background:var(--render)"></span>render
     <span class="key" style="background:var(--frame)"></span>frame interval
     <span class="key" style="background:var(--budget)"></span>16.6 ms (5070)
-    <span class="key" style="background:var(--target)"></span>19 ms (4070 target)</span>
+    <span class="key" style="background:var(--target)"></span>19 ms (4070 target)
+    <span id="keyVs" hidden><span class="key" style="background:var(--vs)"></span><span id="keyVsName">vs</span> gpu total</span></span>
 </header>
 <div id="wrap"><canvas id="c"></canvas><div id="tip"></div></div>
 <table id="shots"></table>
 <script>
 const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 const Q = new URLSearchParams(location.search);
-(async () => {
-  const f = Q.get('f') || (await (await fetch('index.json')).json()).at(-1);
-  const D = await (await fetch(f)).json();
-  const C = D.columns, col = n => C.indexOf(n);
-  const R = D.rows.filter(r => r[col('showT')] > 0);
-  document.getElementById('title').textContent = f;
-  document.getElementById('meta').textContent = `${D.width}x${D.height}, ${D.gpu}, ${D.refresh}, ${D.date} - ${R.length} frames`;
-  const passes = ['sim', 'build', 'photon', 'render'];
-  const cv = document.getElementById('c'), tip = document.getElementById('tip');
-  const end = D.showEnd;
+const $ = id => document.getElementById(id);
+const passes = ['sim', 'build', 'photon', 'render'];
 
-  function smoothed(n) {
-    const out = R.map(r => r.slice());
-    if (n <= 1) return out;
-    for (const name of [...passes, 'frameMs', 'total']) {
-      const k = col(name);
-      let s = 0;
-      for (let i = 0; i < R.length; i++) {
-        s += R[i][k];
-        if (i >= n) s -= R[i - n][k];
-        out[i][k] = s / Math.min(i + 1, n);
-      }
+async function load(f) {
+  const D = await (await fetch(f)).json();
+  const col = n => D.columns.indexOf(n);
+  return { f, D, col, R: D.rows.filter(r => r[col('showT')] > 0) };
+}
+
+// running mean over the last n rows, for the passes, the total and the frame interval
+function smoothed(P, n) {
+  const out = P.R.map(r => r.slice());
+  if (n <= 1) return out;
+  for (const name of [...passes, 'frameMs', 'total']) {
+    const k = P.col(name);
+    let s = 0;
+    for (let i = 0; i < P.R.length; i++) {
+      s += P.R[i][k];
+      if (i >= n) s -= P.R[i - n][k];
+      out[i][k] = s / Math.min(i + 1, n);
     }
-    return out;
   }
+  return out;
+}
+
+// the last row at or before show time t (rows are in show-time order)
+function rowAt(S, P, t) {
+  const k = P.col('showT');
+  let lo = 0, hi = S.length - 1;
+  while (lo < hi) { const m = (lo + hi + 1) >> 1; if (S[m][k] <= t) lo = m; else hi = m - 1; }
+  return lo;
+}
+
+const q = (a, p) => { const s = [...a].sort((u, v) => u - v); return s[Math.min(s.length - 1, Math.floor(p * s.length))] ?? 0; };
+const label = P => `${P.D.gpu}, ${P.D.width}x${P.D.height}`;
+
+(async () => {
+  const index = await (await fetch('index.json')).json();
+  const f = Q.get('f') || index.at(-1), fv = Q.get('vs') || '';
+  for (const [sel, cur, none] of [[$('pick'), f], [$('pickVs'), fv, 1]])
+    for (const name of [...index].reverse())
+      if (!none || name !== f) sel.add(new Option(name, name, false, name === cur));
+  const go = () => {
+    const u = new URLSearchParams({ f: $('pick').value });
+    if ($('pickVs').value && $('pickVs').value !== $('pick').value) u.set('vs', $('pickVs').value);
+    if (Q.has('log')) u.set('log', Q.get('log'));
+    location.search = u;
+  };
+  $('pick').onchange = $('pickVs').onchange = go;
+
+  const P = await load(f), V = fv && fv !== f ? await load(fv) : null;
+  const D = P.D, col = P.col, R = P.R;
+  document.title = 'Profile viewer - ' + f + (V ? ' vs ' + V.f : '');
+  $('meta').textContent = `${label(P)}, ${D.refresh}, ${D.date} - ${R.length} frames`;
+  if (V) {
+    $('metaVs').textContent = `${label(V)}, ${V.D.refresh}, ${V.D.date} - ${V.R.length} frames`;
+    $('keyVs').hidden = false; $('keyVsName').textContent = V.D.gpu;
+  }
+  const cv = $('c'), tip = $('tip');
+  const end = Math.max(D.showEnd, V?.D.showEnd ?? 0);
+  const med = X => q(X.R.map(r => r[X.col('total')]), .5);
+  // log by default when the two are far apart: linear squashes the faster one into the floor
+  const ratio = V ? Math.max(med(P), med(V)) / Math.min(med(P), med(V)) : 1;
+  $('log').checked = Q.has('log') ? Q.get('log') === '1' : ratio > 4;
 
   function draw() {
-    const S = smoothed(+document.getElementById('smooth').value);
+    const n = +$('smooth').value, S = smoothed(P, n), SV = V ? smoothed(V, n) : null;
+    const showFrame = $('frame').checked, log = $('log').checked;
     const W = cv.clientWidth, H = Math.max(360, Math.min(innerHeight - 160, 640));
     const dpr = devicePixelRatio || 1;
     cv.width = W * dpr; cv.height = H * dpr; cv.style.height = H + 'px';
     const g = cv.getContext('2d'); g.scale(dpr, dpr);
     const L = 44, B = 36, T = 8, Rm = 8, pw = W - L - Rm, ph = H - B - T;
     // scale to the 99.5th percentile: the first frames (shaders warming up) run to 100+ ms
-    const peaks = S.map(r => Math.max(r[col('total')], document.getElementById('frame').checked ? r[col('frameMs')] : 0)).sort((a, b) => a - b);
-    const top = Math.max(30, Math.ceil(peaks[Math.floor(peaks.length * .995)] / 5) * 5 + 5);
-    const x = t => L + t / end * pw, y = ms => T + ph - Math.min(ms, top) / top * ph;
+    const peaks = S.map(r => Math.max(r[col('total')], showFrame ? r[col('frameMs')] : 0));
+    if (SV) SV.forEach(r => peaks.push(r[V.col('total')]));
+    peaks.sort((a, b) => a - b);
+    const p995 = peaks[Math.floor(peaks.length * .995)];
+    // log: 1 ms at the floor (nothing of interest is below it), a 1-2-5 grid
+    const LO = 1, top = log ? Math.max(30, p995 * 1.15) : Math.max(30, Math.ceil(p995 / 5) * 5 + 5);
+    const x = t => L + t / end * pw;
+    const y = log ? ms => T + ph - Math.log(Math.min(Math.max(ms, LO), top) / LO) / Math.log(top / LO) * ph
+                  : ms => T + ph - Math.min(ms, top) / top * ph;
     // shots: alternating bands, names on top
     D.shots.forEach((s, i) => {
       const a = x(s.start), b = x(D.shots[i + 1]?.start ?? end);
@@ -89,7 +145,10 @@ const Q = new URLSearchParams(location.search);
     });
     // grid
     g.strokeStyle = css('--grid'); g.fillStyle = css('--dim'); g.font = '11px system-ui'; g.lineWidth = 1;
-    for (let ms = 0; ms <= top; ms += top > 60 ? 20 : 5) {
+    const ticks = [];
+    if (log) { for (let d = 1; d <= top; d *= 10) for (const m of [1, 2, 5]) if (d * m <= top) ticks.push(d * m); }
+    else for (let ms = 0; ms <= top; ms += top > 60 ? 20 : 5) ticks.push(ms);
+    for (const ms of ticks) {
       g.beginPath(); g.moveTo(L, y(ms) + .5); g.lineTo(L + pw, y(ms) + .5); g.stroke();
       g.fillText(ms + ' ms', 4, y(ms) + 4);
     }
@@ -105,11 +164,14 @@ const Q = new URLSearchParams(location.search);
       S.forEach((r, i) => base[i] += r[k]);
     }
     // frame interval
-    if (document.getElementById('frame').checked) {
-      g.beginPath(); g.strokeStyle = css('--frame'); g.lineWidth = 1;
-      S.forEach((r, i) => { const p = [x(r[col('showT')]), y(r[col('frameMs')])]; i ? g.lineTo(...p) : g.moveTo(...p); });
+    const line = (rows, X, name) => {
+      g.beginPath();
+      rows.forEach((r, i) => { const p = [x(r[X.col('showT')]), y(r[X.col(name)])]; i ? g.lineTo(...p) : g.moveTo(...p); });
       g.stroke();
-    }
+    };
+    if (showFrame) { g.strokeStyle = css('--frame'); g.lineWidth = 1; line(S, P, 'frameMs'); }
+    // the second profile's GPU total, over the same show time
+    if (SV) { g.strokeStyle = css('--vs'); g.lineWidth = 2; line(SV, V, 'total'); g.lineWidth = 1; }
     // budgets
     [['--budget', 16.6], ['--target', 19]].forEach(([c, ms]) => {
       g.setLineDash([5, 4]); g.strokeStyle = css(c); g.beginPath(); g.moveTo(L, y(ms) + .5); g.lineTo(L + pw, y(ms) + .5); g.stroke(); g.setLineDash([]);
@@ -117,20 +179,28 @@ const Q = new URLSearchParams(location.search);
     cv.onmousemove = e => {
       const t = (e.offsetX - L) / pw * end;
       if (t < 0 || t > end) { tip.style.display = 'none'; return; }
-      let i = 0; while (i < S.length - 1 && S[i + 1][col('showT')] < t) i++;
-      const r = S[i], raw = R[i];
-      tip.textContent = `show ${r[col('showT')].toFixed(2)} s  (${D.shots[raw[col('shot')]]?.name ?? '?'})\n` +
+      const i = rowAt(S, P, t), r = S[i], raw = R[i];
+      let s = `show ${r[col('showT')].toFixed(2)} s  (${D.shots[raw[col('shot')]]?.name ?? '?'})\n` +
         passes.map(p => `${p.padEnd(7)}${r[col(p)].toFixed(2)} ms`).join('\n') +
         `\ngpu    ${r[col('total')].toFixed(2)} ms\nframe  ${r[col('frameMs')].toFixed(2)} ms\nsteps  ${raw[col('simSteps')]}   drops alive ${raw[col('alive')]}\ntop glass ${raw[col('topLevel')]} mm`;
+      if (SV) {
+        const j = rowAt(SV, V, t), v = SV[j], vc = V.col;
+        s += `\n\nvs ${V.D.gpu}\n` + passes.map(p => `${p.padEnd(7)}${v[vc(p)].toFixed(2)} ms`).join('\n') +
+          `\ngpu    ${v[vc('total')].toFixed(2)} ms  (${(r[col('total')] / v[vc('total')]).toFixed(1)}x)`;
+      }
+      tip.textContent = s;
       tip.style.display = 'block';
-      tip.style.left = Math.min(e.offsetX + 14, cv.clientWidth - 190) + 'px'; tip.style.top = (e.offsetY + 10) + 'px';
+      tip.style.left = Math.min(e.offsetX + 14, cv.clientWidth - 230) + 'px';
+      tip.style.top = Math.max(0, Math.min(e.offsetY + 10, cv.clientHeight - tip.offsetHeight)) + 'px';
     };
     cv.onmouseleave = () => tip.style.display = 'none';
   }
 
-  // per shot: median and 95th percentile of the GPU total, worst frame, frames over budget
-  const q = (a, p) => { const s = [...a].sort((u, v) => u - v); return s[Math.min(s.length - 1, Math.floor(p * s.length))] ?? 0; };
-  let html = '<tr><th>shot</th><th>from</th><th>frames</th><th>gpu median</th><th>gpu p95</th><th>gpu max</th><th>render p95</th><th>sim p95</th><th>&gt;16.6</th><th>&gt;19</th></tr>';
+  // per shot: median and 95th percentile of the GPU total, worst frame, frames over budget.
+  // The second profile's frames are taken by show time within the same shot span, so the
+  // two compare even if the timeline moved between recordings.
+  let html = '<tr><th>shot</th><th>from</th><th>frames</th><th>gpu median</th><th>gpu p95</th><th>gpu max</th><th>render p95</th><th>sim p95</th><th>&gt;16.6</th><th>&gt;19</th>' +
+    (V ? '<th>vs median</th><th>vs p95</th><th>ratio</th>' : '') + '</tr>';
   D.shots.forEach((s, i) => {
     const rs = R.filter(r => r[col('shot')] === i);
     if (!rs.length) return;
@@ -138,12 +208,17 @@ const Q = new URLSearchParams(location.search);
     const cell = v => `<td class="${v > 16.6 ? 'over' : ''}">${v.toFixed(1)}</td>`;
     html += `<tr><td>${s.name}</td><td>${s.start.toFixed(2)}</td><td>${rs.length}</td>${cell(q(tot, .5))}${cell(q(tot, .95))}${cell(Math.max(...tot))}` +
       `${cell(q(rs.map(r => r[col('render')]), .95))}${cell(q(rs.map(r => r[col('sim')]), .95))}` +
-      `<td>${tot.filter(v => v > 16.6).length}</td><td>${tot.filter(v => v > 19).length}</td></tr>`;
+      `<td>${tot.filter(v => v > 16.6).length}</td><td>${tot.filter(v => v > 19).length}</td>`;
+    if (V) {
+      const e = D.shots[i + 1]?.start ?? Infinity, vt = V.col('showT');
+      const vs = V.R.filter(r => r[vt] >= s.start && r[vt] < e).map(r => r[V.col('total')]);
+      html += vs.length ? `${cell(q(vs, .5))}${cell(q(vs, .95))}<td>${(q(tot, .5) / q(vs, .5)).toFixed(1)}x</td>` : '<td></td><td></td><td></td>';
+    }
+    html += '</tr>';
   });
-  document.getElementById('shots').innerHTML = html;
+  $('shots').innerHTML = html;
   draw();
   addEventListener('resize', draw);
-  document.getElementById('smooth').onchange = draw;
-  document.getElementById('frame').onchange = draw;
+  $('smooth').onchange = $('frame').onchange = $('log').onchange = draw;
 })();
 </script>

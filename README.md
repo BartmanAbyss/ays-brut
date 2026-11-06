@@ -736,7 +736,10 @@ show runs. It clicks start, records a row per frame (show time, frame interval, 
 passes' GPU ms, sim steps, live drops, the top glass's level), pauses the renderer at the
 end and sends the rows; `save.py` writes `<name>.json` and `<name>.csv`. Look at it in
 `http://localhost:8787/profiles/view.html`: the passes stacked over show time, shots
-marked, the frame interval, both budget lines, a hover readout and a per-shot table. The
+marked, the frame interval, both budget lines, a hover readout and a per-shot table.
+`&vs=<file>.json` (or the "vs" dropdown) overlays a second profile's GPU total as a cyan
+line on the same show time, with its median, p95 and the ratio per shot in the table; the
+scale turns logarithmic when the two are more than 4x apart (`&log=0|1` to force it). The
 GPU times come from timestamp queries, one frame at a time - at 60 Hz a light frame leaves
 the GPU idle and it clocks down, so the light shots read a little high; the heavy ones are
 real.
