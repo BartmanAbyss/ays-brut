@@ -713,7 +713,7 @@ visible on the rim glints).
 
 The table above freezes one state. A whole run shows the show as it plays: every frame of
 the timeline, with the sim running and the spill as it really develops. On 31 Oct, RTX 4070,
-1920×1080, 60 Hz, the audio clock (`dev/profiles/1080p-2026-10-31.json`, 5 488 frames):
+1920×1080, 60 Hz, the audio clock (`dev/profiles/1080p-rtx4070-2026-10-31.json`, 5 488 frames):
 
 | shot | GPU median | p95 | frames over 19 ms |
 |---|---|---|---|
@@ -729,7 +729,8 @@ sees those frames. Shots 6 and 8 are the ones over the target here; 8 holds the 
 overflowing for 20 s, and its cost keeps climbing with the spray.
 
 To record one: `python dev/serve.py`, then `python dev/profiles/save.py <name> --gpu "..."`
-(it waits for the data), open
+(named `<resolution>-<gpu>[-<variant>]-<date>`, e.g. `1080p-rtx4070-2026-10-31`; it
+waits for the data), open
 `http://localhost:8787/champagne.html?gate=1&show=1&master=0&w=1920&h=1080`, paste
 `dev/profiles/record.js` into its console and keep the page on screen for the ~100 s the
 show runs. It clicks start, records a row per frame (show time, frame interval, the four

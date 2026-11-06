@@ -1,6 +1,9 @@
 """Receive one whole-show profile from record.js and store it for view.html.
 
-    python dev/profiles/save.py 1080p-2026-11-02 [--gpu "RTX 4070"] [--refresh "60 Hz"]
+    python dev/profiles/save.py 1080p-rtx4070-2026-11-02 [--gpu "RTX 4070"] [--refresh "60 Hz"]
+
+Name it <resolution>-<gpu>[-<variant>]-<date>, the GPU short and lowercase:
+1080p-rtx4070-2026-10-31, 900p-rtx4070-3.7Mph-2026-10-31, 1080p-gtx1060-2026-11-05.
 
 Listens on 127.0.0.1:8799 for one POST, then writes dev/profiles/<name>.json (the viewer's
 format: rows plus the shots' names and starts from the harness's timeline), <name>.csv

@@ -5,34 +5,36 @@
 <!-- A whole-show performance profile over show time. Serve dev/ (python dev/serve.py) and
      open http://localhost:8787/profiles/view.html?f=<file>.json - the default is the newest
      the index lists. Files are written by a run recorder (README, "Profiling a whole run").
-     &vs=<file>.json overlays a second profile's GPU total as a line, on the same show time
-     (both dropdowns set these too); &log=0|1 forces the scale, which goes logarithmic by
-     default when the two differ by more than 4x, or one would be a flat line. -->
+     &vs=<file>.json,<file>.json,... overlays other profiles' GPU totals as lines, one colour
+     each, on the same show time (the "compare" checkboxes set it too); &log=0|1 forces the
+     scale, which goes logarithmic by default when the medians differ by more than 4x, or the
+     faster ones would be flat lines along the floor. -->
 <style>
   :root { --bg:#111; --fg:#ddd; --dim:#888; --grid:#2a2a2a; --sim:#6c8ebf; --build:#8fbf6c;
           --photon:#d8b25a; --render:#c8665a; --frame:#fff; --budget:#ff5a5a; --target:#ffb15a; }
   body { margin:0; background:var(--bg); color:var(--fg); font:13px/1.4 system-ui, sans-serif; }
-  header { padding:10px 16px; display:flex; flex-wrap:wrap; gap:6px 18px; align-items:center; }
-  header b { font-size:15px; }
+  header { padding:10px 16px 4px; display:flex; flex-wrap:wrap; gap:6px 18px; align-items:center; }
+  #cmp { padding:0 16px 8px; display:flex; flex-wrap:wrap; gap:4px 16px; align-items:center; }
+  #cmp label { color:var(--fg); white-space:nowrap; }
+  #cmp small { color:var(--dim); }
   label { color:var(--dim); }
+  select { max-width:22em; }
   #wrap { position:relative; margin:0 16px; }
   canvas { display:block; width:100%; }
   #tip { position:absolute; pointer-events:none; background:#000d; border:1px solid #444; padding:6px 8px;
          border-radius:4px; white-space:pre; font:12px ui-monospace, monospace; display:none; }
   .key { display:inline-block; width:10px; height:10px; margin-right:4px; vertical-align:-1px; }
+  .line { display:inline-block; width:16px; height:3px; margin-right:5px; vertical-align:3px; }
   table { border-collapse:collapse; margin:12px 16px 24px; font:12px ui-monospace, monospace; }
+  #shots { display:block; overflow-x:auto; max-width:calc(100% - 32px); }
   th, td { padding:3px 10px; text-align:right; border-bottom:1px solid var(--grid); }
   th:first-child, td:first-child { text-align:left; }
+  th.vs { border-top:3px solid; }
   .over { color:var(--budget); }
-  :root { --vs:#4fd8e8; }
-  select { max-width:22em; }
-  #shots { display:block; overflow-x:auto; max-width:calc(100% - 32px); }
 </style>
 <header>
   <label>profile <select id="pick"></select></label>
   <span id="meta"></span>
-  <label>vs <select id="pickVs"><option value="">none</option></select></label>
-  <span id="metaVs"></span>
   <label><input type="checkbox" id="log"> log scale</label>
   <label>smooth <select id="smooth"><option value="1">off</option><option value="5">5 frames</option>
     <option value="15" selected>15 frames</option><option value="60">60 frames</option></select></label>
@@ -43,9 +45,9 @@
     <span class="key" style="background:var(--render)"></span>render
     <span class="key" style="background:var(--frame)"></span>frame interval
     <span class="key" style="background:var(--budget)"></span>16.6 ms (5070)
-    <span class="key" style="background:var(--target)"></span>19 ms (4070 target)
-    <span id="keyVs" hidden><span class="key" style="background:var(--vs)"></span><span id="keyVsName">vs</span> gpu total</span></span>
+    <span class="key" style="background:var(--target)"></span>19 ms (4070 target)</span>
 </header>
+<div id="cmp"><span style="color:var(--dim)">compare (gpu total):</span></div>
 <div id="wrap"><canvas id="c"></canvas><div id="tip"></div></div>
 <table id="shots"></table>
 <script>
@@ -53,12 +55,18 @@ const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).
 const Q = new URLSearchParams(location.search);
 const $ = id => document.getElementById(id);
 const passes = ['sim', 'build', 'photon', 'render'];
+// overlay colours, kept clear of the passes', the frame line's and the budget lines'
+const COLOURS = ['#4fd8e8', '#e870c8', '#b4f05a', '#9a8cff', '#5a9cff', '#f0f0a0'];
 
-async function load(f) {
-  const D = await (await fetch(f)).json();
-  const col = n => D.columns.indexOf(n);
-  return { f, D, col, R: D.rows.filter(r => r[col('showT')] > 0) };
+const cache = {};
+function load(f) {
+  return cache[f] ??= fetch(f).then(r => r.json()).then(D => {
+    const col = n => D.columns.indexOf(n);
+    return { f, D, col, R: D.rows.filter(r => r[col('showT')] > 0) };
+  });
 }
+// the name without its date: <resolution>-<gpu>[-<variant>]
+const short = f => f.replace(/\.json$/, '').replace(/-\d{4}-\d\d-\d\d$/, '');
 
 // running mean over the last n rows, for the passes, the total and the frame interval
 function smoothed(P, n) {
@@ -85,48 +93,61 @@ function rowAt(S, P, t) {
 }
 
 const q = (a, p) => { const s = [...a].sort((u, v) => u - v); return s[Math.min(s.length - 1, Math.floor(p * s.length))] ?? 0; };
-const label = P => `${P.D.gpu}, ${P.D.width}x${P.D.height}`;
+const med = X => q(X.R.map(r => r[X.col('total')]), .5);
 
 (async () => {
   const index = await (await fetch('index.json')).json();
-  const f = Q.get('f') || index.at(-1), fv = Q.get('vs') || '';
-  for (const [sel, cur, none] of [[$('pick'), f], [$('pickVs'), fv, 1]])
-    for (const name of [...index].reverse())
-      if (!none || name !== f) sel.add(new Option(name, name, false, name === cur));
-  const go = () => {
-    const u = new URLSearchParams({ f: $('pick').value });
-    if ($('pickVs').value && $('pickVs').value !== $('pick').value) u.set('vs', $('pickVs').value);
-    if (Q.has('log')) u.set('log', Q.get('log'));
-    location.search = u;
-  };
-  $('pick').onchange = $('pickVs').onchange = go;
+  const f = index.includes(Q.get('f')) ? Q.get('f') : index.at(-1);
+  // a colour per file, by its place in the index, so a profile keeps its colour whatever
+  // else is ticked
+  const colour = name => COLOURS[index.indexOf(name) % COLOURS.length];
+  const vs = new Set((Q.getAll('vs').join(',')).split(',').filter(n => n && n !== f && index.includes(n)));
+  for (const name of [...index].reverse()) $('pick').add(new Option(name, name, false, name === f));
+  $('pick').onchange = () => { const u = new URLSearchParams(location.search); u.set('f', $('pick').value); location.search = u; };
 
-  const P = await load(f), V = fv && fv !== f ? await load(fv) : null;
+  const P = await load(f);
   const D = P.D, col = P.col, R = P.R;
-  document.title = 'Profile viewer - ' + f + (V ? ' vs ' + V.f : '');
-  $('meta').textContent = `${label(P)}, ${D.refresh}, ${D.date} - ${R.length} frames`;
-  if (V) {
-    $('metaVs').textContent = `${label(V)}, ${V.D.refresh}, ${V.D.date} - ${V.R.length} frames`;
-    $('keyVs').hidden = false; $('keyVsName').textContent = V.D.gpu;
+  $('meta').textContent = `${D.gpu}, ${D.width}x${D.height}, ${D.refresh}, ${D.date} - ${R.length} frames`;
+  const others = await Promise.all(index.filter(n => n !== f).reverse().map(load));
+  for (const X of others) {
+    const l = document.createElement('label');
+    l.title = `${X.f}: ${X.D.gpu}, ${X.D.width}x${X.D.height}, ${X.D.refresh}, ${X.D.date} - ${X.R.length} frames`;
+    l.innerHTML = `<input type="checkbox"> <span class="line" style="background:${colour(X.f)}"></span>${short(X.f)} <small>${X.D.date}</small>`;
+    const box = l.querySelector('input');
+    box.checked = vs.has(X.f);
+    box.onchange = () => { box.checked ? vs.add(X.f) : vs.delete(X.f); update(true); };
+    $('cmp').append(l);
   }
   const cv = $('c'), tip = $('tip');
-  const end = Math.max(D.showEnd, V?.D.showEnd ?? 0);
-  const med = X => q(X.R.map(r => r[X.col('total')]), .5);
-  // log by default when the two are far apart: linear squashes the faster one into the floor
-  const ratio = V ? Math.max(med(P), med(V)) / Math.min(med(P), med(V)) : 1;
-  $('log').checked = Q.has('log') ? Q.get('log') === '1' : ratio > 4;
+  let V = [], logSet = Q.has('log');
+
+  function update(fromUser) {
+    V = others.filter(X => vs.has(X.f));
+    const u = new URLSearchParams(location.search);
+    u.set('f', f);
+    if (V.length) u.set('vs', V.map(X => X.f).join(',')); else u.delete('vs');
+    history.replaceState(null, '', '?' + u.toString().replace(/%2C/g, ','));
+    document.title = 'Profile viewer - ' + short(f) + (V.length ? ' vs ' + V.map(X => short(X.f)).join(', ') : '');
+    // log by default when the medians are far apart: linear squashes the fast ones flat
+    if (!logSet) {
+      const m = [P, ...V].map(med);
+      $('log').checked = Math.max(...m) / Math.min(...m) > 4;
+    } else if (!fromUser) $('log').checked = Q.get('log') === '1';
+    table(); draw();
+  }
 
   function draw() {
-    const n = +$('smooth').value, S = smoothed(P, n), SV = V ? smoothed(V, n) : null;
+    const n = +$('smooth').value, S = smoothed(P, n), SV = V.map(X => smoothed(X, n));
     const showFrame = $('frame').checked, log = $('log').checked;
-    const W = cv.clientWidth, H = Math.max(360, Math.min(innerHeight - 160, 640));
+    const end = Math.max(D.showEnd, ...V.map(X => X.D.showEnd));
+    const W = cv.clientWidth, H = Math.max(360, Math.min(innerHeight - 190, 640));
     const dpr = devicePixelRatio || 1;
     cv.width = W * dpr; cv.height = H * dpr; cv.style.height = H + 'px';
     const g = cv.getContext('2d'); g.scale(dpr, dpr);
     const L = 44, B = 36, T = 8, Rm = 8, pw = W - L - Rm, ph = H - B - T;
     // scale to the 99.5th percentile: the first frames (shaders warming up) run to 100+ ms
     const peaks = S.map(r => Math.max(r[col('total')], showFrame ? r[col('frameMs')] : 0));
-    if (SV) SV.forEach(r => peaks.push(r[V.col('total')]));
+    SV.forEach((rows, j) => rows.forEach(r => peaks.push(r[V[j].col('total')])));
     peaks.sort((a, b) => a - b);
     const p995 = peaks[Math.floor(peaks.length * .995)];
     // log: 1 ms at the floor (nothing of interest is below it), a 1-2-5 grid
@@ -163,15 +184,16 @@ const label = P => `${P.D.gpu}, ${P.D.width}x${P.D.height}`;
       g.closePath(); g.fillStyle = css('--' + p); g.globalAlpha = .85; g.fill(); g.globalAlpha = 1;
       S.forEach((r, i) => base[i] += r[k]);
     }
-    // frame interval
     const line = (rows, X, name) => {
       g.beginPath();
       rows.forEach((r, i) => { const p = [x(r[X.col('showT')]), y(r[X.col(name)])]; i ? g.lineTo(...p) : g.moveTo(...p); });
       g.stroke();
     };
+    // frame interval
     if (showFrame) { g.strokeStyle = css('--frame'); g.lineWidth = 1; line(S, P, 'frameMs'); }
-    // the second profile's GPU total, over the same show time
-    if (SV) { g.strokeStyle = css('--vs'); g.lineWidth = 2; line(SV, V, 'total'); g.lineWidth = 1; }
+    // the compared profiles' GPU totals, over the same show time
+    SV.forEach((rows, j) => { g.strokeStyle = colour(V[j].f); g.lineWidth = 2; line(rows, V[j], 'total'); });
+    g.lineWidth = 1;
     // budgets
     [['--budget', 16.6], ['--target', 19]].forEach(([c, ms]) => {
       g.setLineDash([5, 4]); g.strokeStyle = css(c); g.beginPath(); g.moveTo(L, y(ms) + .5); g.lineTo(L + pw, y(ms) + .5); g.stroke(); g.setLineDash([]);
@@ -183,42 +205,48 @@ const label = P => `${P.D.gpu}, ${P.D.width}x${P.D.height}`;
       let s = `show ${r[col('showT')].toFixed(2)} s  (${D.shots[raw[col('shot')]]?.name ?? '?'})\n` +
         passes.map(p => `${p.padEnd(7)}${r[col(p)].toFixed(2)} ms`).join('\n') +
         `\ngpu    ${r[col('total')].toFixed(2)} ms\nframe  ${r[col('frameMs')].toFixed(2)} ms\nsteps  ${raw[col('simSteps')]}   drops alive ${raw[col('alive')]}\ntop glass ${raw[col('topLevel')]} mm`;
-      if (SV) {
-        const j = rowAt(SV, V, t), v = SV[j], vc = V.col;
-        s += `\n\nvs ${V.D.gpu}\n` + passes.map(p => `${p.padEnd(7)}${v[vc(p)].toFixed(2)} ms`).join('\n') +
-          `\ngpu    ${v[vc('total')].toFixed(2)} ms  (${(r[col('total')] / v[vc('total')]).toFixed(1)}x)`;
+      if (SV.length) {
+        const w = Math.max(...V.map(X => short(X.f).length));
+        s += '\n\ngpu total, and this profile against it\n' + SV.map((rows, j) => {
+          const v = rows[rowAt(rows, V[j], t)][V[j].col('total')];
+          return `${short(V[j].f).padEnd(w)}  ${v.toFixed(2).padStart(6)} ms  ${(r[col('total')] / v).toFixed(1)}x`;
+        }).join('\n');
       }
       tip.textContent = s;
       tip.style.display = 'block';
-      tip.style.left = Math.min(e.offsetX + 14, cv.clientWidth - 230) + 'px';
+      tip.style.left = Math.max(0, Math.min(e.offsetX + 14, cv.clientWidth - tip.offsetWidth)) + 'px';
       tip.style.top = Math.max(0, Math.min(e.offsetY + 10, cv.clientHeight - tip.offsetHeight)) + 'px';
     };
     cv.onmouseleave = () => tip.style.display = 'none';
   }
 
   // per shot: median and 95th percentile of the GPU total, worst frame, frames over budget.
-  // The second profile's frames are taken by show time within the same shot span, so the
+  // A compared profile's frames are taken by show time within the same shot span, so the
   // two compare even if the timeline moved between recordings.
-  let html = '<tr><th>shot</th><th>from</th><th>frames</th><th>gpu median</th><th>gpu p95</th><th>gpu max</th><th>render p95</th><th>sim p95</th><th>&gt;16.6</th><th>&gt;19</th>' +
-    (V ? '<th>vs median</th><th>vs p95</th><th>ratio</th>' : '') + '</tr>';
-  D.shots.forEach((s, i) => {
-    const rs = R.filter(r => r[col('shot')] === i);
-    if (!rs.length) return;
-    const tot = rs.map(r => r[col('total')]);
-    const cell = v => `<td class="${v > 16.6 ? 'over' : ''}">${v.toFixed(1)}</td>`;
-    html += `<tr><td>${s.name}</td><td>${s.start.toFixed(2)}</td><td>${rs.length}</td>${cell(q(tot, .5))}${cell(q(tot, .95))}${cell(Math.max(...tot))}` +
-      `${cell(q(rs.map(r => r[col('render')]), .95))}${cell(q(rs.map(r => r[col('sim')]), .95))}` +
-      `<td>${tot.filter(v => v > 16.6).length}</td><td>${tot.filter(v => v > 19).length}</td>`;
-    if (V) {
-      const e = D.shots[i + 1]?.start ?? Infinity, vt = V.col('showT');
-      const vs = V.R.filter(r => r[vt] >= s.start && r[vt] < e).map(r => r[V.col('total')]);
-      html += vs.length ? `${cell(q(vs, .5))}${cell(q(vs, .95))}<td>${(q(tot, .5) / q(vs, .5)).toFixed(1)}x</td>` : '<td></td><td></td><td></td>';
-    }
-    html += '</tr>';
-  });
-  $('shots').innerHTML = html;
-  draw();
+  function table() {
+    let html = '<tr><th>shot</th><th>from</th><th>frames</th><th>gpu median</th><th>gpu p95</th><th>gpu max</th><th>render p95</th><th>sim p95</th><th>&gt;16.6</th><th>&gt;19</th>' +
+      V.map(X => `<th class="vs" style="border-top-color:${colour(X.f)}" colspan="3">${short(X.f)}: median, p95, ratio</th>`).join('') + '</tr>';
+    D.shots.forEach((s, i) => {
+      const rs = R.filter(r => r[col('shot')] === i);
+      if (!rs.length) return;
+      const tot = rs.map(r => r[col('total')]);
+      const cell = v => `<td class="${v > 16.6 ? 'over' : ''}">${v.toFixed(1)}</td>`;
+      html += `<tr><td>${s.name}</td><td>${s.start.toFixed(2)}</td><td>${rs.length}</td>${cell(q(tot, .5))}${cell(q(tot, .95))}${cell(Math.max(...tot))}` +
+        `${cell(q(rs.map(r => r[col('render')]), .95))}${cell(q(rs.map(r => r[col('sim')]), .95))}` +
+        `<td>${tot.filter(v => v > 16.6).length}</td><td>${tot.filter(v => v > 19).length}</td>`;
+      for (const X of V) {
+        const e = D.shots[i + 1]?.start ?? Infinity, vt = X.col('showT');
+        const vs = X.R.filter(r => r[vt] >= s.start && r[vt] < e).map(r => r[X.col('total')]);
+        html += vs.length ? `${cell(q(vs, .5))}${cell(q(vs, .95))}<td>${(q(tot, .5) / q(vs, .5)).toFixed(1)}x</td>` : '<td></td><td></td><td></td>';
+      }
+      html += '</tr>';
+    });
+    $('shots').innerHTML = html;
+  }
+
+  update(false);
   addEventListener('resize', draw);
-  $('smooth').onchange = $('frame').onchange = $('log').onchange = draw;
+  $('smooth').onchange = $('frame').onchange = draw;
+  $('log').onchange = () => { logSet = true; draw(); };
 })();
 </script>
