@@ -3,8 +3,9 @@
 **Brut** is an 8 KB intro by the demo group **Abyss** (this repository: ays-brut, the
 champagne tower).
 
-**[▶ Run it in your browser](https://bartmanabyss.github.io/ays-brut/)** - needs WebGPU:
-Chrome/Edge 113+, Firefox 141+ or Safari 26+. Click when it says "cliquez".
+**[▶ Run it in your browser](https://bartmanabyss.github.io/ays-brut/)** - needs WebGPU
+(Chrome/Edge 113+, Firefox 141+ or Safari 26+); NVIDIA GeForce RTX 4070 or higher
+recommended. Click when it says "cliquez".
 
 A realtime 3D fluid simulation of champagne filling a three-tier champagne tower, rendered
 entirely by SDF raymarching. Target: an **8192-byte PC intro** for **ComParade 2026**
