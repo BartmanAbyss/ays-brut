@@ -10,6 +10,9 @@ recommended. Click when it says "cliquez".
 **[▶ Watch it on YouTube](https://www.youtube.com/watch?v=QWXMa-IE7lY)** - 4K60, rendered at
 8K.
 
+**[▶ The live recording](https://www.youtube.com/watch?v=ftklcV07Vek)** - as it ran at
+ComParade 2026.
+
 A realtime 3D fluid simulation of champagne filling a three-tier champagne tower, rendered
 entirely by SDF raymarching. Target: an **8192-byte PC intro** for **ComParade 2026**
 (Emmering/Munich, 6–8 Nov 2026), packaged the INCENDIUM way — WebGPU + a tiny PowerShell
